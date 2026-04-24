@@ -1,0 +1,14 @@
+# Exclude everything except stock-pwa and README
+/Bảng giá - SSI iBoard.html
+/Bảng giá - SSI iBoard_files/
+/ssi-etf-helper/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

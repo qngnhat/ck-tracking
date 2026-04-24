@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Phân tích CP">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <title>Phân tích Cổ phiếu</title>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-title">
+      <span class="app-logo">📊</span>
+      <span>Phân tích CP</span>
+    </div>
+  </header>
+
+  <div class="search-bar">
+    <input
+      type="text"
+      id="symbol-input"
+      placeholder="Nhập mã (VNM, HPG, FPT...)"
+      autocomplete="off"
+      autocapitalize="characters"
+      autocorrect="off"
+      spellcheck="false"
+      inputmode="text"
+      maxlength="10">
+    <button id="search-btn" class="btn-primary">Phân tích</button>
+  </div>
+
+  <main id="main-container">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">🔍</div>
+      <h2>Bắt đầu phân tích</h2>
+      <p>Nhập mã cổ phiếu để xem phân tích kỹ thuật, định giá cơ bản và dòng tiền khối ngoại.</p>
+
+      <div class="quick-section">
+        <div class="section-label">Mã phổ biến</div>
+        <div class="chips">
+          <button class="chip" data-symbol="VNM">VNM</button>
+          <button class="chip" data-symbol="HPG">HPG</button>
+          <button class="chip" data-symbol="VCB">VCB</button>
+          <button class="chip" data-symbol="FPT">FPT</button>
+          <button class="chip" data-symbol="MWG">MWG</button>
+          <button class="chip" data-symbol="MBB">MBB</button>
+          <button class="chip" data-symbol="VHM">VHM</button>
+          <button class="chip" data-symbol="VIC">VIC</button>
+          <button class="chip" data-symbol="MSN">MSN</button>
+          <button class="chip" data-symbol="GAS">GAS</button>
+        </div>
+      </div>
+
+      <div class="quick-section" id="history-section" style="display:none">
+        <div class="section-label-row">
+          <span class="section-label">Đã xem gần đây</span>
+          <button class="link-btn" id="clear-history">Xóa</button>
+        </div>
+        <div class="chips" id="history-chips"></div>
+      </div>
+    </div>
+
+    <div id="analysis-root"></div>
+  </main>
+
+  <!-- Bottom sheet for tooltip -->
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <div class="sheet" id="tooltip-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sheet-title">Giải thích</div>
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="analysis.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
