@@ -22,16 +22,19 @@
   </header>
 
   <div class="search-bar">
-    <input
-      type="text"
-      id="symbol-input"
-      placeholder="Nhập mã (VNM, HPG, FPT...)"
-      autocomplete="off"
-      autocapitalize="characters"
-      autocorrect="off"
-      spellcheck="false"
-      inputmode="text"
-      maxlength="10">
+    <div class="search-input-wrap">
+      <input
+        type="text"
+        id="symbol-input"
+        placeholder="Nhập mã (VNM, HPG, FPT...)"
+        autocomplete="off"
+        autocapitalize="characters"
+        autocorrect="off"
+        spellcheck="false"
+        inputmode="text"
+        maxlength="10">
+      <div class="suggestions" id="suggestions"></div>
+    </div>
     <button id="search-btn" class="btn-primary">Phân tích</button>
   </div>
 

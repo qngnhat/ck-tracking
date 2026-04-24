@@ -276,6 +276,25 @@ window.__SSI_ANALYSIS__ = (function () {
     return 100 - 100 / (1 + ratio);
   }
 
+  // ── Fetch full stock list (for autocomplete) ──
+  async function fetchStockList() {
+    const url = "https://api-finfo.vndirect.com.vn/v4/stocks?q=status:LISTED&size=3000&sort=code";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json.data) return [];
+
+    // Keep only STOCK and ETF types (skip indices, futures, warrants...)
+    return json.data
+      .filter((s) => s.type === "STOCK" || s.type === "ETF")
+      .map((s) => ({
+        code: s.code,
+        name: s.companyNameVi || s.companyName || "",
+        floor: s.floor || "",
+        type: s.type || "STOCK",
+      }));
+  }
+
   // ── Fetch fundamentals (VNDirect) ──
   async function fetchFundamentals(symbol) {
     try {
@@ -833,6 +852,7 @@ window.__SSI_ANALYSIS__ = (function () {
     fetchHistory,
     fetchFundamentals,
     fetchForeignFlow,
+    fetchStockList,
     analyze,
     INDEX_SYMBOLS,
   };

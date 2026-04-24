@@ -8,6 +8,12 @@
   const ANALYSIS = window.__SSI_ANALYSIS__;
   const HISTORY_KEY = "stock_analyzer_history";
   const HISTORY_MAX = 10;
+  const STOCK_LIST_KEY = "stock_list_v1";
+  const STOCK_LIST_EXPIRY_KEY = "stock_list_expiry";
+  const STOCK_LIST_TTL = 7 * 24 * 3600 * 1000; // 7 days
+  const SUGGEST_MAX = 8;
+
+  let stockList = [];
 
   const $ = (id) => document.getElementById(id);
 
@@ -659,14 +665,143 @@
       </div>`;
   }
 
+  // ── Stock list caching + autocomplete ──
+  async function ensureStockList() {
+    try {
+      const cached = localStorage.getItem(STOCK_LIST_KEY);
+      const expiry = parseInt(localStorage.getItem(STOCK_LIST_EXPIRY_KEY) || "0", 10);
+      if (cached && Date.now() < expiry) {
+        stockList = JSON.parse(cached);
+        return;
+      }
+    } catch (_) {}
+    try {
+      stockList = await ANALYSIS.fetchStockList();
+      localStorage.setItem(STOCK_LIST_KEY, JSON.stringify(stockList));
+      localStorage.setItem(STOCK_LIST_EXPIRY_KEY, String(Date.now() + STOCK_LIST_TTL));
+    } catch (_) {
+      // Offline or API down — suggestions simply won't appear
+    }
+  }
+
+  function filterStocks(query) {
+    query = query.trim().toUpperCase();
+    if (!query || stockList.length === 0) return [];
+    const qLower = query.toLowerCase();
+    const prefix = [];
+    const contains = [];
+    const byName = [];
+    for (const s of stockList) {
+      if (s.code.startsWith(query)) {
+        prefix.push(s);
+      } else if (s.code.includes(query)) {
+        contains.push(s);
+      } else if (s.name && s.name.toLowerCase().includes(qLower)) {
+        byName.push(s);
+      }
+      if (prefix.length >= SUGGEST_MAX) break;
+    }
+    return [...prefix, ...contains, ...byName].slice(0, SUGGEST_MAX);
+  }
+
+  let suggestIndex = -1;
+  const suggestionsEl = $("suggestions");
+
+  function renderSuggestions(list) {
+    if (list.length === 0) {
+      suggestionsEl.classList.remove("show");
+      suggestionsEl.innerHTML = "";
+      suggestIndex = -1;
+      return;
+    }
+    suggestionsEl.innerHTML = list.map((s, i) => `
+      <div class="suggestion-item" data-code="${s.code}" data-idx="${i}">
+        <span class="sugg-code">${s.code}</span>
+        <span class="sugg-name">${escapeHtml(s.name)}</span>
+        <span class="sugg-floor">${s.floor}</span>
+      </div>
+    `).join("");
+    suggestionsEl.classList.add("show");
+    suggestIndex = -1;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  function hideSuggestions() {
+    suggestionsEl.classList.remove("show");
+    suggestIndex = -1;
+  }
+
+  function updateSuggestHighlight() {
+    const items = suggestionsEl.querySelectorAll(".suggestion-item");
+    items.forEach((el, i) => el.classList.toggle("active", i === suggestIndex));
+    if (suggestIndex >= 0 && items[suggestIndex]) {
+      items[suggestIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+
   // ── Event listeners ──
   const input = $("symbol-input");
-  $("search-btn").addEventListener("click", () => analyzeSymbol(input.value));
+
+  input.addEventListener("input", () => {
+    renderSuggestions(filterStocks(input.value));
+  });
+
+  input.addEventListener("focus", () => {
+    if (input.value.trim()) renderSuggestions(filterStocks(input.value));
+  });
+
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      input.blur();
-      analyzeSymbol(input.value);
+    const isShowing = suggestionsEl.classList.contains("show");
+    const items = suggestionsEl.querySelectorAll(".suggestion-item");
+
+    if (e.key === "ArrowDown" && isShowing) {
+      e.preventDefault();
+      suggestIndex = Math.min(suggestIndex + 1, items.length - 1);
+      updateSuggestHighlight();
+    } else if (e.key === "ArrowUp" && isShowing) {
+      e.preventDefault();
+      suggestIndex = Math.max(suggestIndex - 1, -1);
+      updateSuggestHighlight();
+    } else if (e.key === "Enter") {
+      if (isShowing && suggestIndex >= 0 && items[suggestIndex]) {
+        const code = items[suggestIndex].dataset.code;
+        input.value = code;
+        hideSuggestions();
+        input.blur();
+        analyzeSymbol(code);
+      } else {
+        input.blur();
+        hideSuggestions();
+        analyzeSymbol(input.value);
+      }
+    } else if (e.key === "Escape") {
+      hideSuggestions();
     }
+  });
+
+  suggestionsEl.addEventListener("click", (e) => {
+    const item = e.target.closest(".suggestion-item");
+    if (!item) return;
+    const code = item.dataset.code;
+    input.value = code;
+    hideSuggestions();
+    input.blur();
+    analyzeSymbol(code);
+  });
+
+  // Hide when tapping outside
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-input-wrap")) hideSuggestions();
+  });
+
+  $("search-btn").addEventListener("click", () => {
+    hideSuggestions();
+    analyzeSymbol(input.value);
   });
 
   // Delegate chip clicks
@@ -674,6 +809,7 @@
     const chip = e.target.closest(".chip");
     if (chip && chip.dataset.symbol) {
       input.value = chip.dataset.symbol;
+      hideSuggestions();
       analyzeSymbol(chip.dataset.symbol);
     }
   });
@@ -682,6 +818,7 @@
 
   // ── Init ──
   renderHistory();
+  ensureStockList();
 
   // Register service worker + auto-update on new deploy
   if ("serviceWorker" in navigator) {

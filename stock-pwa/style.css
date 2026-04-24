@@ -70,8 +70,13 @@ button {
   border-bottom: 1px solid #222;
 }
 
-#symbol-input {
+.search-input-wrap {
+  position: relative;
   flex: 1;
+}
+
+#symbol-input {
+  width: 100%;
   background: #1a1a2e;
   border: 1px solid #333;
   border-radius: 10px;
@@ -92,6 +97,77 @@ button {
   color: #555;
   letter-spacing: normal;
   text-transform: none;
+}
+
+/* ── Suggestions dropdown ── */
+.suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 10px;
+  z-index: 30;
+  max-height: 320px;
+  overflow-y: auto;
+  display: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+  -webkit-overflow-scrolling: touch;
+}
+
+.suggestions.show {
+  display: block;
+}
+
+.suggestion-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 12px;
+  border-bottom: 1px solid #20203a;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:active,
+.suggestion-item.active {
+  background: #0f3460;
+}
+
+.sugg-code {
+  color: #00d2ff;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.sugg-name {
+  color: #aaa;
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  min-width: 0;
+}
+
+.sugg-floor {
+  color: #888;
+  font-size: 9px;
+  background: #0f0f1e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
 }
 
 .btn-primary {
