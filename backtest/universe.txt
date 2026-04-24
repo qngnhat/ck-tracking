@@ -1,0 +1,73 @@
+# Universe mẫu: 55 mã liquid TTCK VN, cover ngành chính
+# Dùng cho backtest Phase 1
+
+# === Ngân hàng (14 mã) ===
+VCB
+BID
+CTG
+TCB
+VPB
+MBB
+ACB
+HDB
+STB
+SHB
+TPB
+EIB
+LPB
+VIB
+
+# === Bất động sản (10 mã) ===
+VHM
+VIC
+VRE
+NVL
+PDR
+KDH
+DXG
+KBC
+DIG
+NLG
+
+# === Tiêu dùng / Bán lẻ (7 mã) ===
+MWG
+PNJ
+MSN
+VNM
+SAB
+DGW
+FRT
+
+# === Công nghiệp / Vật liệu (8 mã) ===
+HPG
+HSG
+NKG
+GVR
+DGC
+DCM
+DPM
+PLX
+
+# === Năng lượng / Tiện ích (6 mã) ===
+GAS
+POW
+REE
+NT2
+PC1
+BSR
+
+# === Công nghệ (2 mã) ===
+FPT
+CMG
+
+# === Chứng khoán (4 mã) ===
+SSI
+VCI
+VND
+HCM
+
+# === Dược / Khác (4 mã) ===
+DHG
+IMP
+DBD
+BCM
