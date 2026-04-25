@@ -1,0 +1,428 @@
+# Stock Analyzer PWA — Roadmap Tối Ưu cho TTCK Việt Nam
+
+## Mục tiêu dài hạn
+Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **tool có cơ sở dữ liệu thực tế**, được calibrate cho đặc thù TTCK Việt Nam, và có thể đo lường hiệu quả định kỳ.
+
+## Trạng thái hiện tại
+
+**Đã có:**
+- ~8 chỉ báo kỹ thuật (RSI, MACD, BB, MA20/50/200, ADX, ATR, Stochastic, MFI)
+- Cơ bản: P/E, P/B, ROE, ROA, EPS, BVPS (từ VNDirect)
+- Khối ngoại: net 5/10/20 phiên + tần suất (từ VNDirect)
+- Scoring system + text analysis
+- Chart candlestick + MA overlay, 4 khung thời gian
+- Auto-refresh trong giờ giao dịch VN
+
+**Đang thiếu / Yếu:**
+- Không có backtest → KHÔNG BIẾT scoring có work không
+- Ngưỡng tín hiệu (RSI 30/70, P/E <10, ADX >25...) dùng universal, chưa calibrate cho VN
+- Trọng số scoring (+1/+2) tự bịa, không có cơ sở
+- Không xét context thị trường chung (VN-Index state)
+- Không so sánh ngành (P/E 10 của bank ≠ P/E 10 của tech)
+- **Chỉ phân tích từng mã đơn lẻ** — user phải tự nghĩ xem nên xem mã nào. Thiếu khả năng *quét toàn thị trường* để gợi ý mã đáng chú ý.
+
+---
+
+## Nguyên tắc chỉ đạo
+
+1. **Validate trước, feature sau.** Không thêm chỉ báo/feature mới cho đến khi biết cái hiện tại có work không.
+2. **Để data nói, không đoán.** Mọi thay đổi phải có justification từ backtest.
+3. **Chấp nhận kết quả phũ.** Nếu backtest cho thấy hệ hiện tại thua buy-and-hold → phải gỡ bớt, không phải che giấu.
+4. **Foundation > Features.** Build framework để test nhanh mỗi thay đổi, thay vì build UI đẹp.
+
+---
+
+## Giai đoạn 1 — Backtest Framework (1-2 tuần)
+
+### 1.1. Mục tiêu
+Đo được hiệu quả của từng signal riêng lẻ và combined scoring trên data TTCK VN lịch sử.
+
+### 1.2. Tech stack đề xuất
+- **Python 3 + Jupyter Notebook** (thích hợp cho data analysis, có pandas/numpy/matplotlib)
+- Data source: VNDirect API (đã sẵn, format TradingView)
+- Tránh: không build trong JS — làm chậm và debug khổ
+
+### 1.3. Scope
+- **Universe**: VN30 + VN Diamond + 30 mã liquid khác thuộc 5 ngành (finance, real estate, retail, industrial, utilities) = ~60 mã
+- **Period**: 2018-01-01 đến nay (~7 năm, đủ dài để cover bull 2020-21, crash 2022, hồi phục 2023-24)
+- **Resolution**: Daily
+- **Benchmark**: VN-Index (buy & hold)
+
+### 1.4. Deliverables
+1. **Notebook 1 — `01_data_fetch.ipynb`**: fetch + cache OHLCV + fundamentals + foreign flow cho toàn bộ universe. Save ra parquet/csv.
+2. **Notebook 2 — `02_indicators.ipynb`**: port analysis.js logic sang Python (RSI, MACD, BB, ADX, ATR, Stoch, MFI, MAs). Verify giá trị khớp với app PWA.
+3. **Notebook 3 — `03_single_signal_backtest.ipynb`**: test từng signal đơn lẻ.
+   - Ví dụ: mỗi lần RSI < 30, mua 1 unit, hold 5/10/20 ngày, bán. Tính avg return, win rate, Sharpe.
+   - Làm tương tự cho: MACD cross, BB lower touch, ADX > 25 + +DI > -DI, NN mua 6+/10, P/E < 10, v.v.
+   - Output: bảng xếp hạng signal nào có edge thực sự trên TTCK VN.
+4. **Notebook 4 — `04_combined_scoring_backtest.ipynb`**: test hệ scoring hiện tại.
+   - Rule: "MUA MẠNH"/"MUA" → buy 1 unit, hold đến khi "TRÁNH MUA"/"KHÔNG NÊN MUA" → sell.
+   - Simulate trên toàn universe, tính portfolio return vs VN-Index.
+   - Output: equity curve, total return, Sharpe, max drawdown, win rate.
+5. **Report — `phase1_results.md`**: viết tay kết luận.
+
+### 1.5. Success criteria
+- Có số liệu cụ thể cho từng signal (không phải "RSI hoạt động tốt" mà là "RSI<30 + hold 10 ngày: win rate 54%, avg return +1.2%, Sharpe 0.6")
+- Biết được combined scoring so với VN-Index buy-and-hold là hơn/huề/thua
+- Xác định 3-5 signal yếu nhất để xem xét loại bỏ
+
+### 1.6. Output kỳ vọng (3 kịch bản)
+- **Scenario A (beat baseline)**: hệ thống có edge, tiếp tục sang Giai đoạn 2
+- **Scenario B (huề baseline)**: bằng VN-Index → không đáng dùng TA phức tạp, đơn giản DCA ETF
+- **Scenario C (thua baseline)**: phải gỡ bớt signal, đơn giản hóa hệ scoring
+
+---
+
+## Giai đoạn 2 — Calibrate theo Data (3-5 ngày)
+
+### 2.1. Tuning thresholds
+Dùng grid search trên backtest framework:
+- RSI oversold: test {20, 25, 30, 35} — giá trị nào cho win rate cao nhất trên VN?
+- ADX strong trend: test {20, 25, 30}
+- P/E rẻ: không phải 1 số mà 1 ngưỡng **tương đối ngành** (percentile 20% của ngành)
+- BB: giữ nguyên 20/2 (tiêu chuẩn) hay test 10/1.5, 30/2.5?
+
+### 2.2. Reweight scoring
+Dựa trên Sharpe ratio của từng signal trong Giai đoạn 1:
+- Signal Sharpe > 0.8: weight ×2
+- Signal Sharpe 0.4-0.8: weight ×1
+- Signal Sharpe < 0.4: weight ×0 (drop)
+
+### 2.3. Sector-aware valuation
+- Map ~60 mã universe → 5-8 ngành chính (dùng VNDirect API `icbCode` hoặc tự map tay)
+- Tính P/E, P/B, ROE trung vị + percentile theo ngành
+- Thay ngưỡng "P/E < 10 rẻ" bằng "P/E ở percentile 20% của ngành"
+
+### 2.4. Deliverable
+- `05_threshold_tuning.ipynb`
+- `06_sector_benchmarks.ipynb`
+- Update `analysis.js` với ngưỡng/weight mới
+- Re-run Giai đoạn 1 Notebook 4 để verify improvement
+
+### 2.5. Success criteria
+- Combined score Sharpe cải thiện ít nhất 20% so với version ban đầu
+- Hoặc: đơn giản hóa được (bỏ 3+ signal mà vẫn giữ performance)
+
+---
+
+## Giai đoạn 3 — Thêm Feature dựa trên Gap (2-3 tuần)
+
+**CHỈ làm sau khi Giai đoạn 1-2 hoàn thành.** Ưu tiên dựa trên gap từ backtest.
+
+### Candidate features (xếp theo ROI ước tính)
+
+**A. Market context filter (VN-Index regime)**
+- **Logic**: không khuyến nghị MUA khi VN-Index trong downtrend rõ (giá dưới MA50 + MACD âm)
+- **Expected impact**: giảm max drawdown đáng kể
+- **Effort**: 1-2 ngày
+- **Làm khi**: backtest cho thấy scoring hit nhiều false signal trong bear market
+
+**B. Multi-timeframe confirmation**
+- **Logic**: "MUA MẠNH" chỉ valid khi W + D + 1h cùng chiều tăng
+- **Expected impact**: giảm false signal, tăng win rate (nhưng giảm số lượng trade)
+- **Effort**: 2-3 ngày
+- **Làm khi**: win rate của signal đơn lẻ thấp nhưng khi combine với higher timeframe thì cải thiện
+
+**C. Volume profile (VAP)**
+- **Logic**: thay swing-based S/R bằng volume-based. Point of Control (POC) là magnet.
+- **Expected impact**: chất lượng vùng giá đề xuất mua tốt hơn
+- **Effort**: 3-5 ngày
+- **Làm khi**: backtest cho thấy stop-loss dựa trên support hiện tại hay bị hit
+
+**D. Foreign flow sâu hơn**
+- Tỷ lệ NN / tổng volume hôm nay
+- Room NN còn lại (%sở hữu tối đa)
+- Pattern detection: gom rải rác vs xả nhanh
+- **Expected impact**: khai thác triệt để signal mạnh nhất của TTCK VN
+- **Effort**: 3-5 ngày
+
+**E. Risk metrics**
+- Beta vs VN-Index
+- Max drawdown 1 năm
+- Sharpe ratio
+- Position sizing dựa trên ATR (risk 1% NAV)
+- **Expected impact**: tool chuyển từ "mua không" → "mua bao nhiêu"
+- **Effort**: 2-3 ngày
+
+**F. Price band proximity (VN-specific)**
+- Khoảng cách tới trần/sàn (±7% HOSE, ±10% HNX)
+- Pattern: liên tiếp chạm trần = pump; chạm sàn = distribution
+- **Effort**: 1 ngày
+
+**G. Dividend yield + ex-dividend date**
+- DY hiển thị + cảnh báo ngày GDKHQ
+- **Effort**: 1 ngày (nếu VNDirect có endpoint)
+
+### Các feature KHÔNG nên làm (overkill / ROI thấp)
+- LLM phân tích text (chi phí cao, thêm latency, output khó đo)
+- Ichimoku Cloud (redundant với MA)
+- Fibonacci tự động (chọn swing sai thì vô dụng)
+- News/sentiment thật sự (cần API trả phí hoặc scrape phức tạp)
+
+---
+
+## Giai đoạn 4 — Stock Ranking & Screening (2-3 tuần)
+
+### 4.1. Mục tiêu
+Hiện app chỉ phân tích 1 mã do user nhập. Giai đoạn này thêm **bảng xếp hạng tự động** quét toàn bộ universe (~1700 mã VN) và đề xuất các mã đáng chú ý theo **2 mục đích khác nhau**:
+
+1. **T+ trading (3-15 phiên)** — mã có signal kỹ thuật mạnh, momentum tốt, có catalyst
+2. **DCA dài hạn (tháng-năm)** — mã chất lượng + định giá hợp lý + thanh khoản tốt
+
+Đây là 2 hệ scoring **hoàn toàn riêng biệt**, vì 1 mã có thể đẹp cho T+ nhưng không đáng DCA, và ngược lại (vd: blue chip đi ngang ổn định hợp DCA nhưng không có sóng cho T+).
+
+### 4.2. T+ Score (cho lướt sóng ngắn hạn)
+
+**Trọng số cao:**
+- RSI bounce: vừa từ <30 vọt lên >35 trong 1-2 phiên (signal đáy)
+- MACD golden cross trong 5 phiên gần nhất + histogram dương tăng
+- Stochastic %K cắt lên %D từ vùng <20
+- ADX ≥ 25 + +DI > -DI (trend tăng được xác nhận)
+- Volume hôm nay > 1.5x TB20 (catalyst, có dòng tiền vào)
+- Foreign flow đảo chiều: 3 phiên liên tiếp NN mua sau chuỗi bán
+- Giá vừa break above kháng cự gần nhất trong 5 phiên
+- Còn room to run: khoảng cách tới kháng cự kế tiếp ≥ 5%
+
+**Trọng số phụ:**
+- Bollinger lower bounce (giá chạm BB dưới rồi quay lên)
+- Mfi < 30 đang phục hồi
+- Tỷ lệ NN/total volume hôm nay tăng đột biến
+
+**Filter cứng (loại sớm để giảm noise):**
+- Thanh khoản TB20 < 5 tỷ/ngày → loại
+- Chạm sàn liên tiếp 2 phiên → loại (penny dump)
+- Beta > 2.5 → loại (quá biến động, rủi ro lớn cho T+)
+
+### 4.3. DCA Score (cho tích lũy dài hạn)
+
+**Trọng số cao:**
+- P/E ở percentile <30 của ngành (rẻ tương đối)
+- P/B < 2 (hoặc < trung vị ngành nếu là bank/insurance)
+- ROE > 15% và ổn định (đây cần dữ liệu fundamentals lịch sử, có thể skip nếu API thiếu)
+- Dividend yield > 4%
+- Giá ổn định quanh MA200, max drawdown 1 năm < 30%
+- Foreign flow tích cực dài hạn: NN gom net trong 3-6 tháng
+- Market cap > 10,000 tỷ (loại penny, chỉ blue/mid cap)
+- Thanh khoản TB20 > 20 tỷ/ngày
+
+**Trọng số phụ:**
+- Beta < 1.2 (volatility kiểm soát được)
+- Tăng trưởng EPS dương qua các quý gần (nếu có data)
+- Sector phân bổ: phần thưởng cho mã thuộc ngành defensive (hàng tiêu dùng, tiện ích) — giảm rủi ro DCA
+
+**Filter cứng:**
+- Đang downtrend dài hạn (giá < MA200 và MA200 đang giảm) → loại
+- Đã tăng > 100% trong 6 tháng qua → loại (quá nóng cho DCA mới)
+- Pending corporate event: tách/gộp/phát hành lớn trong 30 ngày → loại
+
+### 4.4. Sector cap & diversification
+Top N của mỗi ranking phải có **giới hạn 2-3 mã/ngành** để không over-concentrate (ví dụ tránh tình huống top 10 toàn ngân hàng khi sector banking đang nóng).
+
+### 4.5. UI / UX trong PWA
+
+**Tab mới "🏆 Xếp hạng"** (bên cạnh tab phân tích hiện tại):
+- 2 toggle: **T+** | **DCA**
+- Bảng top 20-30 mã, mỗi dòng:
+  - Mã + tên ngắn
+  - Score 0-100 + bar visualization
+  - Tags chính (vd "RSI bounce", "Volume surge", "P/E rẻ", "NN gom")
+  - Giá hiện tại + % thay đổi 1 ngày / 1 tuần
+  - Nút "Phân tích chi tiết" → mở panel hiện tại
+- Filter: ngành (multiselect), sàn (HOSE/HNX/UPCOM), market cap range
+- Sort: score / volume / change pct
+- Auto-refresh trong giờ giao dịch (mỗi 5-10 phút thay vì 60s vì compute nặng hơn)
+
+**Mobile UX:**
+- Card layout thay vì table cho dễ đọc
+- Pull-to-refresh
+- Swipe trái → mở "Phân tích chi tiết"
+
+### 4.6. Implementation
+
+**Compute pipeline:**
+1. Universe ~1700 mã quá lớn cho mobile compute → backend pre-compute mỗi 5-10 phút
+2. Tận dụng VNDirect endpoints batch:
+   - `/v4/stocks` — list toàn bộ mã + sector mapping
+   - `/v4/stock_prices?q=date:today` — giá toàn thị trường 1 phiên (1 request)
+   - `/v4/foreigns?q=tradingDate:today` — NN flow toàn thị trường 1 phiên
+3. Lưu kết quả ranking ở Apps Script (Google Sheet) hoặc Supabase free tier
+4. PWA chỉ fetch top N ranking (~50-100 dòng), không compute lại
+
+**Thay thế đơn giản hơn (Phase 4a):**
+- Hard-code ranking compute trong client JS, chấp nhận chậm 5-10s lần đầu load
+- Cache localStorage 30 phút
+- Universe giới hạn còn ~200 mã liquid (loại penny/illiquid sớm)
+- Đủ tốt cho personal use, không cần backend
+
+**Lựa chọn:** Bắt đầu với "Phase 4a" (client-side, đơn giản), nếu thực sự cần realtime + universe full thì mới setup backend.
+
+### 4.7. Validation (CRITICAL)
+
+Đây là tính năng bự nhất — **PHẢI backtest** trước khi rilease:
+
+**Backtest T+ ranking:**
+- Mỗi ngày trong 5 năm: lấy top 5 mã theo T+ score
+- Mua đều (1 unit/mã) khi đóng cửa, hold 5/10/15 phiên, bán
+- Đo: avg return per trade, win rate, max drawdown
+- Benchmark: random pick 5 mã + buy-and-hold VN-Index
+- Mục tiêu: avg return > VN-Index hold 5/10/15 ngày + Sharpe > 0.8
+
+**Backtest DCA ranking:**
+- Mỗi tháng trong 5 năm: lấy top 10 mã theo DCA score (tái cân bằng)
+- Mua equal weight (10% mỗi mã), hold đến tháng sau, rebalance
+- Đo: total return, Sharpe, max drawdown
+- Benchmark: DCA VN30 ETF (E1VFVN30) đều
+- Mục tiêu: vượt E1VFVN30 hoặc tệ nhất là không thua nhiều với drawdown thấp hơn
+
+**Out-of-sample test bắt buộc:**
+- Train + tune trên 2018-2022
+- Test ranking trên 2023-2024 (chưa thấy trong tuning)
+- Nếu performance giảm > 50% giữa train và test → ranking đang overfit, không dùng được
+
+### 4.8. Rủi ro riêng của ranking feature
+
+- **Selection bias / Goodhart's law:** Khi user theo top ranking đầu tư → mã đó lên tự động → ranking tự xác nhận chính nó (self-fulfilling, nhưng tạm thời). Cần đa dạng user mới có vấn đề này.
+- **Universe drift:** Mã mới niêm yết / hủy niêm yết liên tục → cần update universe list định kỳ.
+- **Compute cost:** Quét 1700 mã × 8-10 indicators / 5 phút trên mobile là không khả thi → bắt buộc giới hạn universe hoặc move sang backend.
+- **Quá nhiều khuyến nghị:** Top 30 T+ mỗi ngày = quá nhiều lựa chọn cho user → có thể chỉ show top 5-10 với confidence cao nhất.
+
+### 4.9. Deliverables Phase 4
+
+1. `notebooks/07_t_plus_ranking.ipynb` — develop + backtest T+ score
+2. `notebooks/08_dca_ranking.ipynb` — develop + backtest DCA score
+3. `src/ranking.py` — production code cho 2 ranking system
+4. `phase4_results.md` — kết quả backtest 2 ranking
+5. UI component "Xếp hạng" trong PWA
+6. Compute caching (client-side localStorage hoặc Apps Script backend)
+
+---
+
+## Giai đoạn 5 — Continuous Validation (định kỳ)
+
+### 5.1. Monthly re-backtest
+- Chạy lại toàn bộ backtest mỗi tháng với data mới nhất
+- Detect drift: signal nào trước work giờ không work
+- Re-calibrate nếu Sharpe suy giảm > 30%
+- Áp dụng cho **cả 3 hệ**: scoring đơn lẻ, T+ ranking, DCA ranking
+
+### 5.2. Paper trading
+- Track các lần "MUA MẠNH" được sinh ra trong thực tế (sau Phase 2)
+- Track top 5 T+ ranking mỗi ngày + top 10 DCA ranking mỗi tháng (sau Phase 4)
+- Log vào Google Sheet hoặc DB: ngày, mã, giá, signal, giá sau 5/10/20 ngày
+- So sánh với backtest → xác nhận không có look-ahead bias
+
+### 5.3. Regime change detection
+- Thị trường có 3 chế độ: bull / bear / ranging
+- Theo dõi VN-Index MA200 + ADX để detect regime shift
+- Scoring có thể cần thay đổi theo regime (bull: đánh momentum, bear: chỉ đánh mean reversion)
+- T+ ranking đặc biệt nhạy với regime: bear market thì ngừng khuyến nghị T+, chỉ giữ DCA quality
+
+---
+
+## Rủi ro & Giả định
+
+### Rủi ro
+- **Backtest overfitting**: tune tham số quá kỹ trên data cũ → hoạt động kém trên tương lai. Giảm thiểu bằng train/test split (train 2018-2022, test 2023-2024).
+- **Survivorship bias**: universe không bao gồm mã bị hủy niêm yết → kết quả quá đẹp. Khắc phục: bao gồm cả mã đã từng bị hủy.
+- **Data quality**: VNDirect API có thể thiếu/lệch. Cross-check với Cafef/Vietstock nếu cần.
+- **Kết quả thất vọng**: scoring có thể thua buy-and-hold → phải thừa nhận, không che giấu.
+- **Look-ahead bias trong ranking**: tính score hôm nay dùng data hôm nay (close price) → khi backtest phải xử lý cẩn thận để mua vào ngày T+1, không phải T.
+- **Concentration risk trong ranking**: top picks có thể tập trung 1 ngành đang nóng → phải có sector cap.
+
+### Giả định
+- Có thể fetch đủ 7 năm data từ VNDirect (họ thường giới hạn 10 năm, nên OK)
+- API VNDirect stable (đã dùng trong app mấy tuần không down)
+- Trader đủ kỷ luật follow signal (không cherry-pick)
+
+---
+
+## Thứ tự thực thi cụ thể (next concrete actions)
+
+### Tuần 1
+- [ ] Setup Python env với pandas, numpy, matplotlib, jupyter
+- [ ] Tạo folder `/Users/qngnhat/bong/ck_tracking/backtest/`
+- [ ] `01_data_fetch.ipynb`: fetch OHLCV 60 mã × 7 năm, save parquet
+- [ ] `02_indicators.ipynb`: port + verify indicator values khớp PWA
+
+### Tuần 2
+- [ ] `03_single_signal_backtest.ipynb`: test 10+ signal đơn lẻ
+- [ ] `04_combined_scoring_backtest.ipynb`: test hệ scoring hiện tại
+- [ ] Viết `phase1_results.md`, kết luận scenario A/B/C
+
+### Decision point sau Phase 1
+Dựa vào kết quả Phase 1 → quyết định:
+- Scenario A (hơn baseline): sang Phase 2 (calibrate)
+- Scenario B (huề): dừng project tool TA, chuyển sang chiến lược DCA ETF thuần
+- Scenario C (thua): đơn giản hóa mạnh, chỉ giữ 2-3 signal có edge nhất
+
+### Tuần 3-4 (nếu scenario A hoặc C)
+- Phase 2 — calibrate thresholds + weights
+- Update app PWA với logic mới
+- Re-backtest verify improvement
+
+### Tuần 5-7
+- Phase 3: thêm 3-5 feature dựa trên gap từ backtest (priority list)
+
+### Tuần 8-10
+- Phase 4 — Stock Ranking & Screening
+  - Tuần 8: develop T+ score + backtest (notebook 07)
+  - Tuần 9: develop DCA score + backtest (notebook 08)
+  - Tuần 10: implement UI ranking trong PWA + caching
+- **Gate**: chỉ release ranking ra production nếu out-of-sample test pass
+
+### Từ tuần 11 trở đi
+- Phase 5: setup cron chạy re-backtest mỗi tháng cho cả 3 hệ
+- Paper trading + monitor drift
+
+---
+
+## Metrics đo lường
+
+### Cấp signal
+- Win rate (% số trade thắng)
+- Average return per trade (%)
+- Average hold period
+- Sharpe ratio (nếu treat như time series)
+
+### Cấp combined strategy
+- Total return vs VN-Index
+- Sharpe ratio (annualized)
+- Max drawdown
+- Calmar ratio (return / max drawdown)
+- Number of trades (càng ít càng giảm chi phí giao dịch)
+
+### Cấp ranking (Phase 4)
+**T+ ranking metrics:**
+- Avg return per trade ở các horizon 5/10/15 phiên
+- Win rate top-5 daily picks
+- Hit rate signal "MUA" + giá thực sự tăng trong N ngày
+- Max drawdown nếu run với risk 1% NAV/trade
+- So với random pick + buy-and-hold benchmark
+
+**DCA ranking metrics:**
+- Total return của portfolio top-10 rebalance hàng tháng
+- Sharpe ratio + max drawdown
+- Tracking error vs E1VFVN30 (nếu chỉ baseline beat được ít, vẫn OK miễn drawdown thấp hơn)
+- Diversification: HHI sector concentration (≤ 0.25 lý tưởng)
+
+### Benchmark so sánh
+1. Buy & hold VN-Index
+2. Buy & hold VN30 ETF (E1VFVN30)
+3. Buy & hold VN Diamond (FUEVFVND)
+4. DCA đều đặn 1tr/tuần vào VN-Index (baseline chiến lược đơn giản nhất)
+5. Random pick top 10 mã liquid (cho ranking)
+
+---
+
+## Kết luận
+
+Cách tiếp cận này **tránh cái bẫy phổ biến** của các dự án TA cá nhân: cứ thêm indicator mà không bao giờ kiểm chứng. Chậm hơn trong ngắn hạn nhưng nếu theo đuổi nghiêm túc, kết quả cuối có thể là **tool thực sự dùng được** — chứ không phải đồ chơi đẹp mà hiệu quả không khác gì bấm đại.
+
+Sau toàn bộ roadmap, app sẽ có **3 use cases** rõ ràng phục vụ 3 nhu cầu khác nhau:
+1. **Phân tích sâu 1 mã** (Phase 1-3) — khi user đã biết muốn xem mã nào
+2. **Xếp hạng mã T+ tốt nhất** (Phase 4) — khi user muốn lướt sóng ngắn hạn
+3. **Xếp hạng mã DCA tốt nhất** (Phase 4) — khi user muốn tích lũy dài hạn
+
+Mỗi tính năng phải pass backtest trước khi release.
+
+Nếu kết quả Phase 1 thất bại → vẫn thắng, vì ít nhất tiết kiệm được thời gian build thêm features vô ích.

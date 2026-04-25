@@ -2,6 +2,9 @@
 data/
 *.parquet
 
+# Backtest output CSVs (re-runnable)
+results/*.csv
+
 # Python
 __pycache__/
 *.pyc
