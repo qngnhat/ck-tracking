@@ -48,6 +48,220 @@ window.__SSI_RANKING__ = (function () {
 
   const CACHE_KEY = "dca_top_picks_v1";
   const CACHE_TTL_MS = 24 * 3600 * 1000; // 24h
+  const CACHE_KEY_TPLUS = "tplus_top_picks_v1";
+  const CACHE_TTL_TPLUS_MS = 1 * 3600 * 1000; // 1h (refresh hourly during market hours)
+
+  // ── Indicator helpers (port từ analysis.js) ──────────
+  function calcRsi(closes, period = 14) {
+    if (closes.length < period + 1) return null;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d > 0) gains += d; else losses -= d;
+    }
+    let avgG = gains / period, avgL = losses / period;
+    for (let i = period + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
+      avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
+    }
+    if (avgL === 0) return 100;
+    return 100 - 100 / (1 + avgG / avgL);
+  }
+
+  function calcBB(closes, period = 20, std = 2) {
+    if (closes.length < period) return null;
+    const slice = closes.slice(-period);
+    const mid = slice.reduce((a, b) => a + b, 0) / period;
+    const v = slice.reduce((a, b) => a + (b - mid) ** 2, 0) / period;
+    const sd = Math.sqrt(v);
+    return { upper: mid + sd * std, middle: mid, lower: mid - sd * std };
+  }
+
+  function calcMfi(highs, lows, closes, volumes, period = 14) {
+    const n = closes.length;
+    if (n < period + 1) return null;
+    let posFlow = 0, negFlow = 0;
+    for (let i = n - period; i < n; i++) {
+      const tp = (highs[i] + lows[i] + closes[i]) / 3;
+      const tpPrev = (highs[i - 1] + lows[i - 1] + closes[i - 1]) / 3;
+      const rmf = tp * volumes[i];
+      if (tp > tpPrev) posFlow += rmf;
+      else if (tp < tpPrev) negFlow += rmf;
+    }
+    if (negFlow === 0) return 100;
+    const r = posFlow / negFlow;
+    return 100 - 100 / (1 + r);
+  }
+
+  function calcStoch(highs, lows, closes, kPer = 14, dPer = 3) {
+    const n = closes.length;
+    if (n < kPer + dPer) return null;
+    const ks = [];
+    for (let i = kPer - 1; i < n; i++) {
+      const hh = Math.max(...highs.slice(i - kPer + 1, i + 1));
+      const ll = Math.min(...lows.slice(i - kPer + 1, i + 1));
+      ks.push(hh === ll ? 50 : (100 * (closes[i] - ll)) / (hh - ll));
+    }
+    const k = ks[ks.length - 1];
+    const d = ks.slice(-dPer).reduce((a, b) => a + b, 0) / dPer;
+    return { k, d };
+  }
+
+  function ema(values, period) {
+    if (values.length < period) return null;
+    const k = 2 / (period + 1);
+    let e = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < values.length; i++) {
+      e = values[i] * k + e * (1 - k);
+    }
+    return e;
+  }
+
+  function calcMacd(closes, fast = 12, slow = 26, signal = 9) {
+    if (closes.length < slow + signal) return null;
+    // Build MACD line series, then signal EMA
+    const macdSeries = [];
+    let efast = closes.slice(0, fast).reduce((a, b) => a + b, 0) / fast;
+    let eslow = closes.slice(0, slow).reduce((a, b) => a + b, 0) / slow;
+    const kf = 2 / (fast + 1), ks = 2 / (slow + 1);
+    for (let i = 0; i < closes.length; i++) {
+      if (i >= fast) efast = closes[i] * kf + efast * (1 - kf);
+      if (i >= slow) eslow = closes[i] * ks + eslow * (1 - ks);
+      if (i >= slow - 1) macdSeries.push(efast - eslow);
+    }
+    if (macdSeries.length < signal) return null;
+    const sig = ema(macdSeries, signal);
+    const m = macdSeries[macdSeries.length - 1];
+    return { macd: m, signal: sig, hist: m - sig };
+  }
+
+  // ── T+ Score (mean-reversion focused) ───────────────
+  function computeTPlusFactors(ohlcv, foreignDailyData) {
+    const closes = ohlcv.closes;
+    const highs = ohlcv.highs;
+    const lows = ohlcv.lows;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 60) return null;
+
+    const currentClose = closes[n - 1];
+    const reasons = [];
+    let score = 0;
+
+    // RSI today vs 3 days ago (for bounce detection)
+    const rsiToday = calcRsi(closes, 14);
+    const rsi3 = closes.length >= 17 ? calcRsi(closes.slice(0, n - 3), 14) : null;
+
+    // 1. RSI signals (PRIMARY edge from Phase 1.3 backtest)
+    if (rsiToday !== null) {
+      if (rsiToday < 25) {
+        score += 3;
+        reasons.push("RSI<25 quá bán cực mạnh");
+      } else if (rsiToday < 30) {
+        score += 2;
+        reasons.push("RSI<30 quá bán");
+      } else if (rsiToday < 35 && rsi3 !== null && rsi3 < 25) {
+        score += 3;
+        reasons.push("RSI vừa hồi từ đáy");
+      }
+    }
+
+    // 2. Bollinger Bands
+    const bb = calcBB(closes, 20, 2);
+    if (bb) {
+      if (currentClose <= bb.lower) {
+        score += 1.5;
+        reasons.push("Chạm BB dưới");
+      } else if (closes[n - 2] <= bb.lower && currentClose > bb.lower) {
+        score += 2;
+        reasons.push("Bounce từ BB dưới");
+      }
+    }
+
+    // 3. MFI oversold
+    const mfi = calcMfi(highs, lows, closes, volumes, 14);
+    if (mfi !== null && mfi < 20) {
+      score += 1.5;
+      reasons.push("MFI<20 quá bán");
+    }
+
+    // 4. Stochastic oversold + cross up
+    const stoch = calcStoch(highs, lows, closes, 14, 3);
+    if (stoch && stoch.k < 20 && stoch.k > stoch.d) {
+      score += 1.5;
+      reasons.push("Stoch cross lên");
+    }
+
+    // 5. Volume spike (catalyst)
+    let avgVol = 0;
+    if (n >= 21) {
+      for (let i = n - 21; i < n - 1; i++) avgVol += volumes[i];
+      avgVol /= 20;
+    }
+    const volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
+    if (volRatio > 1.5) {
+      score += 1;
+      reasons.push(`Vol ${volRatio.toFixed(1)}x TB`);
+    }
+
+    // 6. MACD histogram turning positive
+    const macd = calcMacd(closes, 12, 26, 9);
+    const macdYest = closes.length >= 36
+      ? calcMacd(closes.slice(0, n - 1), 12, 26, 9)
+      : null;
+    if (macd && macdYest && macd.hist > 0 && macdYest.hist <= 0) {
+      score += 1;
+      reasons.push("MACD đảo chiều +");
+    }
+
+    // 7. Foreign flow reversal (NN bought today after sell streak)
+    if (foreignDailyData && foreignDailyData.length >= 5) {
+      const recent = foreignDailyData.slice(-5);
+      const today = recent[recent.length - 1];
+      const prev4 = recent.slice(0, -1);
+      const todayBuy = (today.netVal || 0) > 0;
+      const sellCount = prev4.filter((d) => (d.netVal || 0) < 0).length;
+      if (todayBuy && sellCount >= 3) {
+        score += 1.5;
+        reasons.push("NN đảo chiều mua");
+      }
+    }
+
+    // ── Hard filters ──
+    let avgTurnover = 0;
+    const liqLookback = Math.min(20, n);
+    for (let i = n - liqLookback; i < n; i++) {
+      avgTurnover += closes[i] * volumes[i] * 1000;
+    }
+    avgTurnover /= liqLookback;
+
+    const filterIlliquid = avgTurnover < 5e9; // < 5 tỷ/day
+    let filterCrash = false;
+    if (n > 127) {
+      const ret6m = currentClose / closes[n - 127] - 1;
+      filterCrash = ret6m < -0.5; // crashed >50% in 6m → catching knife
+    }
+
+    if (filterIlliquid || filterCrash) {
+      score = -999;
+    }
+
+    // Day change
+    const dayChange = n >= 2 ? (currentClose - closes[n - 2]) / closes[n - 2] : 0;
+
+    return {
+      score,
+      reasons,
+      currentPrice: currentClose,
+      dayChange,
+      rsiToday,
+      mfi,
+      avgTurnover,
+      filterIlliquid,
+      filterCrash,
+    };
+  }
 
   // ── Helpers ──
   function sma(arr, period, end) {
@@ -295,12 +509,91 @@ window.__SSI_RANKING__ = (function () {
 
   function clearCache() {
     localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(CACHE_KEY_TPLUS);
+  }
+
+  // ── T+ ranking main ───────────────────────────────
+  // Min score threshold to be included (filter low-quality)
+  const TPLUS_MIN_SCORE = 2.0;
+
+  async function loadTopPicksTPlus(opts = {}) {
+    const {
+      topN = 10,
+      useCache = true,
+      onProgress,
+    } = opts;
+
+    if (useCache) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(CACHE_KEY_TPLUS) || "null");
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL_TPLUS_MS) {
+          return { ...cached.data, fromCache: true };
+        }
+      } catch {}
+    }
+
+    const startTime = Date.now();
+    const stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+
+    const batchSize = 10;
+    let done = 0;
+    for (let i = 0; i < stocks.length; i += batchSize) {
+      const batch = stocks.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (stock) => {
+          try {
+            const [ohlcv, foreign] = await Promise.all([
+              ANALYSIS.fetchHistory(stock.symbol, "D", 200),
+              fetchForeignDaily(stock.symbol, 10),
+            ]);
+            stock.tplusFactors = computeTPlusFactors(ohlcv, foreign);
+          } catch (e) {
+            stock.error = e.message;
+            stock.tplusFactors = null;
+          }
+          done++;
+          if (onProgress) onProgress(done, stocks.length);
+        })
+      );
+    }
+
+    // Filter by min score, sort by score
+    const valid = stocks
+      .filter((s) => s.tplusFactors && s.tplusFactors.score >= TPLUS_MIN_SCORE)
+      .sort((a, b) => b.tplusFactors.score - a.tplusFactors.score);
+
+    const picks = valid.slice(0, topN).map((s) => ({
+      symbol: s.symbol,
+      sector: s.sector,
+      score: s.tplusFactors.score,
+      reasons: s.tplusFactors.reasons,
+      factors: s.tplusFactors,
+    }));
+
+    const result = {
+      picks,
+      allCount: stocks.length,
+      eligibleCount: valid.length,
+      timestamp: Date.now(),
+      duration: Date.now() - startTime,
+      fromCache: false,
+    };
+
+    try {
+      localStorage.setItem(CACHE_KEY_TPLUS, JSON.stringify({
+        timestamp: Date.now(),
+        data: result,
+      }));
+    } catch {}
+
+    return result;
   }
 
   return {
     UNIVERSE,
     FACTOR_NAMES,
     loadTopPicks,
+    loadTopPicksTPlus,
     clearCache,
   };
 })();

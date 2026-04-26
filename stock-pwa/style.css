@@ -752,6 +752,37 @@ button {
   padding-bottom: calc(40px + env(safe-area-inset-bottom));
 }
 
+.ranking-mode-toggle {
+  display: flex;
+  gap: 6px;
+  background: #16213e;
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mode-btn.active {
+  background: #0f3460;
+  color: #00d2ff;
+}
+
+.mode-btn:active {
+  transform: scale(0.97);
+}
+
 .ranking-header {
   display: flex;
   justify-content: space-between;

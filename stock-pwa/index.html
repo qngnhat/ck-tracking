@@ -81,9 +81,14 @@
   <!-- Ranking tab -->
   <div class="tab-content tab-ranking">
     <main id="ranking-container">
+      <div class="ranking-mode-toggle">
+        <button class="mode-btn active" data-mode="dca">📈 DCA dài hạn</button>
+        <button class="mode-btn" data-mode="tplus">⚡ T+ ngắn hạn</button>
+      </div>
+
       <div class="ranking-header">
         <div>
-          <h2 class="ranking-title">Top mã DCA</h2>
+          <h2 class="ranking-title" id="ranking-title">Top mã DCA</h2>
           <div class="ranking-meta" id="ranking-meta">Tải lần đầu để xem khuyến nghị</div>
         </div>
         <div class="ranking-actions">
@@ -101,16 +106,16 @@
       </div>
 
       <div id="ranking-content">
-        <div class="empty-state ranking-intro">
-          <div class="empty-icon">🏆</div>
+        <div class="empty-state ranking-intro" id="intro-dca">
+          <div class="empty-icon">📈</div>
           <h2>Khuyến nghị DCA dài hạn</h2>
-          <p>Bảng xếp hạng top mã đáng cân nhắc cho tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả 55 mã trong universe.</p>
+          <p>Bảng xếp hạng top mã đáng tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả universe.</p>
           <button class="btn-primary" id="ranking-load-btn">Tải bảng xếp hạng</button>
         </div>
       </div>
 
-      <div class="ranking-disclaimer">
-        ⚠️ Khuyến nghị cập nhật mỗi 24h. Cần rebalance mỗi đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
+      <div class="ranking-disclaimer" id="ranking-disclaimer">
+        ⚠️ DCA cập nhật 24h, rebalance đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
       </div>
     </main>
   </div>

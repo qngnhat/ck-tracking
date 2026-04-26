@@ -840,12 +840,81 @@
   // ════════════════════════════════════════════════════
   // ── RANKING TAB ──
   // ════════════════════════════════════════════════════
-  let rankingState = { picks: [], topN: 10, loading: false };
+  let rankingState = {
+    mode: "dca",  // "dca" | "tplus"
+    dca: { picks: [], topN: 10, loaded: false },
+    tplus: { picks: [], topN: 10, loaded: false },
+    loading: false,
+  };
+
+  function curState() {
+    return rankingState[rankingState.mode];
+  }
+
+  function switchRankingMode(mode) {
+    if (mode === rankingState.mode) return;
+    rankingState.mode = mode;
+    document.querySelectorAll(".mode-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    });
+
+    // Update title + disclaimer
+    const title = $("ranking-title");
+    const disc = $("ranking-disclaimer");
+    if (mode === "dca") {
+      title.textContent = "Top mã DCA";
+      disc.textContent = "⚠️ DCA cập nhật 24h, rebalance đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.";
+    } else {
+      title.textContent = "Top mã T+";
+      disc.textContent = "⚠️ T+ cập nhật mỗi giờ trong giờ giao dịch. Setup hiếm, có thể không có mã nào hôm nay. Hold 15-30 phiên, stop loss -8%.";
+    }
+
+    // Update topN button state
+    const tn = curState().topN;
+    document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => {
+      b.classList.toggle("active", parseInt(b.dataset.n, 10) === tn);
+    });
+
+    // Render or show intro
+    if (curState().loaded) {
+      renderRanking();
+      // Try to update meta from cache info if available
+    } else {
+      showRankingIntro();
+    }
+  }
+
+  function showRankingIntro() {
+    const mode = rankingState.mode;
+    const content = $("ranking-content");
+    if (mode === "dca") {
+      content.innerHTML = `
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">📈</div>
+          <h2>Khuyến nghị DCA dài hạn</h2>
+          <p>Bảng xếp hạng top mã đáng tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả universe.</p>
+          <button class="btn-primary" id="ranking-load-btn">Tải bảng xếp hạng</button>
+        </div>
+      `;
+    } else {
+      content.innerHTML = `
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">⚡</div>
+          <h2>Cơ hội T+ (lướt sóng ngắn hạn)</h2>
+          <p>Quét toàn bộ universe để tìm setup mean-reversion: RSI quá bán, BB lower bounce, MFI &lt; 20 + volume catalyst. Hold 15-30 phiên, target hồi phục.</p>
+          <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> setup T+ tốt rất hiếm. Có thể có 0 mã hôm nay — đó là chuyện bình thường, không cần ép vào lệnh.</p>
+          <button class="btn-primary" id="ranking-load-btn">Quét cơ hội T+</button>
+        </div>
+      `;
+    }
+    document.getElementById("ranking-load-btn").addEventListener("click", () => loadRanking());
+  }
 
   async function loadRanking(forceFresh = false) {
     if (rankingState.loading) return;
     rankingState.loading = true;
 
+    const mode = rankingState.mode;
     const content = $("ranking-content");
     content.innerHTML = `
       <div class="ranking-loading">
@@ -855,8 +924,9 @@
     `;
 
     try {
-      const result = await RANKING.loadTopPicks({
-        topN: 15, // always fetch top 15, slice later by user choice
+      const loader = mode === "dca" ? RANKING.loadTopPicks : RANKING.loadTopPicksTPlus;
+      const result = await loader({
+        topN: 15,
         sectorCap: 2,
         useCache: !forceFresh,
         onProgress: (done, total) => {
@@ -865,9 +935,10 @@
         },
       });
 
-      rankingState.picks = result.picks;
-      rankingState.timestamp = result.timestamp;
-      rankingState.fromCache = result.fromCache;
+      const s = curState();
+      s.picks = result.picks;
+      s.loaded = true;
+      s.lastResult = result;
       renderRanking();
       updateRankingMeta(result);
     } catch (e) {
@@ -889,10 +960,15 @@
 
   function renderRanking() {
     const content = $("ranking-content");
-    const picks = rankingState.picks.slice(0, rankingState.topN);
+    const s = curState();
+    const picks = s.picks.slice(0, s.topN);
+    const mode = rankingState.mode;
 
     if (picks.length === 0) {
-      content.innerHTML = `<div class="empty-state"><p>Không có mã nào đủ điều kiện trong top hiện tại.</p></div>`;
+      const msg = mode === "tplus"
+        ? "Không có setup T+ nào đủ chất lượng hôm nay. Đó là chuyện bình thường — đừng ép vào lệnh khi không có cơ hội rõ. Quay lại sau hoặc thử ngày khác."
+        : "Không có mã nào đủ điều kiện trong top hiện tại.";
+      content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">${mode === "tplus" ? "💤" : "⚠️"}</div><p>${msg}</p></div>`;
       return;
     }
 
@@ -902,15 +978,23 @@
       const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
       const dayChangeSign = f.dayChange >= 0 ? "+" : "";
 
-      // Top contributing factors (top 3 z-scores)
-      const factorList = RANKING.FACTOR_NAMES
-        .map((fn) => ({ name: fn, z: f[fn + "_z"] }))
-        .filter((x) => x.z !== null && !isNaN(x.z))
-        .sort((a, b) => b.z - a.z);
-
-      const topFactors = factorList.slice(0, 3).map((x) => factorTag(x.name, x.z, true)).join("");
-      const weakFactors = factorList.slice(-2).filter((x) => x.z < 0)
-        .map((x) => factorTag(x.name, x.z, false)).join("");
+      let tagsHtml = "";
+      if (mode === "dca") {
+        // For DCA: top 3 z-scores as strong, bottom 2 as weak
+        const factorList = RANKING.FACTOR_NAMES
+          .map((fn) => ({ name: fn, z: f[fn + "_z"] }))
+          .filter((x) => x.z !== null && !isNaN(x.z))
+          .sort((a, b) => b.z - a.z);
+        const topFactors = factorList.slice(0, 3).map((x) => factorTag(x.name, x.z, true)).join("");
+        const weakFactors = factorList.slice(-2).filter((x) => x.z < 0)
+          .map((x) => factorTag(x.name, x.z, false)).join("");
+        tagsHtml = topFactors + weakFactors;
+      } else {
+        // For T+: show reasons from score
+        tagsHtml = (p.reasons || []).map((r) =>
+          `<span class="factor-tag tag-strong">${r}</span>`
+        ).join("");
+      }
 
       html += `
         <div class="pick-card" data-symbol="${p.symbol}">
@@ -925,7 +1009,7 @@
               <span class="pick-price">${fp(f.currentPrice)}</span>
               <span class="pct ${dayChangeClass}">${dayChangeSign}${(f.dayChange * 100).toFixed(2)}%</span>
             </div>
-            <div class="pick-tags">${topFactors}${weakFactors}</div>
+            <div class="pick-tags">${tagsHtml}</div>
           </div>
           <div class="pick-cta">›</div>
         </div>
@@ -933,17 +1017,25 @@
     });
     html += "</div>";
 
-    // Allocation hint
-    const monthlyPerStock = Math.round(10000000 / rankingState.topN / 1000) * 1000;
-    html += `
-      <div class="allocation-hint">
-        💡 Với 10tr/tháng chia ${rankingState.topN} mã: <b>~${(monthlyPerStock / 1000).toLocaleString()}k/mã/tháng</b>
-      </div>
-    `;
+    // Allocation hint (different for DCA vs T+)
+    if (mode === "dca") {
+      const monthlyPerStock = Math.round(10000000 / s.topN / 1000) * 1000;
+      html += `
+        <div class="allocation-hint">
+          💡 Với 10tr/tháng chia ${s.topN} mã: <b>~${(monthlyPerStock / 1000).toLocaleString()}k/mã/tháng</b>
+        </div>
+      `;
+    } else {
+      // T+ uses small reserve allocation
+      html += `
+        <div class="allocation-hint">
+          ⚡ T+ reserve gợi ý: ~1.5tr/lệnh × 3-5 lệnh/năm. Stop loss <b>-8%</b> hoặc 2× ATR. Hold ~15-30 phiên, exit khi RSI hồi >50.
+        </div>
+      `;
+    }
 
     content.innerHTML = html;
 
-    // Tap pick → switch to analyze tab + load
     content.querySelectorAll(".pick-card").forEach((card) => {
       card.addEventListener("click", () => {
         const sym = card.dataset.symbol;
@@ -983,9 +1075,14 @@
     btn.addEventListener("click", () => {
       document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      rankingState.topN = parseInt(btn.dataset.n, 10);
-      if (rankingState.picks.length > 0) renderRanking();
+      curState().topN = parseInt(btn.dataset.n, 10);
+      if (curState().picks.length > 0) renderRanking();
     });
+  });
+
+  // Mode toggle (DCA / T+)
+  document.querySelectorAll(".mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => switchRankingMode(btn.dataset.mode));
   });
 
   $("ranking-refresh").addEventListener("click", () => {
@@ -993,7 +1090,10 @@
     loadRanking(true);
   });
 
-  $("ranking-load-btn").addEventListener("click", () => loadRanking());
+  // Initial intro load button (delegated since it may be re-rendered)
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "ranking-load-btn") loadRanking();
+  });
 
   // ── Init ──
   renderHistory();
