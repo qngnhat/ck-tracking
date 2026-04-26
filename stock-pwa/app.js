@@ -1020,17 +1020,15 @@
 
     // Allocation hint (different for DCA vs T+)
     if (mode === "dca") {
-      const monthlyPerStock = Math.round(10000000 / s.topN / 1000) * 1000;
       html += `
         <div class="allocation-hint">
-          💡 Với 10tr/tháng chia ${s.topN} mã: <b>~${(monthlyPerStock / 1000).toLocaleString()}k/mã/tháng</b>
+          💡 Mua đều ${s.topN} mã trên, rebalance đầu tháng — bán mã rớt khỏi top, mua mã mới vào. Sector cap 2 mã/ngành để tránh concentrate.
         </div>
       `;
     } else {
-      // T+ uses small reserve allocation
       html += `
         <div class="allocation-hint">
-          ⚡ T+ reserve gợi ý: ~1.5tr/lệnh × 3-5 lệnh/năm. Stop loss <b>-8%</b> hoặc 2× ATR. Hold ~15-30 phiên, exit khi RSI hồi >50.
+          ⚡ Hold ~15-30 phiên. Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
         </div>
       `;
     }
