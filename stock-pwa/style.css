@@ -39,10 +39,47 @@ button {
   top: 0;
   z-index: 10;
   background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-  padding: 14px 16px;
+  padding: 14px 16px 0;
   padding-top: calc(14px + env(safe-area-inset-top));
   border-bottom: 1px solid #2a2a3e;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Tab nav ── */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab-btn.active {
+  color: #00d2ff;
+  border-bottom-color: #00d2ff;
+}
+
+.tab-btn:active {
+  background: rgba(0, 210, 255, 0.05);
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
 }
 
 .app-title {
@@ -706,3 +743,242 @@ button {
 .badge-cheap { background: rgba(76, 175, 80, 0.2); color: #4CAF50; }
 .badge-fair  { background: rgba(255, 152, 0, 0.2); color: #FF9800; }
 .badge-exp   { background: rgba(255, 68, 68, 0.2); color: #ff4444; }
+
+/* ════════════════════════════════════════
+   RANKING TAB (Top picks)
+   ════════════════════════════════════════ */
+#ranking-container {
+  padding: 16px;
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
+}
+
+.ranking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.ranking-title {
+  font-size: 17px;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.ranking-meta {
+  font-size: 11px;
+  color: #888;
+}
+
+.ranking-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-icon {
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  color: #00d2ff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-icon:active {
+  background: #0f3460;
+  transform: scale(0.95);
+}
+
+.ranking-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ctrl-label {
+  font-size: 11px;
+  color: #888;
+}
+
+.seg-toggle {
+  display: flex;
+  background: #16213e;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.seg-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: #0f3460;
+  color: #00d2ff;
+}
+
+.ranking-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: #888;
+}
+
+#ranking-progress {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.ranking-intro {
+  padding: 16px 12px;
+}
+
+.ranking-intro p {
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+  padding: 0;
+  margin-bottom: 16px;
+}
+
+/* ── Pick card ── */
+.picks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pick-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pick-card:active {
+  background: #16213e;
+  border-color: #00d2ff;
+}
+
+.pick-rank {
+  font-size: 18px;
+  font-weight: 700;
+  color: #00d2ff;
+  min-width: 32px;
+  text-align: center;
+}
+
+.pick-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pick-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.pick-symbol {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.pick-sector {
+  font-size: 10px;
+  color: #888;
+  background: #0f0f1e;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.pick-score {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4CAF50;
+}
+
+.pick-row2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pick-price {
+  font-size: 14px;
+  color: #ccc;
+  font-weight: 600;
+}
+
+.pick-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.factor-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.tag-strong {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4CAF50;
+}
+
+.tag-weak {
+  background: rgba(255, 68, 68, 0.1);
+  color: #ff7777;
+}
+
+.pick-cta {
+  font-size: 22px;
+  color: #555;
+  font-weight: 300;
+}
+
+.allocation-hint {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: rgba(0, 210, 255, 0.08);
+  border: 1px solid rgba(0, 210, 255, 0.2);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #00d2ff;
+  line-height: 1.5;
+}
+
+.ranking-disclaimer {
+  margin-top: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 152, 0, 0.05);
+  border: 1px solid rgba(255, 152, 0, 0.2);
+  border-radius: 8px;
+  font-size: 10px;
+  color: #FF9800;
+  line-height: 1.5;
+}

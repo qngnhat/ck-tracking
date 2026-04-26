@@ -19,8 +19,13 @@
       <span class="app-logo">📊</span>
       <span>Phân tích CP</span>
     </div>
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="analyze">Phân tích</button>
+      <button class="tab-btn" data-tab="ranking">🏆 Top picks</button>
+    </div>
   </header>
 
+  <div class="tab-content tab-analyze active">
   <div class="search-bar">
     <div class="search-input-wrap">
       <input
@@ -71,6 +76,44 @@
 
     <div id="analysis-root"></div>
   </main>
+  </div>
+
+  <!-- Ranking tab -->
+  <div class="tab-content tab-ranking">
+    <main id="ranking-container">
+      <div class="ranking-header">
+        <div>
+          <h2 class="ranking-title">Top mã DCA</h2>
+          <div class="ranking-meta" id="ranking-meta">Tải lần đầu để xem khuyến nghị</div>
+        </div>
+        <div class="ranking-actions">
+          <button class="btn-icon" id="ranking-refresh" title="Cập nhật">↻</button>
+        </div>
+      </div>
+
+      <div class="ranking-controls">
+        <span class="ctrl-label">Top:</span>
+        <div class="seg-toggle" id="seg-topn">
+          <button class="seg-btn" data-n="5">5</button>
+          <button class="seg-btn active" data-n="10">10</button>
+          <button class="seg-btn" data-n="15">15</button>
+        </div>
+      </div>
+
+      <div id="ranking-content">
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">🏆</div>
+          <h2>Khuyến nghị DCA dài hạn</h2>
+          <p>Bảng xếp hạng top mã đáng cân nhắc cho tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả 55 mã trong universe.</p>
+          <button class="btn-primary" id="ranking-load-btn">Tải bảng xếp hạng</button>
+        </div>
+      </div>
+
+      <div class="ranking-disclaimer">
+        ⚠️ Khuyến nghị cập nhật mỗi 24h. Cần rebalance mỗi đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
+      </div>
+    </main>
+  </div>
 
   <!-- Bottom sheet for tooltip -->
   <div class="sheet-backdrop" id="sheet-backdrop"></div>
@@ -82,6 +125,7 @@
 
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="analysis.js"></script>
+  <script src="ranking.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

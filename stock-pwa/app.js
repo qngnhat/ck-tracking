@@ -816,6 +816,185 @@
 
   $("clear-history").addEventListener("click", clearHistory);
 
+  // ════════════════════════════════════════════════════
+  // ── TAB NAVIGATION ──
+  // ════════════════════════════════════════════════════
+  const RANKING = window.__SSI_RANKING__;
+  let currentTab = "analyze";
+
+  function switchTab(tab) {
+    if (tab === currentTab) return;
+    currentTab = tab;
+    document.querySelectorAll(".tab-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.tab === tab);
+    });
+    document.querySelectorAll(".tab-content").forEach((el) => {
+      el.classList.toggle("active", el.classList.contains("tab-" + tab));
+    });
+  }
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  // ════════════════════════════════════════════════════
+  // ── RANKING TAB ──
+  // ════════════════════════════════════════════════════
+  let rankingState = { picks: [], topN: 10, loading: false };
+
+  async function loadRanking(forceFresh = false) {
+    if (rankingState.loading) return;
+    rankingState.loading = true;
+
+    const content = $("ranking-content");
+    content.innerHTML = `
+      <div class="ranking-loading">
+        <div class="spinner"></div>
+        <div id="ranking-progress">Đang tải dữ liệu 0/55...</div>
+      </div>
+    `;
+
+    try {
+      const result = await RANKING.loadTopPicks({
+        topN: 15, // always fetch top 15, slice later by user choice
+        sectorCap: 2,
+        useCache: !forceFresh,
+        onProgress: (done, total) => {
+          const el = document.getElementById("ranking-progress");
+          if (el) el.textContent = `Đang tải ${done}/${total} mã...`;
+        },
+      });
+
+      rankingState.picks = result.picks;
+      rankingState.timestamp = result.timestamp;
+      rankingState.fromCache = result.fromCache;
+      renderRanking();
+      updateRankingMeta(result);
+    } catch (e) {
+      content.innerHTML = `<div class="error"><h3>Lỗi tải dữ liệu</h3><p>${e.message}</p><button class="btn-primary" onclick="document.getElementById('ranking-refresh').click()">Thử lại</button></div>`;
+    } finally {
+      rankingState.loading = false;
+    }
+  }
+
+  function updateRankingMeta(result) {
+    const meta = $("ranking-meta");
+    const date = new Date(result.timestamp);
+    const time = date.toLocaleString("vi-VN", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+    const cacheTxt = result.fromCache ? " (từ cache)" : "";
+    meta.textContent = `Cập nhật ${time}${cacheTxt} · ${result.eligibleCount}/${result.allCount} mã đủ điều kiện`;
+  }
+
+  function renderRanking() {
+    const content = $("ranking-content");
+    const picks = rankingState.picks.slice(0, rankingState.topN);
+
+    if (picks.length === 0) {
+      content.innerHTML = `<div class="empty-state"><p>Không có mã nào đủ điều kiện trong top hiện tại.</p></div>`;
+      return;
+    }
+
+    let html = '<div class="picks-list">';
+    picks.forEach((p, i) => {
+      const f = p.factors;
+      const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
+      const dayChangeSign = f.dayChange >= 0 ? "+" : "";
+
+      // Top contributing factors (top 3 z-scores)
+      const factorList = RANKING.FACTOR_NAMES
+        .map((fn) => ({ name: fn, z: f[fn + "_z"] }))
+        .filter((x) => x.z !== null && !isNaN(x.z))
+        .sort((a, b) => b.z - a.z);
+
+      const topFactors = factorList.slice(0, 3).map((x) => factorTag(x.name, x.z, true)).join("");
+      const weakFactors = factorList.slice(-2).filter((x) => x.z < 0)
+        .map((x) => factorTag(x.name, x.z, false)).join("");
+
+      html += `
+        <div class="pick-card" data-symbol="${p.symbol}">
+          <div class="pick-rank">#${i + 1}</div>
+          <div class="pick-main">
+            <div class="pick-row1">
+              <span class="pick-symbol">${p.symbol}</span>
+              <span class="pick-sector">${sectorLabel(p.sector)}</span>
+              <span class="pick-score">${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</span>
+            </div>
+            <div class="pick-row2">
+              <span class="pick-price">${fp(f.currentPrice)}</span>
+              <span class="pct ${dayChangeClass}">${dayChangeSign}${(f.dayChange * 100).toFixed(2)}%</span>
+            </div>
+            <div class="pick-tags">${topFactors}${weakFactors}</div>
+          </div>
+          <div class="pick-cta">›</div>
+        </div>
+      `;
+    });
+    html += "</div>";
+
+    // Allocation hint
+    const monthlyPerStock = Math.round(10000000 / rankingState.topN / 1000) * 1000;
+    html += `
+      <div class="allocation-hint">
+        💡 Với 10tr/tháng chia ${rankingState.topN} mã: <b>~${(monthlyPerStock / 1000).toLocaleString()}k/mã/tháng</b>
+      </div>
+    `;
+
+    content.innerHTML = html;
+
+    // Tap pick → switch to analyze tab + load
+    content.querySelectorAll(".pick-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const sym = card.dataset.symbol;
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        analyzeSymbol(sym);
+      });
+    });
+  }
+
+  function factorTag(name, z, isStrong) {
+    const labels = {
+      ma200Quality: "Trên MA200",
+      lowDrawdown: "Ít DD",
+      momentum6m: "Đà 6t",
+      trendConsistency: "Trend đều",
+      liquidity: "Thanh khoản",
+      foreignFlow60d: "NN gom",
+    };
+    const cls = isStrong ? "tag-strong" : "tag-weak";
+    return `<span class="factor-tag ${cls}">${labels[name] || name}</span>`;
+  }
+
+  function sectorLabel(sector) {
+    const map = {
+      bank: "Ngân hàng", realestate: "BĐS", retail: "Bán lẻ",
+      consumer: "Tiêu dùng", industrial: "Công nghiệp", energy: "Năng lượng",
+      utility: "Tiện ích", tech: "Công nghệ", broker: "Chứng khoán",
+      pharma: "Dược", other: "Khác",
+    };
+    return map[sector] || sector;
+  }
+
+  // Top-N selector
+  document.querySelectorAll("#seg-topn .seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      rankingState.topN = parseInt(btn.dataset.n, 10);
+      if (rankingState.picks.length > 0) renderRanking();
+    });
+  });
+
+  $("ranking-refresh").addEventListener("click", () => {
+    RANKING.clearCache();
+    loadRanking(true);
+  });
+
+  $("ranking-load-btn").addEventListener("click", () => loadRanking());
+
   // ── Init ──
   renderHistory();
   ensureStockList();
