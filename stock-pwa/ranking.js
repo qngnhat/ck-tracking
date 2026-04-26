@@ -513,8 +513,12 @@ window.__SSI_RANKING__ = (function () {
   }
 
   // ── T+ ranking main ───────────────────────────────
-  // Min score threshold to be included (filter low-quality)
-  const TPLUS_MIN_SCORE = 2.0;
+  // Min score threshold (validated by Phase 4b backtest):
+  //   - 2.0: no edge vs random (avg +1.10% / Sharpe 0.11)
+  //   - 4.0: real edge (avg +2.66% / Sharpe 0.25, win rate 58%)
+  //   - 5.0: best (avg +3.99% / Sharpe 0.36, win rate 63%) but rare
+  // Use 4.0 as production threshold for balance of signal quality + frequency.
+  const TPLUS_MIN_SCORE = 4.0;
 
   async function loadTopPicksTPlus(opts = {}) {
     const {
