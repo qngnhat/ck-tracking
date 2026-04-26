@@ -133,6 +133,10 @@
   let chartInstance = null;
   let refreshTimer = null;
   let lastUpdated = null;
+  // Context for analysis: 'dca' | 'tplus' | null (regular search)
+  let analyzeContext = null;
+  let analyzeContextPick = null;
+  let analyzeContextRank = null;
 
   const RESOLUTIONS = {
     "W": { label: "Tuần", days: 1820 },
@@ -454,7 +458,15 @@
       ? row("Vùng mua tốt", `${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}`, null, "color:#4CAF50;font-weight:600")
       : "";
 
-    root.innerHTML = `
+    // Context card (DCA/T+ pick explanation)
+    let contextHtml = "";
+    if (analyzeContext === "dca" && analyzeContextPick) {
+      contextHtml = renderDcaContextCard(analyzeContextPick, analyzeContextRank, r);
+    } else if (analyzeContext === "tplus" && analyzeContextPick) {
+      contextHtml = renderTplusContextCard(analyzeContextPick, analyzeContextRank, r);
+    }
+
+    root.innerHTML = contextHtml + `
       <!-- Header card -->
       <div class="an-card">
         <div class="an-head">
@@ -620,6 +632,133 @@
     });
   }
 
+  function clearAnalyzeContext() {
+    analyzeContext = null;
+    analyzeContextPick = null;
+    analyzeContextRank = null;
+  }
+
+  // ── Context cards (when navigating from DCA/T+ ranking) ──
+  function renderDcaContextCard(pick, rank, r) {
+    const f = pick.factors || {};
+    const bullets = [];
+
+    if (f.ma200Quality != null) {
+      const pct = (f.ma200Quality * 100).toFixed(0);
+      const quality = f.ma200Quality >= 0.8 ? "rất ổn định" : f.ma200Quality >= 0.5 ? "ổn định" : "đang yếu";
+      bullets.push(`Trên MA200 <b>${pct}%</b> thời gian (252 phiên) — trend dài hạn ${quality}`);
+    }
+    if (f.lowDrawdown != null) {
+      const dd = (f.lowDrawdown * 100).toFixed(1);
+      const safety = Math.abs(f.lowDrawdown) < 0.2 ? "rất an toàn" : Math.abs(f.lowDrawdown) < 0.35 ? "vừa phải" : "có biến động";
+      bullets.push(`Max drawdown 252 ngày: <b>${dd}%</b> — ${safety}`);
+    }
+    if (f.momentum6m != null) {
+      const m = (f.momentum6m * 100).toFixed(1);
+      const sign = f.momentum6m >= 0 ? "+" : "";
+      const desc = f.momentum6m > 0.2 ? "đà tăng tốt" : f.momentum6m > 0 ? "đà tăng nhẹ" : "đi ngang/giảm";
+      bullets.push(`Hiệu suất 6 tháng: <b>${sign}${m}%</b> — ${desc}`);
+    }
+    if (f.trendConsistency != null) {
+      bullets.push(`Trend Sharpe (252d): <b>${f.trendConsistency.toFixed(3)}</b> — đo độ đều đặn của xu hướng`);
+    }
+    if (f.avgTurnover != null) {
+      const billions = (f.avgTurnover / 1e9).toFixed(1);
+      bullets.push(`Thanh khoản TB 20 phiên: <b>${billions} tỷ/ngày</b>`);
+    }
+    if (f.foreignFlow60d != null && Math.abs(f.foreignFlow60d) > 0.1) {
+      const positive = f.foreignFlow60d > 0;
+      bullets.push(
+        positive
+          ? `Khối ngoại đang <span style="color:#4CAF50"><b>gom ròng</b></span> trong 60 phiên — smart money tích lũy`
+          : `Khối ngoại đang <span style="color:#ff4444"><b>xả ròng</b></span> trong 60 phiên — cảnh báo`
+      );
+    }
+
+    const rankTxt = rank ? `Pick #${rank}` : "";
+
+    return `
+      <div class="an-card context-card context-dca">
+        <div class="context-header">
+          <span class="context-icon">📈</span>
+          <div>
+            <div class="context-title">DCA ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</div>
+            <div class="context-subtitle">Khuyến nghị tích lũy dài hạn</div>
+          </div>
+        </div>
+        <div class="context-section">
+          <div class="context-section-title">Tại sao mã này hợp DCA</div>
+          <ul class="context-bullets">${bullets.map((b) => `<li>${b}</li>`).join("")}</ul>
+        </div>
+        <div class="context-section">
+          <div class="context-section-title">Đề xuất hành động</div>
+          <ul class="context-bullets">
+            <li>Mua đều với các mã top khác — không tập trung 1 mã</li>
+            <li>Rebalance đầu tháng: bán nếu rớt khỏi top, mua mã mới vào</li>
+            <li>Sector cap đã áp dụng (max 2 mã/ngành) → đã diversify</li>
+            <li>Không cần stop loss chặt — DCA giữ lâu, chấp nhận drawdown ngắn hạn</li>
+          </ul>
+        </div>
+        <div class="context-disclaimer">
+          📊 Backtest 8 năm: chiến lược DCA Top 15 đạt CAGR <b>17.8%</b> (vs Equal-Weight 55: 16.4%, VN-Index: 7.9%).
+        </div>
+      </div>
+    `;
+  }
+
+  function renderTplusContextCard(pick, rank, r) {
+    const reasons = pick.reasons || [];
+    const f = pick.factors || {};
+    const cur = f.currentPrice || r.current;
+
+    // Stop loss: max(2*ATR below, -8%)
+    const slFromAtr = r.atr ? cur - 2 * r.atr : null;
+    const slFromPct = cur * 0.92;
+    const slFinal = slFromAtr ? Math.max(slFromAtr, slFromPct) : slFromPct;
+    const slPct = ((slFinal - cur) / cur) * 100;
+
+    const targets = [];
+    if (r.ma20 && r.ma20 > cur) {
+      const upPct = ((r.ma20 - cur) / cur) * 100;
+      targets.push(`Mục tiêu 1: <b>${fp(r.ma20)}</b> (hồi về MA20, +${upPct.toFixed(1)}%)`);
+    }
+    if (r.resistance && r.resistance > cur) {
+      const upPct = ((r.resistance - cur) / cur) * 100;
+      targets.push(`Mục tiêu 2: <b>${fp(r.resistance)}</b> (kháng cự gần, +${upPct.toFixed(1)}%)`);
+    }
+
+    const rankTxt = rank ? `Pick #${rank}` : "";
+
+    return `
+      <div class="an-card context-card context-tplus">
+        <div class="context-header">
+          <span class="context-icon">⚡</span>
+          <div>
+            <div class="context-title">T+ ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</div>
+            <div class="context-subtitle">Cơ hội mean-reversion ngắn hạn</div>
+          </div>
+        </div>
+        <div class="context-section">
+          <div class="context-section-title">Tín hiệu đang fire</div>
+          <ul class="context-bullets">${reasons.map((rr) => `<li><b>${rr}</b></li>`).join("")}</ul>
+        </div>
+        <div class="context-section">
+          <div class="context-section-title">Plan giao dịch</div>
+          <ul class="context-bullets">
+            <li>Vùng vào: <b>~${fp(cur)}</b> (giá hiện tại)</li>
+            <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
+            ${targets.map((t) => `<li>${t}</li>`).join("")}
+            <li>Hold: <b>15-30 phiên</b></li>
+            <li>Exit khi: RSI hồi &gt;50 HOẶC đạt mục tiêu HOẶC dính SL</li>
+          </ul>
+        </div>
+        <div class="context-disclaimer">
+          ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest test set 2023-2026: setup score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — nhưng 4/10 lệnh thua, cần tuân thủ stop loss.
+        </div>
+      </div>
+    `;
+  }
+
   function row(label, value, tip, valueStyle) {
     if (tip) {
       const safeTip = tip.replace(/"/g, "&quot;");
@@ -773,10 +912,12 @@
         input.value = code;
         hideSuggestions();
         input.blur();
+        clearAnalyzeContext();
         analyzeSymbol(code);
       } else {
         input.blur();
         hideSuggestions();
+        clearAnalyzeContext();
         analyzeSymbol(input.value);
       }
     } else if (e.key === "Escape") {
@@ -791,6 +932,7 @@
     input.value = code;
     hideSuggestions();
     input.blur();
+    clearAnalyzeContext();
     analyzeSymbol(code);
   });
 
@@ -801,6 +943,7 @@
 
   $("search-btn").addEventListener("click", () => {
     hideSuggestions();
+    clearAnalyzeContext();
     analyzeSymbol(input.value);
   });
 
@@ -810,6 +953,7 @@
     if (chip && chip.dataset.symbol) {
       input.value = chip.dataset.symbol;
       hideSuggestions();
+      clearAnalyzeContext();
       analyzeSymbol(chip.dataset.symbol);
     }
   });
@@ -998,7 +1142,7 @@
       }
 
       html += `
-        <div class="pick-card" data-symbol="${p.symbol}">
+        <div class="pick-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
           <div class="pick-rank">#${i + 1}</div>
           <div class="pick-main">
             <div class="pick-row1">
@@ -1038,6 +1182,11 @@
     content.querySelectorAll(".pick-card").forEach((card) => {
       card.addEventListener("click", () => {
         const sym = card.dataset.symbol;
+        const rank = parseInt(card.dataset.rank, 10);
+        const pick = picks.find((p) => p.symbol === sym);
+        analyzeContext = mode;
+        analyzeContextPick = pick;
+        analyzeContextRank = rank;
         switchTab("analyze");
         const input = document.getElementById("symbol-input");
         if (input) input.value = sym;
