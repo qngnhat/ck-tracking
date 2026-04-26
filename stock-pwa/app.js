@@ -468,7 +468,7 @@
 
     root.innerHTML = contextHtml + `
       <!-- Header card -->
-      <div class="an-card">
+      <div class="an-card full-width">
         <div class="an-head">
           <div class="an-symbol">${r.symbol}</div>
           <div class="an-price-row">
@@ -485,7 +485,7 @@
       </div>
 
       <!-- Chart -->
-      <div class="an-card chart-card">
+      <div class="an-card chart-card full-width">
         <div class="chart-head">
           <div class="an-title" style="margin-bottom:0">Biểu đồ giá</div>
           <div class="chart-range" id="chart-range">
@@ -607,12 +607,12 @@
       </div>
 
       <!-- Text analysis -->
-      <div class="an-card">
+      <div class="an-card full-width">
         <div class="an-title">Phân tích chi tiết</div>
         <div class="text-analysis">${r.textAnalysis}</div>
       </div>
 
-      <div class="disclaimer">
+      <div class="disclaimer full-width">
         ⚠️ Phân tích kỹ thuật chỉ là xác suất dựa trên hành vi giá lịch sử — không phải dự đoán chắc chắn. Quyết định đầu tư là trách nhiệm của bạn.
       </div>
     `;
