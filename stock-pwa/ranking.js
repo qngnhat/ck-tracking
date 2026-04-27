@@ -91,61 +91,58 @@ window.__SSI_RANKING__ = (function () {
     return SECTOR_MAP[code] || "other";
   }
 
-  // ── Expanded T+ Universe (top by market cap) ────────
-  // T+ scan rộng hơn để tăng cơ hội setup. DCA giữ 58 mã curated
-  // (chỉ blue-chip cho long-term hold), T+ scan top ~120 mã.
-  // Cache 7 ngày — market cap không đổi nhanh.
-  const TPLUS_UNIVERSE_KEY = "tplus_universe_v1";
+  // ── Full T+ Universe (HOSE + HNX listed STOCK) ─────
+  // T+ quét toàn bộ HOSE + HNX (skip UPCOM penny). ~700 mã.
+  // Hard filters trong T+ score (illiquid < 5 tỷ/ngày, crash > 50%/6m)
+  // tự loại noise. Cache 7 ngày — list mã ít đổi.
+  const TPLUS_UNIVERSE_KEY = "tplus_universe_full_v2";
   const TPLUS_UNIVERSE_TTL_MS = 7 * 24 * 3600 * 1000;
 
-  async function fetchTopMcapUniverse(limit = 120) {
+  // Valid ticker pattern: 3-4 uppercase letters
+  const VALID_TICKER = /^[A-Z]{3,4}$/;
+
+  async function fetchFullUniverse() {
     try {
       const cached = JSON.parse(localStorage.getItem(TPLUS_UNIVERSE_KEY) || "null");
       if (cached && Date.now() - cached.timestamp < TPLUS_UNIVERSE_TTL_MS &&
-          cached.data && cached.data.length >= limit) {
-        return cached.data.slice(0, limit);
+          cached.data && cached.data.length > 100) {
+        return cached.data;
       }
     } catch {}
 
     try {
-      const fromDate = new Date(Date.now() - 5 * 24 * 3600 * 1000)
-        .toISOString().split("T")[0];
-      const url =
-        `https://api-finfo.vndirect.com.vn/v4/ratios?` +
-        `q=ratioCode:MARKETCAP~group:STOCK~reportDate:gte:${fromDate}` +
-        `&size=500&sort=value:desc`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const json = await res.json();
-      const data = json.data || [];
-      if (data.length === 0) return null;
+      // Fetch HOSE + HNX in parallel (skip UPCOM — too many penny)
+      const [hose, hnx] = await Promise.all([
+        fetch("https://api-finfo.vndirect.com.vn/v4/stocks?q=floor:HOSE~status:LISTED~type:STOCK&size=2000")
+          .then((r) => r.ok ? r.json() : { data: [] }),
+        fetch("https://api-finfo.vndirect.com.vn/v4/stocks?q=floor:HNX~status:LISTED~type:STOCK&size=2000")
+          .then((r) => r.ok ? r.json() : { data: [] }),
+      ]);
+      const all = [...(hose.data || []), ...(hnx.data || [])];
 
-      // Latest reportDate per code (in case multiple dates returned)
-      const latestPerCode = {};
-      for (const item of data) {
-        const cur = latestPerCode[item.code];
-        if (!cur || item.reportDate > cur.reportDate) {
-          latestPerCode[item.code] = item;
-        }
-      }
-      const sorted = Object.values(latestPerCode).sort(
-        (a, b) => (b.value || 0) - (a.value || 0)
-      );
+      const result = all
+        .filter((s) => VALID_TICKER.test(s.code || ""))
+        .map((s) => ({
+          code: s.code,
+          sector: getSector(s.code),
+          floor: s.floor,
+        }));
 
-      const result = sorted.slice(0, limit).map((item) => ({
-        code: item.code,
-        sector: getSector(item.code),
-        marketCap: item.value,
-      }));
+      if (result.length < 100) return null;
 
-      localStorage.setItem(TPLUS_UNIVERSE_KEY, JSON.stringify({
-        timestamp: Date.now(), data: result,
-      }));
+      try {
+        localStorage.setItem(TPLUS_UNIVERSE_KEY, JSON.stringify({
+          timestamp: Date.now(), data: result,
+        }));
+      } catch {}
       return result;
     } catch {
       return null;
     }
   }
+
+  // Set of DCA universe codes for quick membership check
+  const DCA_UNIVERSE_SET = new Set(UNIVERSE.map((u) => u.code));
 
   const FACTOR_NAMES = [
     "ma200Quality", "lowDrawdown", "momentum6m",
@@ -761,25 +758,28 @@ window.__SSI_RANKING__ = (function () {
     }
 
     const startTime = Date.now();
-    // T+ uses expanded universe (top ~120 by market cap) for more opportunities.
-    // Falls back to curated UNIVERSE if API fails.
-    let universeList = await fetchTopMcapUniverse(120);
-    if (!universeList || universeList.length < 50) {
+    // T+ quét full HOSE + HNX (~700 mã). Fallback về DCA universe nếu API fail.
+    let universeList = await fetchFullUniverse();
+    if (!universeList || universeList.length < 100) {
       universeList = UNIVERSE;
     }
     const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector }));
 
-    const batchSize = 10;
+    // Skip foreign flow fetch cho mã ngoài DCA universe để tăng tốc 2x.
+    // NN reversal signal worth +1.5/13 max — drop OK cho mã extended.
+    // Batch 20 parallel cho fast scan.
+    const batchSize = 20;
     let done = 0;
     for (let i = 0; i < stocks.length; i += batchSize) {
       const batch = stocks.slice(i, i + batchSize);
       await Promise.all(
         batch.map(async (stock) => {
           try {
-            const [ohlcv, foreign] = await Promise.all([
-              ANALYSIS.fetchHistory(stock.symbol, "D", 200),
-              fetchForeignDaily(stock.symbol, 10),
-            ]);
+            const isDcaUniverse = DCA_UNIVERSE_SET.has(stock.symbol);
+            const ohlcv = await ANALYSIS.fetchHistory(stock.symbol, "D", 200);
+            const foreign = isDcaUniverse
+              ? await fetchForeignDaily(stock.symbol, 10).catch(() => null)
+              : null;
             stock.tplusFactors = computeTPlusFactors(ohlcv, foreign);
           } catch (e) {
             stock.error = e.message;
