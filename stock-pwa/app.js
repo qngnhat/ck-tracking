@@ -1190,16 +1190,85 @@
       }
     });
 
-    // Listen auth state
-    AUTH.onAuthChange((event, session) => {
+    // Listen auth state — handle login/logout sync
+    AUTH.onAuthChange(async (event, session) => {
       console.log("[auth] state change:", event, session?.user?.email);
       renderAuthUI();
+      if (event === "SIGNED_IN" && session?.user) {
+        await onUserLoggedIn(session.user);
+      } else if (event === "SIGNED_OUT") {
+        onUserLoggedOut();
+      }
     });
 
-    // Initialize
-    AUTH.init().then(() => renderAuthUI());
+    // Initialize — also handle case khi đã login (refresh page)
+    AUTH.init().then(async (session) => {
+      renderAuthUI();
+      if (session?.user) {
+        await onUserLoggedIn(session.user, /*silent*/true);
+      }
+    });
   } else {
     renderAuthUI();
+  }
+
+  const LAST_USER_KEY = "ssi_last_user_id";
+
+  async function onUserLoggedIn(user, silent = false) {
+    const userId = user.id;
+    const lastUser = localStorage.getItem(LAST_USER_KEY);
+
+    if (lastUser !== userId) {
+      // Different user → clear local user data trước khi pull
+      console.log("[auth] new user, clearing local data");
+      localStorage.removeItem("user_watchlist_v1");
+      localStorage.removeItem("watchlist_data_v1");
+      localStorage.removeItem("alerts_log_v1");
+      localStorage.removeItem("alerts_state_v1");
+      localStorage.removeItem("paper_tracker_v1");
+    }
+    localStorage.setItem(LAST_USER_KEY, userId);
+
+    // Phase 1: pull DB → local
+    await Promise.all([
+      RANKING.syncWatchlistFromDB(),
+      RANKING.syncAlertsFromDB(),
+      RANKING.syncAlertStateFromDB(),
+      RANKING.syncTrackerFromDB(),
+    ]);
+
+    // Phase 2: migrate any local-only data → DB (case: user was guest with data)
+    // Note: chỉ migrate nếu DB còn empty cho từng table
+    // (đơn giản: just attempt migrate, DB unique constraints prevent dupes)
+    // We use a flag to migrate ONCE per user
+    const MIGRATED_KEY = `ssi_migrated_${userId}`;
+    if (!localStorage.getItem(MIGRATED_KEY)) {
+      console.log("[auth] first login for this user, migrating local → DB");
+      await Promise.all([
+        RANKING.migrateWatchlistToDB(),
+        RANKING.migrateAlertsToDB(),
+        RANKING.migrateAlertStateToDB(),
+        RANKING.migrateTrackerToDB(),
+      ]);
+      // Re-sync after migration để pickup migrated data với DB-assigned IDs
+      await Promise.all([
+        RANKING.syncWatchlistFromDB(),
+        RANKING.syncAlertsFromDB(),
+        RANKING.syncTrackerFromDB(),
+      ]);
+      localStorage.setItem(MIGRATED_KEY, "1");
+    }
+
+    // Re-render UI
+    updateBellBadge();
+    if (currentTab === "home") renderHome();
+    if (currentTab === "ranking") renderTrackerSection();
+  }
+
+  function onUserLoggedOut() {
+    // Giữ local data — guest mode tiếp tục dùng. Re-render để clear UI state.
+    updateBellBadge();
+    if (currentTab === "home") renderHome();
   }
 
   // ════════════════════════════════════════════════════

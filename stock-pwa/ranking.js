@@ -870,33 +870,108 @@ window.__SSI_RANKING__ = (function () {
 
   function takeSnapshot(mode, picks, regime) {
     const tracker = loadTracker();
-    const entry = {
-      date: new Date().toISOString(),
-      regime: regime ? regime.regime : null,
-      picks: picks.map((p) => ({
-        symbol: p.symbol,
-        sector: p.sector,
-        score: p.score,
-        entryPrice: p.factors ? p.factors.currentPrice : null,
-        reasons: p.reasons || null,
-      })),
-    };
+    const dateIso = new Date().toISOString();
+    const regimeStr = regime ? regime.regime : null;
+    const picksData = picks.map((p) => ({
+      symbol: p.symbol,
+      sector: p.sector,
+      score: p.score,
+      entryPrice: p.factors ? p.factors.currentPrice : null,
+      reasons: p.reasons || null,
+    }));
+    const entry = { date: dateIso, regime: regimeStr, picks: picksData };
     tracker[mode].push(entry);
     const max = mode === "dca" ? MAX_SNAPSHOTS_DCA : MAX_SNAPSHOTS_TPLUS;
     if (tracker[mode].length > max) {
       tracker[mode] = tracker[mode].slice(-max);
     }
     saveTracker(tracker);
+    // DB write-through
+    if (_isOnline()) {
+      _AUTH().dbInsert("tracker_snapshots", {
+        mode,
+        snapshot_date: dateIso,
+        regime: regimeStr,
+        picks: picksData,
+      }).catch((e) => console.warn("[tracker] DB insert:", e));
+    }
   }
 
-  function clearTracker() {
+  async function clearTracker() {
     localStorage.removeItem(TRACKER_KEY);
+    if (_isOnline()) {
+      const c = _AUTH();
+      try {
+        const all = await c.dbSelect("tracker_snapshots", { columns: "id" });
+        if (all && all.length > 0) {
+          for (const row of all) {
+            await c.dbDelete("tracker_snapshots", { eq: { id: row.id } }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn("[tracker] DB clear:", e);
+      }
+    }
+  }
+
+  /** Pull tracker snapshots từ DB → replace local. */
+  async function syncTrackerFromDB() {
+    if (!_isOnline()) return;
+    const data = await _AUTH().dbSelect("tracker_snapshots", {
+      order: { column: "snapshot_date", ascending: true },
+    });
+    if (data) {
+      const tracker = { dca: [], tplus: [] };
+      for (const row of data) {
+        const entry = {
+          date: row.snapshot_date,
+          regime: row.regime,
+          picks: row.picks || [],
+        };
+        if (row.mode === "dca") tracker.dca.push(entry);
+        else if (row.mode === "tplus") tracker.tplus.push(entry);
+      }
+      // Trim to max
+      tracker.dca = tracker.dca.slice(-MAX_SNAPSHOTS_DCA);
+      tracker.tplus = tracker.tplus.slice(-MAX_SNAPSHOTS_TPLUS);
+      saveTracker(tracker);
+    }
+  }
+
+  async function migrateTrackerToDB() {
+    if (!_isOnline()) return;
+    const tracker = loadTracker();
+    const all = [];
+    for (const m of ["dca", "tplus"]) {
+      for (const e of tracker[m] || []) {
+        all.push({
+          mode: m,
+          snapshot_date: e.date,
+          regime: e.regime,
+          picks: e.picks || [],
+        });
+      }
+    }
+    if (all.length === 0) return;
+    // Insert in batches
+    const batchSize = 20;
+    for (let i = 0; i < all.length; i += batchSize) {
+      const batch = all.slice(i, i + batchSize);
+      await _AUTH().dbInsert("tracker_snapshots", batch).catch(() => {});
+    }
   }
 
   // ── Watchlist (mã user theo dõi) ────────────────────
+  // Pattern: localStorage là source of truth cho sync reads,
+  // DB sync trong background khi user logged in.
   const WATCHLIST_KEY = "user_watchlist_v1";
   const WATCHLIST_DATA_KEY = "watchlist_data_v1";
-  const WATCHLIST_DATA_TTL = 30 * 60 * 1000; // 30 phút
+  const WATCHLIST_DATA_TTL = 30 * 60 * 1000;
+
+  function _AUTH() { return window.__SSI_AUTH__; }
+  function _isOnline() {
+    return _AUTH() && _AUTH().isLoggedIn();
+  }
 
   function loadWatchlist() {
     try {
@@ -928,8 +1003,12 @@ window.__SSI_RANKING__ = (function () {
     if (list.some((w) => w.symbol === sym)) return false;
     list.push({ symbol: sym, addedAt: Date.now() });
     saveWatchlist(list);
-    // Invalidate data cache (force re-fetch next time)
     try { localStorage.removeItem(WATCHLIST_DATA_KEY); } catch {}
+    // DB write-through (fire-and-forget)
+    if (_isOnline()) {
+      _AUTH().dbInsert("watchlist", { symbol: sym })
+        .catch((e) => console.warn("[watchlist] DB insert:", e));
+    }
     return true;
   }
 
@@ -939,6 +1018,11 @@ window.__SSI_RANKING__ = (function () {
     const list = loadWatchlist().filter((w) => w.symbol !== sym);
     saveWatchlist(list);
     try { localStorage.removeItem(WATCHLIST_DATA_KEY); } catch {}
+    // DB delete (fire-and-forget)
+    if (_isOnline()) {
+      _AUTH().dbDelete("watchlist", { eq: { symbol: sym } })
+        .catch((e) => console.warn("[watchlist] DB delete:", e));
+    }
     return true;
   }
 
@@ -949,6 +1033,32 @@ window.__SSI_RANKING__ = (function () {
     } else {
       addToWatchlist(symbol);
       return true;
+    }
+  }
+
+  /** Pull watchlist từ DB → replace local cache. */
+  async function syncWatchlistFromDB() {
+    if (!_isOnline()) return;
+    const data = await _AUTH().dbSelect("watchlist", {
+      order: { column: "added_at", ascending: false },
+    });
+    if (data) {
+      const arr = data.map((d) => ({
+        symbol: d.symbol,
+        addedAt: new Date(d.added_at).getTime(),
+      }));
+      saveWatchlist(arr);
+    }
+  }
+
+  /** Push local watchlist → DB (migration). Skip duplicates. */
+  async function migrateWatchlistToDB() {
+    if (!_isOnline()) return;
+    const local = loadWatchlist();
+    if (local.length === 0) return;
+    for (const item of local) {
+      await _AUTH().dbInsert("watchlist", { symbol: item.symbol })
+        .catch(() => {}); // ignore duplicates (unique constraint)
     }
   }
 
@@ -1053,19 +1163,116 @@ window.__SSI_RANKING__ = (function () {
     const arr = loadAlerts();
     arr.push(alert);
     saveAlerts(arr);
+    // DB insert (fire-and-forget)
+    if (_isOnline()) {
+      _AUTH().dbInsert("alerts", {
+        symbol: alert.symbol,
+        type: alert.type,
+        title: alert.title,
+        message: alert.message,
+        color: alert.color,
+        seen: !!alert.seen,
+        created_at: new Date(alert.timestamp).toISOString(),
+      }).catch((e) => console.warn("[alerts] DB insert:", e));
+    }
   }
   function unreadAlertCount() {
     return loadAlerts().filter((a) => !a.seen).length;
   }
   function markAllAlertsSeen() {
     const arr = loadAlerts();
+    const wasUnread = arr.filter((a) => !a.seen);
     arr.forEach((a) => { a.seen = true; });
     saveAlerts(arr);
+    // DB: mark all unread → seen
+    if (_isOnline() && wasUnread.length > 0) {
+      _AUTH().dbUpdate("alerts", { seen: true }, { eq: { seen: false } })
+        .catch((e) => console.warn("[alerts] DB mark seen:", e));
+    }
   }
-  function clearAlerts() {
+  async function clearAlerts() {
     try {
       localStorage.removeItem(ALERTS_LOG_KEY);
     } catch {}
+    if (_isOnline()) {
+      // Supabase JS SDK requires filter cho delete. Dùng id != 0-uuid để match all.
+      const c = _AUTH();
+      try {
+        const all = await c.dbSelect("alerts", { columns: "id" });
+        if (all && all.length > 0) {
+          for (const row of all) {
+            await c.dbDelete("alerts", { eq: { id: row.id } }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn("[alerts] DB clear:", e);
+      }
+    }
+  }
+  // alert_state DB sync
+  async function syncAlertStateFromDB() {
+    if (!_isOnline()) return;
+    const data = await _AUTH().dbSelect("alert_state");
+    if (data) {
+      const state = {};
+      for (const row of data) {
+        state[row.symbol] = {
+          score: row.score,
+          rsi: row.rsi,
+          dayChange: row.day_change,
+          lastSeenAt: new Date(row.last_seen_at).getTime(),
+        };
+      }
+      saveAlertsState(state);
+    }
+  }
+  async function syncAlertsFromDB() {
+    if (!_isOnline()) return;
+    const data = await _AUTH().dbSelect("alerts", {
+      order: { column: "created_at", ascending: true },
+      limit: MAX_ALERTS,
+    });
+    if (data) {
+      const arr = data.map((r) => ({
+        timestamp: new Date(r.created_at).getTime(),
+        symbol: r.symbol,
+        type: r.type,
+        title: r.title,
+        message: r.message,
+        color: r.color,
+        seen: !!r.seen,
+      }));
+      saveAlerts(arr);
+    }
+  }
+  async function migrateAlertsToDB() {
+    if (!_isOnline()) return;
+    const local = loadAlerts();
+    for (const a of local) {
+      await _AUTH().dbInsert("alerts", {
+        symbol: a.symbol,
+        type: a.type,
+        title: a.title,
+        message: a.message,
+        color: a.color,
+        seen: !!a.seen,
+        created_at: new Date(a.timestamp).toISOString(),
+      }).catch(() => {});
+    }
+  }
+  async function migrateAlertStateToDB() {
+    if (!_isOnline()) return;
+    const state = loadAlertsState();
+    const rows = Object.entries(state).map(([symbol, s]) => ({
+      symbol,
+      score: s.score,
+      rsi: s.rsi,
+      day_change: s.dayChange,
+      last_seen_at: new Date(s.lastSeenAt || Date.now()).toISOString(),
+    }));
+    if (rows.length === 0) return;
+    await _AUTH().dbUpsert("alert_state", rows, { onConflict: "user_id,symbol" })
+      .catch((e) => console.warn("[alert_state] migrate:", e));
   }
 
   /**
@@ -1140,10 +1347,40 @@ window.__SSI_RANKING__ = (function () {
 
     saveAlertsState(state);
 
-    // Save new alerts to log
+    // Save new alerts to log (also writes through to DB)
     if (newAlerts.length > 0) {
-      const log = loadAlerts();
-      saveAlerts(log.concat(newAlerts));
+      // Use pushAlert one-by-one to trigger DB writes
+      for (const a of newAlerts) {
+        const log = loadAlerts();
+        log.push(a);
+        saveAlerts(log);
+        if (_isOnline()) {
+          _AUTH().dbInsert("alerts", {
+            symbol: a.symbol,
+            type: a.type,
+            title: a.title,
+            message: a.message,
+            color: a.color,
+            seen: false,
+            created_at: new Date(a.timestamp).toISOString(),
+          }).catch((e) => console.warn("[alerts] DB insert:", e));
+        }
+      }
+    }
+
+    // Persist alert_state to DB (upsert affected symbols)
+    if (_isOnline() && watchlistData.length > 0) {
+      const rows = watchlistData.filter((d) => !d.error).map((d) => ({
+        symbol: d.symbol,
+        score: d.score,
+        rsi: d.rsi,
+        day_change: d.dayChange,
+        last_seen_at: new Date(now).toISOString(),
+      }));
+      if (rows.length > 0) {
+        _AUTH().dbUpsert("alert_state", rows, { onConflict: "user_id,symbol" })
+          .catch((e) => console.warn("[alert_state] DB upsert:", e));
+      }
     }
     return newAlerts;
   }
@@ -1194,5 +1431,14 @@ window.__SSI_RANKING__ = (function () {
     unreadAlertCount,
     markAllAlertsSeen,
     clearAlerts,
+    // DB sync helpers (called on login/logout)
+    syncWatchlistFromDB,
+    syncAlertsFromDB,
+    syncAlertStateFromDB,
+    syncTrackerFromDB,
+    migrateWatchlistToDB,
+    migrateAlertsToDB,
+    migrateAlertStateToDB,
+    migrateTrackerToDB,
   };
 })();
