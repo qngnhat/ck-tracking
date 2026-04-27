@@ -2316,18 +2316,17 @@
   let dcaTopSymbols = new Set();
 
   function fmtMoney(vnd) {
-    if (vnd === null || vnd === undefined || isNaN(vnd)) return "0";
+    if (vnd === null || vnd === undefined || isNaN(vnd)) return "0đ";
+    const sign = vnd < 0 ? "-" : "";
     const abs = Math.abs(vnd);
-    // ≥ 1 tỷ: show "X,YYY tỷ" (vi-VN locale: "," = decimal sep)
-    if (abs >= 1e9) {
-      return (vnd / 1e9).toLocaleString("vi-VN", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 3,
-      }) + " tỷ";
-    }
-    // < 1 tỷ: show kVND with full precision (no rounding)
-    // 4,649,000 VND → "4.649k" (vi-VN: "." = thousand sep)
-    return Math.round(vnd / 1e3).toLocaleString("vi-VN") + "k";
+    // Treat near-whole VND as whole (avoid float artifacts like 484000.0000001)
+    const rounded = Math.round(abs);
+    const isEffectivelyWhole = Math.abs(abs - rounded) < 0.001;
+    const display = isEffectivelyWhole ? rounded : abs;
+    return sign + display.toLocaleString("vi-VN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: isEffectivelyWhole ? 0 : 3,
+    }) + "đ";
   }
 
   function fmtPriceK(price) {
@@ -2394,7 +2393,7 @@
     const summary = $("tx-summary");
     if (summary) {
       summary.textContent = qty && price
-        ? `Tổng: ${fmtMoney(total)}đ`
+        ? `Tổng: ${fmtMoney(total)}`
         : "";
     }
   }
@@ -2491,6 +2490,277 @@
       await PORTFOLIO.updateCash(k * 1000); // k → VND
       closeCashModal();
       renderPortfolio();
+    });
+  }
+
+  // ── Holding detail modal (per-symbol portfolio analysis + tx history) ──
+  let hdCurrentSymbol = null;
+
+  function openHoldingDetail(symbol) {
+    hdCurrentSymbol = symbol;
+    const modal = $("hd-modal");
+    const backdrop = $("hd-modal-backdrop");
+    if (!modal || !backdrop) return;
+    bindHoldingDetailModal();
+    modal.classList.add("open");
+    backdrop.classList.add("open");
+    $("hd-modal-title").textContent = `${symbol} — phân tích danh mục`;
+    renderHoldingDetail(symbol);
+  }
+
+  function closeHoldingDetail() {
+    $("hd-modal")?.classList.remove("open");
+    $("hd-modal-backdrop")?.classList.remove("open");
+    hdCurrentSymbol = null;
+  }
+
+  function bindHoldingDetailModal() {
+    const modal = $("hd-modal");
+    if (!modal || modal.dataset.bound) return;
+    modal.dataset.bound = "1";
+    $("hd-modal-close")?.addEventListener("click", closeHoldingDetail);
+    $("hd-modal-backdrop")?.addEventListener("click", closeHoldingDetail);
+  }
+
+  // Build action plan with concrete numbers (TP zones, stop loss, sizing)
+  function buildHoldingActionPlan(holding, ana, inDcaTop) {
+    const cur = ana.current;
+    const avg = holding.avg_cost;
+    const qty = holding.qty;
+    const pnlPct = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
+    const score = ana.score ?? 0;
+    const items = [];
+
+    // 1. Cut-loss level: max(2*ATR below current, -8% from avg cost)
+    const slFromAtr = ana.atr ? cur - 2 * ana.atr : null;
+    const slFromAvg = avg * 0.92; // -8% from cost basis
+    const stopCandidates = [slFromAtr, ana.support, slFromAvg].filter((x) => x && x > 0);
+    const stopLoss = stopCandidates.length ? Math.max(...stopCandidates.filter((x) => x < cur)) : slFromAvg;
+    const stopPct = avg > 0 ? ((stopLoss - avg) / avg) * 100 : 0;
+
+    // 2. Take-profit zones (if profitable)
+    if (pnlPct > 0) {
+      const tp1 = avg * 1.10; // +10%
+      const tp2 = avg * 1.20; // +20%
+      const tp3 = ana.resistance && ana.resistance > cur ? ana.resistance : avg * 1.30;
+      items.push({
+        kind: "tp",
+        title: "🎯 Vùng chốt lời",
+        rows: [
+          [`TP1 (+10%)`, fp(tp1), cur >= tp1 ? "Đã chạm — cân nhắc bán 1/3" : `Còn ${(((tp1 - cur) / cur) * 100).toFixed(1)}%`],
+          [`TP2 (+20%)`, fp(tp2), cur >= tp2 ? "Đã chạm — cân nhắc bán 1/3" : `Còn ${(((tp2 - cur) / cur) * 100).toFixed(1)}%`],
+          [`TP3 (kháng cự)`, fp(tp3), cur >= tp3 ? "Đã chạm — cân nhắc bán phần còn lại" : `Còn ${(((tp3 - cur) / cur) * 100).toFixed(1)}%`],
+        ],
+      });
+    }
+
+    // 3. Stop loss
+    items.push({
+      kind: "sl",
+      title: "🛡️ Mức cắt lỗ đề xuất",
+      rows: [
+        [`Stop loss`, fp(stopLoss), `${stopPct.toFixed(1)}% so với cost`],
+        [`Lỗ tối đa`, fmtMoney((stopLoss - avg) * qty * 1000), `nếu ${cur > stopLoss ? "trigger" : "đã thua từ trước"}`],
+      ],
+    });
+
+    // 4. Add zone (only if score good + in DCA top + not too profitable)
+    if (score >= 4 && inDcaTop && pnlPct < 15) {
+      const buyZoneLow = ana.buyZoneLow ?? cur * 0.97;
+      const buyZoneHigh = ana.buyZoneHigh ?? cur * 1.01;
+      items.push({
+        kind: "add",
+        title: "📈 Vùng mua thêm (nếu muốn tăng tỷ trọng)",
+        rows: [
+          [`Vùng giá`, `${fp(buyZoneLow)} – ${fp(buyZoneHigh)}`, ""],
+          [`Lý do`, `Setup score ${score}, còn trong DCA top`, ""],
+        ],
+      });
+    }
+
+    return { stopLoss, items };
+  }
+
+  function renderHoldingDetail(symbol) {
+    const body = $("hd-modal-body");
+    if (!body) return;
+
+    const txs = PORTFOLIO.loadTransactions().filter((t) => t.symbol === symbol);
+    const holdings = PORTFOLIO.allHoldings().filter((h) => h.symbol === symbol);
+    const holding = holdings[0];
+    const ana = portfolioAnalysisCache[symbol];
+
+    if (!holding && txs.length === 0) {
+      body.innerHTML = `<div class="hd-section"><p>Không có giao dịch cho mã ${symbol}.</p></div>`;
+      return;
+    }
+
+    const cur = ana?.current ?? 0;
+    const avg = holding?.avg_cost ?? 0;
+    const qty = holding?.qty ?? 0;
+    const marketValue = qty * cur * 1000;
+    const costBasis = (holding?.cost_basis ?? 0) * 1000;
+    const pnl = marketValue - costBasis;
+    const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+    const pnlCls = pnl >= 0 ? "up" : "down";
+    const pnlSign = pnl >= 0 ? "+" : "";
+    const realized = (holding?.realized_pnl ?? 0) * 1000;
+
+    const inDcaTop = dcaTopSymbols.has(symbol);
+    const action = ana && holding ? PORTFOLIO.recommendAction(holding, ana, inDcaTop) : null;
+    const plan = ana && holding && qty > 0 ? buildHoldingActionPlan(holding, ana, inDcaTop) : null;
+
+    const meta = getStockMeta(symbol) || {};
+    const companyParts = [meta.name, sectorLabel(meta.sector), meta.floor].filter(Boolean);
+    const companyLine = companyParts.length
+      ? `<div class="hd-company">${escapeHtml(companyParts.join(" · "))}</div>`
+      : "";
+
+    const setupLabel = ana?.recommendation || "--";
+    const setupColor = ana?.recColor || "#888";
+
+    const positionHtml = qty > 0 ? `
+      <div class="hd-section hd-position">
+        <div class="hd-section-title">📊 Vị thế hiện tại</div>
+        <div class="hd-pos-grid">
+          <div><span class="hd-lbl">Khối lượng</span><span class="hd-val">${qty.toLocaleString("vi-VN")} cp</span></div>
+          <div><span class="hd-lbl">Giá vốn TB</span><span class="hd-val">${fp(avg)}</span></div>
+          <div><span class="hd-lbl">Giá hiện tại</span><span class="hd-val">${fp(cur)}</span></div>
+          <div><span class="hd-lbl">Giá trị TT</span><span class="hd-val">${fmtMoney(marketValue)}</span></div>
+          <div><span class="hd-lbl">Vốn đã bỏ</span><span class="hd-val">${fmtMoney(costBasis)}</span></div>
+          <div><span class="hd-lbl">P&L</span><span class="hd-val pct ${pnlCls}">${pnlSign}${pnlPct.toFixed(2)}%</span></div>
+        </div>
+        <div class="hd-pos-pnl ${pnlCls}">
+          ${pnlSign}${fmtMoney(pnl)} ${realized !== 0 ? `<span class="hd-realized">· đã chốt ${realized >= 0 ? "+" : ""}${fmtMoney(realized)}</span>` : ""}
+        </div>
+      </div>
+    ` : `
+      <div class="hd-section">
+        <div class="hd-section-title">📊 Vị thế</div>
+        <p class="hd-muted">Đã bán hết. Lãi/lỗ thực hiện: <b>${realized >= 0 ? "+" : ""}${fmtMoney(realized)}</b></p>
+      </div>
+    `;
+
+    const setupHtml = ana ? `
+      <div class="hd-section">
+        <div class="hd-section-title">🔬 Tín hiệu kỹ thuật</div>
+        <div class="hd-signal-row">
+          <span class="hd-setup-tag" style="background:${setupColor}22;color:${setupColor};border-color:${setupColor}55">${setupLabel}</span>
+          <span class="hd-muted">Score <b>${ana.score?.toFixed(1) ?? "--"}</b></span>
+          ${ana.rsi !== null && ana.rsi !== undefined ? `<span class="hd-muted">RSI <b>${ana.rsi.toFixed(0)}</b></span>` : ""}
+          ${ana.trendDir ? `<span class="hd-muted">Xu hướng <b>${ana.trendDir}</b></span>` : ""}
+        </div>
+        <div class="hd-reasons">${(ana.reasons || []).map((x) => `• ${escapeHtml(x)}`).join("<br>") || "<em>Không có tín hiệu rõ.</em>"}</div>
+      </div>
+    ` : "";
+
+    const actionHtml = action ? `
+      <div class="hd-section hd-action-card" style="border-left-color:${action.color}">
+        <div class="hd-section-title">🎯 Hành động đề xuất</div>
+        <div class="hd-action-main">
+          <span class="hd-action-icon">${action.icon}</span>
+          <span class="hd-action-text">${escapeHtml(action.text)}</span>
+        </div>
+      </div>
+    ` : "";
+
+    const planHtml = plan ? plan.items.map((it) => `
+      <div class="hd-section hd-plan-${it.kind}">
+        <div class="hd-section-title">${it.title}</div>
+        <div class="hd-plan-rows">
+          ${it.rows.map(([k, v, hint]) => `
+            <div class="hd-plan-row">
+              <span class="hd-plan-k">${escapeHtml(k)}</span>
+              <span class="hd-plan-v">${v}</span>
+              <span class="hd-plan-hint">${escapeHtml(hint || "")}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `).join("") : "";
+
+    const sortedTxs = [...txs].sort((a, b) =>
+      new Date(b.trade_date).getTime() - new Date(a.trade_date).getTime()
+    );
+    const txHtml = `
+      <div class="hd-section">
+        <div class="hd-section-title">📋 Lịch sử giao dịch (${txs.length})</div>
+        <div class="hd-tx-list">
+          ${sortedTxs.map((t) => {
+            const sideCls = t.side === "buy" ? "buy" : "sell";
+            const sideLabel = t.side === "buy" ? "MUA" : "BÁN";
+            const total = (t.quantity * t.price + (t.fee || 0)) * 1000;
+            const date = new Date(t.trade_date).toLocaleDateString("vi-VN");
+            return `
+              <div class="hd-tx-item" data-tx-id="${t.id}">
+                <div class="hd-tx-main">
+                  <span class="hd-tx-side ${sideCls}">${sideLabel}</span>
+                  <span class="hd-tx-qty">${Number(t.quantity).toLocaleString("vi-VN")}cp</span>
+                  <span class="hd-tx-price">@ ${fp(t.price)}</span>
+                  <span class="hd-tx-total">${fmtMoney(total)}</span>
+                </div>
+                <div class="hd-tx-meta">
+                  <span class="hd-tx-date">${date}</span>
+                  ${t.notes ? `<span class="hd-tx-notes">${escapeHtml(t.notes)}</span>` : ""}
+                </div>
+                <div class="hd-tx-actions">
+                  <button class="link-btn hd-tx-edit" data-tx-id="${t.id}">Sửa</button>
+                  <button class="link-btn hd-tx-del" data-tx-id="${t.id}">Xóa</button>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+
+    body.innerHTML = `
+      ${companyLine}
+      ${positionHtml}
+      ${actionHtml}
+      ${planHtml}
+      ${setupHtml}
+      ${txHtml}
+      <div class="form-actions" style="justify-content:space-between">
+        <button class="link-btn" id="hd-add-tx">+ Thêm giao dịch</button>
+        <button class="link-btn" id="hd-open-analysis">Xem phân tích đầy đủ →</button>
+      </div>
+    `;
+
+    // Bind action buttons
+    $("hd-add-tx")?.addEventListener("click", () => {
+      closeHoldingDetail();
+      openTxModal();
+      $("tx-symbol").value = symbol;
+    });
+    $("hd-open-analysis")?.addEventListener("click", () => {
+      closeHoldingDetail();
+      switchTab("analyze");
+      const input = document.getElementById("symbol-input");
+      if (input) input.value = symbol;
+      clearAnalyzeContext();
+      analyzeSymbol(symbol);
+    });
+
+    // Bind tx edit/delete
+    body.querySelectorAll(".hd-tx-edit").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.txId;
+        const tx = txs.find((t) => t.id === id);
+        if (!tx) return;
+        closeHoldingDetail();
+        openTxModal(tx);
+      });
+    });
+    body.querySelectorAll(".hd-tx-del").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.txId;
+        if (!confirm("Xóa giao dịch này?")) return;
+        await PORTFOLIO.deleteTransaction(id);
+        // Re-render this modal + parent list
+        renderHoldingDetail(symbol);
+        renderPortfolio();
+      });
     });
   }
 
@@ -2605,8 +2875,8 @@
             <div class="port-stat-value pct ${pnlCls}">${pnlSign}${unrealizedPct.toFixed(2)}%</div>
             <div class="port-stat-sub">${pnlSign}${fmtMoney(unrealized)}</div>
           </div>
-          <div class="port-stat">
-            <div class="port-stat-label">Cash <button class="port-stat-edit" id="edit-cash-btn">✎</button></div>
+          <div class="port-stat port-stat-clickable" id="cash-stat-card">
+            <div class="port-stat-label">Cash <span class="port-stat-edit">Sửa</span></div>
             <div class="port-stat-value">${fmtMoney(cash)}</div>
           </div>
         </div>
@@ -2619,8 +2889,8 @@
       // Direct bind sau render (safety: delegation không phải lúc nào cũng fire)
       const addBtn = $("add-tx-top");
       if (addBtn) addBtn.onclick = () => openTxModal();
-      const cashBtn = $("edit-cash-btn");
-      if (cashBtn) cashBtn.onclick = () => openCashModal();
+      const cashCard = $("cash-stat-card");
+      if (cashCard) cashCard.onclick = () => openCashModal();
     }
 
     // Render holdings list
@@ -2686,11 +2956,7 @@
       list.querySelectorAll(".holding-card").forEach((card) => {
         const sym = card.dataset.symbol;
         card.querySelector(".holding-analyze")?.addEventListener("click", () => {
-          switchTab("analyze");
-          const input = document.getElementById("symbol-input");
-          if (input) input.value = sym;
-          clearAnalyzeContext();
-          analyzeSymbol(sym);
+          openHoldingDetail(sym);
         });
         card.querySelector(".holding-add-tx")?.addEventListener("click", () => {
           // Open modal pre-filled with symbol
@@ -2711,8 +2977,8 @@
       console.log("[portfolio] add-tx-top clicked");
       openTxModal();
     }
-    if (e.target.closest?.("#edit-cash-btn")) {
-      console.log("[portfolio] edit-cash clicked");
+    if (e.target.closest?.("#cash-stat-card")) {
+      console.log("[portfolio] cash card clicked");
       openCashModal();
     }
   });

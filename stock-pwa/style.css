@@ -2118,12 +2118,24 @@ button {
 }
 
 .port-stat-edit {
-  background: none;
-  border: none;
+  font-size: 9px;
+  font-weight: 700;
   color: #00d2ff;
-  font-size: 11px;
+  background: rgba(0, 210, 255, 0.1);
+  border: 1px solid rgba(0, 210, 255, 0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.3px;
+  margin-left: auto;
+}
+
+.port-stat-clickable {
   cursor: pointer;
-  padding: 0 2px;
+  transition: background 0.15s;
+}
+
+.port-stat-clickable:hover {
+  background: #1a1a3a;
 }
 
 .port-summary-foot {
@@ -2239,6 +2251,268 @@ button {
   font-size: 11px;
   color: #d0d0d0;
   line-height: 1.4;
+}
+
+/* ── Holding detail modal (per-symbol portfolio analysis) ── */
+.hd-modal {
+  /* Wider on desktop */
+}
+@media (min-width: 600px) {
+  .hd-modal {
+    width: 560px;
+  }
+}
+
+.hd-company {
+  font-size: 11px;
+  color: #888;
+  margin: -4px 0 12px;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
+}
+
+.hd-section {
+  background: #0f0f1e;
+  border: 1px solid #2a2a3e;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.hd-section-title {
+  font-size: 11px;
+  color: #00d2ff;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.hd-muted {
+  color: #888;
+  font-size: 12px;
+}
+
+.hd-pos-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.hd-pos-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hd-lbl {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.hd-val {
+  font-size: 14px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.hd-pos-pnl {
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a3e;
+}
+
+.hd-pos-pnl.up { color: #4CAF50; }
+.hd-pos-pnl.down { color: #ff4444; }
+
+.hd-realized {
+  font-size: 12px;
+  font-weight: 500;
+  color: #888;
+  margin-left: 6px;
+}
+
+.hd-action-card {
+  border-left: 4px solid #4CAF50;
+  background: rgba(76, 175, 80, 0.05);
+}
+
+.hd-action-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hd-action-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.hd-action-text {
+  font-size: 13px;
+  color: #d8d8d8;
+  line-height: 1.5;
+}
+
+.hd-plan-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hd-plan-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #20203a;
+}
+
+.hd-plan-row:last-child {
+  border-bottom: none;
+}
+
+.hd-plan-k {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.hd-plan-v {
+  color: #fff;
+  font-weight: 700;
+  text-align: right;
+}
+
+.hd-plan-hint {
+  color: #888;
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hd-plan-tp { border-left: 3px solid #FF9800; }
+.hd-plan-sl { border-left: 3px solid #ff4444; }
+.hd-plan-add { border-left: 3px solid #4CAF50; }
+
+.hd-signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.hd-setup-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  letter-spacing: 0.3px;
+}
+
+.hd-reasons {
+  font-size: 12px;
+  color: #c0c0c0;
+  line-height: 1.7;
+}
+
+.hd-tx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.hd-tx-item {
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.hd-tx-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.hd-tx-side {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.hd-tx-side.buy {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4CAF50;
+}
+
+.hd-tx-side.sell {
+  background: rgba(255, 68, 68, 0.2);
+  color: #ff4444;
+}
+
+.hd-tx-qty {
+  color: #fff;
+  font-weight: 600;
+}
+
+.hd-tx-price {
+  color: #aaa;
+}
+
+.hd-tx-total {
+  color: #00d2ff;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.hd-tx-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #888;
+}
+
+.hd-tx-notes {
+  flex: 1;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hd-tx-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #20203a;
+}
+
+.hd-tx-actions .link-btn {
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.hd-tx-del {
+  color: #ff4444 !important;
 }
 
 .holding-actions-row {

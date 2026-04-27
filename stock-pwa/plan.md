@@ -37,6 +37,9 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ Portfolio Phase 1: nhập giao dịch (mua/bán), holdings, cash, P&L, action recommendation per holding
 - ✅ Autocomplete cho input mã trong transaction modal (reuse cùng filterStocks logic)
 - ✅ Company info trong analyze header (tên CTCK · ngành · sàn HOSE/HNX)
+- ✅ fmtMoney hiện full VND (4.649.000đ) thay vì làm tròn (4.6 tr)
+- ✅ Holding detail modal: vị thế + portfolio-specific action plan (TP zones, stop loss, vùng mua thêm) + tx history với edit/xóa per-row
+- ✅ Cash card cả ô click được (thay vì chỉ icon ✎)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
