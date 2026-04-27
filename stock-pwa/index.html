@@ -15,9 +15,15 @@
 </head>
 <body>
   <header class="app-header">
-    <div class="app-title">
-      <span class="app-logo">📊</span>
-      <span>Phân tích CP</span>
+    <div class="app-header-row">
+      <div class="app-title">
+        <span class="app-logo">📊</span>
+        <span>Phân tích CP</span>
+      </div>
+      <button class="bell-btn" id="bell-btn" title="Cảnh báo">
+        <span class="bell-icon">🔔</span>
+        <span class="bell-badge" id="bell-badge" style="display:none">0</span>
+      </button>
     </div>
     <div class="tab-nav">
       <button class="tab-btn active" data-tab="home">🏠 Trang chủ</button>
@@ -25,6 +31,19 @@
       <button class="tab-btn" data-tab="ranking">🏆 Top picks</button>
     </div>
   </header>
+
+  <!-- Alert panel (slide-down) -->
+  <div class="alert-panel" id="alert-panel">
+    <div class="alert-panel-head">
+      <span class="alert-panel-title">🔔 Cảnh báo từ watchlist</span>
+      <div class="alert-panel-actions">
+        <button class="link-btn" id="alert-permission-btn" style="display:none">Bật notification</button>
+        <button class="link-btn" id="alert-clear-btn">Xoá</button>
+        <button class="link-btn" id="alert-close-btn">✕</button>
+      </div>
+    </div>
+    <div class="alert-panel-body" id="alert-panel-body"></div>
+  </div>
 
   <!-- Market Regime Widget (sticky under tab nav) -->
   <div class="regime-widget" id="regime-widget" style="display:none">

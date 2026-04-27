@@ -1100,6 +1100,144 @@
   loadMarketRegime();
 
   // ════════════════════════════════════════════════════
+  // ── ALERT SYSTEM ──
+  // ════════════════════════════════════════════════════
+  function updateBellBadge() {
+    const count = RANKING.unreadAlertCount();
+    const badge = $("bell-badge");
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 9 ? "9+" : count;
+      badge.style.display = "inline-flex";
+    } else {
+      badge.style.display = "none";
+    }
+  }
+
+  function fmtTimeShort(ts) {
+    const d = new Date(ts);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }) +
+      " " + d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function renderAlertPanel() {
+    const body = $("alert-panel-body");
+    if (!body) return;
+    const alerts = RANKING.loadAlerts().slice().reverse(); // newest first
+
+    if (alerts.length === 0) {
+      body.innerHTML = `<div class="alert-empty">Chưa có cảnh báo nào. Watchlist sẽ tự check khi mày mở app.</div>`;
+      return;
+    }
+    body.innerHTML = alerts.map((a) => `
+      <div class="alert-row ${a.seen ? '' : 'unread'}" data-symbol="${a.symbol}" style="border-left-color: ${a.color}">
+        <div class="alert-row-head">
+          <span class="alert-row-title">${a.title}</span>
+          <span class="alert-row-time">${fmtTimeShort(a.timestamp)}</span>
+        </div>
+        <div class="alert-row-msg">${a.message}</div>
+      </div>
+    `).join("");
+
+    body.querySelectorAll(".alert-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sym = row.dataset.symbol;
+        toggleAlertPanel(false);
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        clearAnalyzeContext();
+        analyzeSymbol(sym);
+      });
+    });
+
+    // Show notification permission button if not granted
+    const permBtn = $("alert-permission-btn");
+    if (permBtn && "Notification" in window) {
+      if (Notification.permission === "default") {
+        permBtn.style.display = "inline";
+      } else {
+        permBtn.style.display = "none";
+      }
+    }
+  }
+
+  function toggleAlertPanel(force) {
+    const panel = $("alert-panel");
+    if (!panel) return;
+    const open = force !== undefined ? force : !panel.classList.contains("open");
+    panel.classList.toggle("open", open);
+    if (open) {
+      renderAlertPanel();
+      RANKING.markAllAlertsSeen();
+      updateBellBadge();
+    }
+  }
+
+  function notifyBrowser(title, body, color) {
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    try {
+      new Notification(title, {
+        body,
+        icon: "icons/icon-192.png",
+        badge: "icons/icon-192.png",
+        tag: title, // dedupe same title
+      });
+    } catch {}
+  }
+
+  async function checkWatchlistAlerts({ silent = false } = {}) {
+    const list = RANKING.loadWatchlist();
+    if (list.length === 0) return;
+    try {
+      // Fetch fresh data nếu cache hết hạn (30 phút)
+      const data = await RANKING.fetchWatchlistData({ useCache: true });
+      const newAlerts = RANKING.detectAlerts(data);
+      updateBellBadge();
+      // Show browser notification for each new alert (if permission)
+      if (!silent) {
+        newAlerts.forEach((a) => notifyBrowser(a.title, a.message, a.color));
+      }
+    } catch {}
+  }
+
+  // Bind bell button
+  const bellBtn = $("bell-btn");
+  if (bellBtn) bellBtn.addEventListener("click", () => toggleAlertPanel());
+  const alertCloseBtn = $("alert-close-btn");
+  if (alertCloseBtn) alertCloseBtn.addEventListener("click", () => toggleAlertPanel(false));
+  const alertClearBtn = $("alert-clear-btn");
+  if (alertClearBtn) {
+    alertClearBtn.addEventListener("click", () => {
+      if (!confirm("Xóa toàn bộ cảnh báo?")) return;
+      RANKING.clearAlerts();
+      renderAlertPanel();
+      updateBellBadge();
+    });
+  }
+  const alertPermBtn = $("alert-permission-btn");
+  if (alertPermBtn) {
+    alertPermBtn.addEventListener("click", async () => {
+      if (!("Notification" in window)) return;
+      const result = await Notification.requestPermission();
+      if (result === "granted") {
+        alertPermBtn.style.display = "none";
+        notifyBrowser("Đã bật thông báo", "Bạn sẽ nhận cảnh báo cho watchlist", "#4CAF50");
+      }
+    });
+  }
+
+  // Initial badge
+  updateBellBadge();
+  // Check on app load (background)
+  setTimeout(() => checkWatchlistAlerts({ silent: true }), 1500);
+
+  // ════════════════════════════════════════════════════
   // ── HOME DASHBOARD ──
   // ════════════════════════════════════════════════════
   function isMarketOpenNow() {
@@ -1381,6 +1519,10 @@
     try {
       const data = await RANKING.fetchWatchlistData({ useCache: !forceFresh });
       renderWatchlistInHome(data);
+      // Detect alerts from fresh data
+      const newAlerts = RANKING.detectAlerts(data);
+      updateBellBadge();
+      newAlerts.forEach((a) => notifyBrowser(a.title, a.message, a.color));
     } catch (e) {
       wrap.innerHTML = `<div class="home-card-empty">Lỗi: ${e.message}</div>`;
     }

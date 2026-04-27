@@ -1017,6 +1017,137 @@ window.__SSI_RANKING__ = (function () {
     return result;
   }
 
+  // ── Alert system ─────────────────────────────────
+  // Phát hiện thay đổi tín hiệu trong watchlist + log lại để hiện
+  // notification trong app (+ optional browser notification).
+  const ALERTS_STATE_KEY = "alerts_state_v1";
+  const ALERTS_LOG_KEY = "alerts_log_v1";
+  const MAX_ALERTS = 100;
+
+  function loadAlertsState() {
+    try {
+      return JSON.parse(localStorage.getItem(ALERTS_STATE_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  }
+  function saveAlertsState(state) {
+    try {
+      localStorage.setItem(ALERTS_STATE_KEY, JSON.stringify(state));
+    } catch {}
+  }
+  function loadAlerts() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(ALERTS_LOG_KEY) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveAlerts(arr) {
+    try {
+      localStorage.setItem(ALERTS_LOG_KEY, JSON.stringify(arr.slice(-MAX_ALERTS)));
+    } catch {}
+  }
+  function pushAlert(alert) {
+    const arr = loadAlerts();
+    arr.push(alert);
+    saveAlerts(arr);
+  }
+  function unreadAlertCount() {
+    return loadAlerts().filter((a) => !a.seen).length;
+  }
+  function markAllAlertsSeen() {
+    const arr = loadAlerts();
+    arr.forEach((a) => { a.seen = true; });
+    saveAlerts(arr);
+  }
+  function clearAlerts() {
+    try {
+      localStorage.removeItem(ALERTS_LOG_KEY);
+    } catch {}
+  }
+
+  /**
+   * So sánh data mới với state cũ → generate alerts cho mỗi mã có
+   * tín hiệu mới đáng chú ý. Returns array of new alerts (also saves to log).
+   *
+   * Trigger conditions:
+   *  - score crossed up to ≥4 (Setup tốt mới hit)
+   *  - score crossed down to <-3 (Cảnh báo rủi ro mới hit)
+   *  - RSI crossed below 25 (T+ opportunity mới)
+   *  - |day change| ≥ 5%
+   */
+  function detectAlerts(watchlistData) {
+    const state = loadAlertsState();
+    const newAlerts = [];
+    const now = Date.now();
+
+    for (const d of watchlistData) {
+      if (d.error) continue;
+      const sym = d.symbol;
+      const prev = state[sym] || {};
+
+      // 1. Score crossed into "Setup tốt"
+      if (d.score >= 4 && (prev.score == null || prev.score < 4)) {
+        newAlerts.push({
+          timestamp: now, symbol: sym, type: "strong_setup",
+          title: `${sym} — Setup tốt`,
+          message: `Score ${d.score >= 0 ? "+" : ""}${d.score.toFixed(1)} (từ ${prev.score != null ? (prev.score >= 0 ? "+" : "") + prev.score.toFixed(1) : "?"})`,
+          color: "#4CAF50", seen: false,
+        });
+      }
+      // 2. Score crossed into "Cảnh báo"
+      if (d.score < -3 && (prev.score == null || prev.score >= -3)) {
+        newAlerts.push({
+          timestamp: now, symbol: sym, type: "warning",
+          title: `${sym} — Cảnh báo rủi ro`,
+          message: `Score ${d.score.toFixed(1)} (từ ${prev.score != null ? (prev.score >= 0 ? "+" : "") + prev.score.toFixed(1) : "?"})`,
+          color: "#ff4444", seen: false,
+        });
+      }
+      // 3. RSI crossed below 25 (T+ opportunity)
+      if (d.rsi != null && d.rsi < 25 && (prev.rsi == null || prev.rsi >= 25)) {
+        newAlerts.push({
+          timestamp: now, symbol: sym, type: "oversold",
+          title: `${sym} — RSI quá bán mạnh`,
+          message: `RSI ${d.rsi.toFixed(1)} (T+ opportunity)`,
+          color: "#FF9800", seen: false,
+        });
+      }
+      // 4. Big move (|day change| >= 5%)
+      const moveAbs = Math.abs(d.dayChange || 0);
+      const prevMoveAbs = Math.abs(prev.dayChange || 0);
+      if (moveAbs >= 5 && prevMoveAbs < 5) {
+        const dir = d.dayChange > 0 ? "tăng" : "giảm";
+        newAlerts.push({
+          timestamp: now, symbol: sym, type: "big_move",
+          title: `${sym} — biến động mạnh`,
+          message: `${dir} ${d.dayChange.toFixed(2)}% hôm nay`,
+          color: d.dayChange > 0 ? "#4CAF50" : "#ff4444",
+          seen: false,
+        });
+      }
+
+      // Update state
+      state[sym] = {
+        score: d.score,
+        rsi: d.rsi,
+        dayChange: d.dayChange,
+        lastSeenAt: now,
+      };
+    }
+
+    saveAlertsState(state);
+
+    // Save new alerts to log
+    if (newAlerts.length > 0) {
+      const log = loadAlerts();
+      saveAlerts(log.concat(newAlerts));
+    }
+    return newAlerts;
+  }
+
   // Fetch current prices for unique symbols across all snapshots
   async function fetchCurrentPrices(symbols) {
     const result = {};
@@ -1057,5 +1188,11 @@ window.__SSI_RANKING__ = (function () {
     removeFromWatchlist,
     toggleWatchlist,
     fetchWatchlistData,
+    // Alerts
+    detectAlerts,
+    loadAlerts,
+    unreadAlertCount,
+    markAllAlertsSeen,
+    clearAlerts,
   };
 })();
