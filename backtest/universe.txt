@@ -1,7 +1,12 @@
-# Universe mẫu: 55 mã liquid TTCK VN, cover ngành chính
-# Dùng cho backtest Phase 1
+# Universe: VN30 (Tier 1) + Extended (Tier 2) — ~58 mã
+# Last reviewed: 2026-04-27 (sau VN30 rebalance Q1)
+# Next review: ~2026-07-27
 
-# === Ngân hàng (14 mã) ===
+# ════════════════════════════════════════════════════════
+# TIER 1 — CORE VN30 (Apr 2026 actual constituents, 30 mã)
+# ════════════════════════════════════════════════════════
+
+# Banks (14)
 VCB
 BID
 CTG
@@ -13,61 +18,86 @@ HDB
 STB
 SHB
 TPB
-EIB
 LPB
 VIB
+SSB
 
-# === Bất động sản (10 mã) ===
+# Real estate (3)
 VHM
 VIC
 VRE
+
+# Consumer / Tourism (5)
+MSN
+VNM
+SAB
+VJC
+VPL
+
+# Retail (1)
+MWG
+
+# Industrial / Materials (3)
+HPG
+GVR
+DGC
+
+# Energy (2)
+GAS
+PLX
+
+# Tech (1)
+FPT
+
+# Broker (1)
+SSI
+
+# ════════════════════════════════════════════════════════
+# TIER 2 — EXTENDED diversifiers (~28 mã)
+# ════════════════════════════════════════════════════════
+
+# Bank
+EIB
+
+# Real estate mid-tier (8)
 NVL
-PDR
+BCM
 KDH
 DXG
 KBC
 DIG
 NLG
+PDR
 
-# === Tiêu dùng / Bán lẻ (7 mã) ===
-MWG
+# Consumer / Retail mid (3)
 PNJ
-MSN
-VNM
-SAB
 DGW
 FRT
 
-# === Công nghiệp / Vật liệu (8 mã) ===
-HPG
+# Industrial mid (5)
 HSG
 NKG
-GVR
-DGC
 DCM
 DPM
-PLX
+PC1
 
-# === Năng lượng / Tiện ích (6 mã) ===
-GAS
+# Energy mid (1)
+BSR
+
+# Utility (3)
 POW
 REE
 NT2
-PC1
-BSR
 
-# === Công nghệ (2 mã) ===
-FPT
+# Tech mid (1)
 CMG
 
-# === Chứng khoán (4 mã) ===
-SSI
+# Broker mid (3)
 VCI
 VND
 HCM
 
-# === Dược / Khác (4 mã) ===
+# Pharma (3)
 DHG
 IMP
 DBD
-BCM

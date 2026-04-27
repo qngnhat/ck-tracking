@@ -7,39 +7,83 @@ window.__SSI_RANKING__ = (function () {
 
   const ANALYSIS = window.__SSI_ANALYSIS__;
 
-  // Universe + sector mapping (từ backtest/src/sectors.py)
-  const UNIVERSE = [
+  // ─────────────────────────────────────────────────────────
+  // Universe — chia 2 tier (Option C, manual quarterly update)
+  //
+  // Last reviewed: 2026-04-27 (sau VN30 rebalance Q1)
+  // Next review: ~2026-07-27 (khi VN30 rebalance Q2)
+  //
+  // Tier 1 (CORE 30): VN30 actual constituents — fetched via
+  //   GET /v4/stocks?q=indexCode:VN30
+  // Tier 2 (EXTENDED ~28): mid/large-cap diversifiers theo ngành
+  //   để đảm bảo có signal khi VN30 yếu.
+  //
+  // Update workflow khi rebalance:
+  //   curl 'https://api-finfo.vndirect.com.vn/v4/stocks?q=indexCode:VN30&size=50' \
+  //     -H 'User-Agent: Mozilla/5.0' | jq '[.data[].code] | sort'
+  // → so với CORE list dưới, sửa diff.
+  // ─────────────────────────────────────────────────────────
+
+  const CORE_VN30 = [
+    // Banks (14)
     { code: "VCB", sector: "bank" }, { code: "BID", sector: "bank" },
     { code: "CTG", sector: "bank" }, { code: "TCB", sector: "bank" },
     { code: "VPB", sector: "bank" }, { code: "MBB", sector: "bank" },
     { code: "ACB", sector: "bank" }, { code: "HDB", sector: "bank" },
     { code: "STB", sector: "bank" }, { code: "SHB", sector: "bank" },
-    { code: "TPB", sector: "bank" }, { code: "EIB", sector: "bank" },
-    { code: "LPB", sector: "bank" }, { code: "VIB", sector: "bank" },
+    { code: "TPB", sector: "bank" }, { code: "LPB", sector: "bank" },
+    { code: "VIB", sector: "bank" }, { code: "SSB", sector: "bank" },
+    // Real estate (3)
     { code: "VHM", sector: "realestate" }, { code: "VIC", sector: "realestate" },
-    { code: "VRE", sector: "realestate" }, { code: "NVL", sector: "realestate" },
-    { code: "PDR", sector: "realestate" }, { code: "KDH", sector: "realestate" },
-    { code: "DXG", sector: "realestate" }, { code: "KBC", sector: "realestate" },
-    { code: "DIG", sector: "realestate" }, { code: "NLG", sector: "realestate" },
-    { code: "MWG", sector: "retail" }, { code: "PNJ", sector: "retail" },
-    { code: "DGW", sector: "retail" }, { code: "FRT", sector: "retail" },
+    { code: "VRE", sector: "realestate" },
+    // Consumer / Tourism (5)
     { code: "MSN", sector: "consumer" }, { code: "VNM", sector: "consumer" },
-    { code: "SAB", sector: "consumer" },
-    { code: "HPG", sector: "industrial" }, { code: "HSG", sector: "industrial" },
-    { code: "NKG", sector: "industrial" }, { code: "GVR", sector: "industrial" },
-    { code: "DGC", sector: "industrial" }, { code: "DCM", sector: "industrial" },
-    { code: "DPM", sector: "industrial" }, { code: "BCM", sector: "industrial" },
+    { code: "SAB", sector: "consumer" }, { code: "VJC", sector: "consumer" },
+    { code: "VPL", sector: "consumer" },
+    // Retail (1)
+    { code: "MWG", sector: "retail" },
+    // Industrial / Materials (3)
+    { code: "HPG", sector: "industrial" }, { code: "GVR", sector: "industrial" },
+    { code: "DGC", sector: "industrial" },
+    // Energy (2)
+    { code: "GAS", sector: "energy" }, { code: "PLX", sector: "energy" },
+    // Tech (1)
+    { code: "FPT", sector: "tech" },
+    // Broker (1)
+    { code: "SSI", sector: "broker" },
+  ];
+
+  const EXTENDED = [
+    // Bank (1)
+    { code: "EIB", sector: "bank" },
+    // Real estate mid-tier (8)
+    { code: "NVL", sector: "realestate" }, { code: "BCM", sector: "realestate" },
+    { code: "KDH", sector: "realestate" }, { code: "DXG", sector: "realestate" },
+    { code: "KBC", sector: "realestate" }, { code: "DIG", sector: "realestate" },
+    { code: "NLG", sector: "realestate" }, { code: "PDR", sector: "realestate" },
+    // Consumer / Retail mid (3)
+    { code: "PNJ", sector: "retail" },
+    { code: "DGW", sector: "retail" }, { code: "FRT", sector: "retail" },
+    // Industrial mid (5)
+    { code: "HSG", sector: "industrial" }, { code: "NKG", sector: "industrial" },
+    { code: "DCM", sector: "industrial" }, { code: "DPM", sector: "industrial" },
     { code: "PC1", sector: "industrial" },
-    { code: "GAS", sector: "energy" }, { code: "BSR", sector: "energy" },
-    { code: "PLX", sector: "energy" },
+    // Energy mid (1)
+    { code: "BSR", sector: "energy" },
+    // Utility (3)
     { code: "POW", sector: "utility" }, { code: "REE", sector: "utility" },
     { code: "NT2", sector: "utility" },
-    { code: "FPT", sector: "tech" }, { code: "CMG", sector: "tech" },
-    { code: "SSI", sector: "broker" }, { code: "VCI", sector: "broker" },
-    { code: "VND", sector: "broker" }, { code: "HCM", sector: "broker" },
+    // Tech mid (1)
+    { code: "CMG", sector: "tech" },
+    // Broker mid (3)
+    { code: "VCI", sector: "broker" }, { code: "VND", sector: "broker" },
+    { code: "HCM", sector: "broker" },
+    // Pharma (3)
     { code: "DHG", sector: "pharma" }, { code: "IMP", sector: "pharma" },
     { code: "DBD", sector: "pharma" },
   ];
+
+  const UNIVERSE = [...CORE_VN30, ...EXTENDED];
 
   const FACTOR_NAMES = [
     "ma200Quality", "lowDrawdown", "momentum6m",
