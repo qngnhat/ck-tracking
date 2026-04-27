@@ -613,7 +613,7 @@
       </div>
 
       <div class="disclaimer full-width">
-        ⚠️ Phân tích kỹ thuật chỉ là xác suất dựa trên hành vi giá lịch sử — không phải dự đoán chắc chắn. Quyết định đầu tư là trách nhiệm của bạn.
+        ⚠️ "Setup tốt/khá/yếu" là <b>chỉ báo chất lượng kỹ thuật</b>, KHÔNG phải tín hiệu mua/bán. Backtest 8 năm cho thấy hệ scoring tổng hợp này chỉ tốt để đánh giá rủi ro (drawdown thấp), không sinh alpha so với buy-and-hold cả universe. Để chọn mã đầu tư, dùng tab <b>Top picks → DCA</b> (đã validate beat baseline). Quyết định cuối cùng là của bạn.
       </div>
     `;
 

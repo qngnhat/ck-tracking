@@ -430,10 +430,13 @@ window.__SSI_ANALYSIS__ = (function () {
     let score = 0;
     const reasons = [];
 
+    // RSI: bumped <25 weight per Phase 1.3 backtest (Sharpe 0.68 — strongest signal)
     if (rsi !== null) {
-      if (rsi < 30) { score += 2; reasons.push("RSI quá bán"); }
+      if (rsi < 25) { score += 3; reasons.push("RSI<25 quá bán mạnh"); }
+      else if (rsi < 30) { score += 2; reasons.push("RSI<30 quá bán"); }
       else if (rsi < 45) { score += 1; reasons.push("RSI gần quá bán"); }
-      else if (rsi > 70) { score -= 2; reasons.push("RSI quá mua"); }
+      else if (rsi > 75) { score -= 3; reasons.push("RSI>75 quá mua mạnh"); }
+      else if (rsi > 70) { score -= 2; reasons.push("RSI>70 quá mua"); }
       else if (rsi > 55) { score -= 1; reasons.push("RSI gần quá mua"); }
     }
 
@@ -457,16 +460,9 @@ window.__SSI_ANALYSIS__ = (function () {
       reasons.push(`Giá gần kháng cự (${resistance.toFixed(0)})`);
     }
 
-    // MACD signal
-    if (macd) {
-      if (macd.hist > 0 && macd.macd > macd.signal) {
-        score += 1;
-        reasons.push("MACD dương (động lực tăng)");
-      } else if (macd.hist < 0 && macd.macd < macd.signal) {
-        score -= 1;
-        reasons.push("MACD âm (động lực giảm)");
-      }
-    }
+    // MACD: weight dropped per Phase 1.3 backtest (no edge vs random in test set)
+    // MACD value still computed and displayed in indicators panel for context,
+    // but NOT contributing to recommendation score.
 
     // Bollinger Bands
     let bbPos = null; // "upper" | "middle-upper" | "middle-lower" | "lower"
@@ -573,25 +569,30 @@ window.__SSI_ANALYSIS__ = (function () {
       reasons.push(`Volume thấp (${volRatio.toFixed(1)}x trung bình)`);
     }
 
+    // ── Recommendation labels ──
+    // NOTE: Phase 1.4 backtest cho thấy combined scoring system underperform
+    // buy-and-hold cả universe. Vì vậy labels được đổi thành "Setup" thay vì
+    // "MUA/BÁN" để tránh tạo cảm giác đây là tín hiệu giao dịch chắc chắn.
+    // Đây là chỉ báo CHẤT LƯỢNG SETUP KỸ THUẬT, không phải lệnh mua/bán.
     let recommendation, recLevel, recColor;
     if (score >= 4) {
-      recommendation = "CÓ THỂ MUA MẠNH";
+      recommendation = "Setup tốt";
       recLevel = "strong-buy";
       recColor = "#4CAF50";
     } else if (score >= 2) {
-      recommendation = "CÓ THỂ MUA";
+      recommendation = "Setup khá";
       recLevel = "buy";
       recColor = "#8BC34A";
     } else if (score >= -1) {
-      recommendation = "QUAN SÁT";
+      recommendation = "Trung tính";
       recLevel = "hold";
       recColor = "#FF9800";
     } else if (score >= -3) {
-      recommendation = "TRÁNH MUA";
+      recommendation = "Setup yếu";
       recLevel = "avoid";
       recColor = "#FF5722";
     } else {
-      recommendation = "KHÔNG NÊN MUA";
+      recommendation = "Cảnh báo rủi ro";
       recLevel = "sell";
       recColor = "#ff4444";
     }
@@ -828,18 +829,18 @@ window.__SSI_ANALYSIS__ = (function () {
       }
     }
 
-    // ─ Part 8: Conclusion with actionable guidance ─
+    // ─ Part 8: Conclusion (NEUTRAL framing — describe situation, not give orders) ─
     let conclusion = "";
     if (r.score >= 4) {
-      conclusion = `<b>Tổng hợp:</b> Confluence các tín hiệu đang nghiêng mạnh về phía tích cực (điểm ${r.score}). Vùng giá cân nhắc vào lệnh: <b>${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}</b>. Stop loss đề xuất <b>${fp(r.stopLoss)}</b> (dưới hỗ trợ ~3%). Mục tiêu gần nhất ở vùng kháng cự <b>${fp(r.resistance)}</b> (cách giá hiện tại ${(((r.resistance - r.current) / r.current) * 100).toFixed(1)}%).`;
+      conclusion = `<b>Tổng hợp:</b> Setup kỹ thuật tốt (điểm ${r.score}) — confluence của nhiều tín hiệu đang nghiêng về phía tích cực. Nếu mã đã trong watchlist, vùng giá đáng chú ý: <b>${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}</b>. Stop loss tham khảo <b>${fp(r.stopLoss)}</b>. Kháng cự gần ở <b>${fp(r.resistance)}</b> (+${(((r.resistance - r.current) / r.current) * 100).toFixed(1)}%). <b>Lưu ý:</b> backtest cho thấy hệ scoring tổng hợp underperform buy-and-hold — đây là chỉ báo chất lượng setup, không phải lệnh mua.`;
     } else if (r.score >= 2) {
-      conclusion = `<b>Tổng hợp:</b> Tín hiệu nghiêng về phía tích cực (điểm ${r.score}) nhưng chưa đủ mạnh để vào full vị thế. Có thể cân nhắc mua thăm dò tại <b>${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}</b>, phần còn lại chờ breakout kháng cự ${fp(r.resistance)} hoặc pullback về hỗ trợ ${fp(r.support)}. Stop loss <b>${fp(r.stopLoss)}</b>.`;
+      conclusion = `<b>Tổng hợp:</b> Setup kỹ thuật khá (điểm ${r.score}) — một số tín hiệu tích cực nhưng chưa đủ confluence rõ. Vùng giá đáng quan sát: <b>${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}</b>; kháng cự ${fp(r.resistance)}, hỗ trợ ${fp(r.support)}.`;
     } else if (r.score >= -1) {
-      conclusion = `<b>Tổng hợp:</b> Các tín hiệu đang mâu thuẫn/trung tính (điểm ${r.score}). Chưa nên vào lệnh mới. Quan sát thêm và chờ xác nhận: nếu breakout lên trên <b>${fp(r.resistance)}</b> với volume thì tín hiệu tích cực hơn; nếu phá xuống dưới <b>${fp(r.support)}</b> thì đà giảm có thể tiếp diễn.`;
+      conclusion = `<b>Tổng hợp:</b> Tín hiệu trung tính (điểm ${r.score}) — chưa có hướng rõ. Nếu breakout lên trên <b>${fp(r.resistance)}</b> với volume thì momentum tích cực hơn; nếu phá xuống dưới <b>${fp(r.support)}</b> thì đà giảm có thể tiếp diễn.`;
     } else if (r.score >= -3) {
-      conclusion = `<b>Tổng hợp:</b> Tín hiệu nghiêng về tiêu cực (điểm ${r.score}). Không phải thời điểm mua mới. Nếu đang giữ, cân nhắc giảm tỷ trọng nếu giá tiếp tục dưới hỗ trợ <b>${fp(r.support)}</b>.`;
+      conclusion = `<b>Tổng hợp:</b> Setup yếu (điểm ${r.score}) — nhiều tín hiệu kỹ thuật tiêu cực. Mã đang giữ cần theo dõi vùng hỗ trợ <b>${fp(r.support)}</b>; nếu phá xuống có thể đà giảm tiếp diễn.`;
     } else {
-      conclusion = `<b>Tổng hợp:</b> Tín hiệu tiêu cực rõ ràng (điểm ${r.score}). Không nên bắt đáy, nên xem xét thoát vị thế nếu đang giữ. Chỉ xem xét lại khi có dấu hiệu đảo chiều (RSI phục hồi từ quá bán + MACD cắt lên + volume xác nhận).`;
+      conclusion = `<b>Tổng hợp:</b> Tín hiệu kỹ thuật tiêu cực rõ ràng (điểm ${r.score}) — momentum giảm + nhiều chỉ báo cảnh báo. Cần dấu hiệu đảo chiều (RSI phục hồi từ quá bán + volume xác nhận) trước khi xét lại.`;
     }
     parts.push(conclusion);
 
