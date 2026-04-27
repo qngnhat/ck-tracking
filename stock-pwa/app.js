@@ -1130,6 +1130,15 @@
       s.lastResult = result;
       renderRanking();
       updateRankingMeta(result);
+
+      // Auto-snapshot for paper tracker
+      if (result.picks.length > 0 && !result.fromCache) {
+        const tracker = RANKING.loadTracker();
+        if (RANKING.shouldSnapshot(mode, tracker)) {
+          RANKING.takeSnapshot(mode, result.picks, result.regime);
+        }
+      }
+      renderTrackerSection();
     } catch (e) {
       content.innerHTML = `<div class="error"><h3>Lỗi tải dữ liệu</h3><p>${e.message}</p><button class="btn-primary" onclick="document.getElementById('ranking-refresh').click()">Thử lại</button></div>`;
     } finally {
@@ -1146,6 +1155,145 @@
     const cacheTxt = result.fromCache ? " (từ cache)" : "";
     meta.textContent = `Cập nhật ${time}${cacheTxt} · ${result.eligibleCount}/${result.allCount} mã đủ điều kiện`;
   }
+
+  // ════════════════════════════════════════════════════
+  // ── PAPER TRACKER ──
+  // ════════════════════════════════════════════════════
+  function renderTrackerSection() {
+    const section = $("tracker-section");
+    if (!section) return;
+    const tracker = RANKING.loadTracker();
+    const totalSnaps = (tracker.dca?.length || 0) + (tracker.tplus?.length || 0);
+    if (totalSnaps === 0) {
+      section.style.display = "none";
+      return;
+    }
+    section.style.display = "block";
+  }
+
+  function fmtDateShort(iso) {
+    const d = new Date(iso);
+    return d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  }
+
+  function daysSince(iso) {
+    const ms = Date.now() - new Date(iso).getTime();
+    return Math.floor(ms / (24 * 3600 * 1000));
+  }
+
+  async function refreshTracker() {
+    const btn = $("tracker-refresh-btn");
+    const content = $("tracker-content");
+    btn.disabled = true;
+    btn.textContent = "Đang tải...";
+    content.innerHTML = `<div class="loading"><div class="spinner"></div><div>Fetch giá hiện tại...</div></div>`;
+
+    try {
+      const tracker = RANKING.loadTracker();
+      const allSyms = new Set();
+      for (const m of ["dca", "tplus"]) {
+        for (const s of tracker[m] || []) {
+          for (const p of s.picks) allSyms.add(p.symbol);
+        }
+      }
+      const prices = await RANKING.fetchCurrentPrices([...allSyms]);
+      renderTrackerContent(tracker, prices);
+    } catch (e) {
+      content.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Cập nhật giá hiện tại";
+    }
+  }
+
+  function renderTrackerContent(tracker, prices) {
+    const content = $("tracker-content");
+    let html = "";
+
+    for (const mode of ["dca", "tplus"]) {
+      const arr = (tracker[mode] || []).slice().reverse();  // newest first
+      if (arr.length === 0) continue;
+      const modeLabel = mode === "dca" ? "📈 DCA Snapshots" : "⚡ T+ Snapshots";
+      html += `<div class="tracker-mode-block"><div class="tracker-mode-title">${modeLabel} (${arr.length})</div>`;
+
+      for (const snap of arr) {
+        const days = daysSince(snap.date);
+        // Compute returns
+        const rows = snap.picks.map((p) => {
+          const cur = prices[p.symbol];
+          if (cur == null || !p.entryPrice) {
+            return { symbol: p.symbol, ret: null, cur, entry: p.entryPrice };
+          }
+          const ret = (cur - p.entryPrice) / p.entryPrice;
+          return { symbol: p.symbol, ret, cur, entry: p.entryPrice };
+        });
+        const validRows = rows.filter((r) => r.ret !== null);
+        const avgRet = validRows.length
+          ? validRows.reduce((a, b) => a + b.ret, 0) / validRows.length
+          : null;
+        const winCount = validRows.filter((r) => r.ret > 0).length;
+
+        const aggClass = avgRet == null ? "" : avgRet >= 0 ? "up" : "down";
+        const aggSign = avgRet == null || avgRet < 0 ? "" : "+";
+
+        html += `
+          <div class="tracker-snap">
+            <div class="tracker-snap-head">
+              <span class="tracker-snap-date">${fmtDateShort(snap.date)} (${days}d)</span>
+              ${snap.regime ? `<span class="tracker-snap-regime">${snap.regime}</span>` : ""}
+              ${avgRet != null
+                ? `<span class="tracker-snap-agg pct ${aggClass}">TB ${aggSign}${(avgRet * 100).toFixed(2)}% · ${winCount}/${validRows.length}</span>`
+                : `<span class="tracker-snap-agg">--</span>`}
+            </div>
+            <div class="tracker-snap-picks">
+              ${rows.map((r) => {
+                if (r.ret == null) {
+                  return `<span class="tracker-pick"><b>${r.symbol}</b> --</span>`;
+                }
+                const cls = r.ret >= 0 ? "up" : "down";
+                const sign = r.ret >= 0 ? "+" : "";
+                return `<span class="tracker-pick"><b>${r.symbol}</b> <span class="pct ${cls}">${sign}${(r.ret * 100).toFixed(1)}%</span></span>`;
+              }).join("")}
+            </div>
+          </div>
+        `;
+      }
+      html += "</div>";
+    }
+
+    if (!html) {
+      content.innerHTML = `<div class="empty-state ranking-intro"><p>Chưa có snapshot nào.</p></div>`;
+    } else {
+      content.innerHTML = html;
+    }
+  }
+
+  // Toggle tracker body
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#tracker-header")) {
+      const body = $("tracker-body");
+      const icon = $("tracker-toggle-icon");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      icon.textContent = open ? "▼" : "▲";
+      if (!open) refreshTracker(); // auto-fetch on open
+    }
+  });
+
+  // Bind tracker buttons
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "tracker-refresh-btn") refreshTracker();
+    if (e.target && e.target.id === "tracker-clear-btn") {
+      if (confirm("Xóa toàn bộ lịch sử khuyến nghị?")) {
+        RANKING.clearTracker();
+        renderTrackerSection();
+        $("tracker-content").innerHTML = "";
+      }
+    }
+  });
+
+  // Render tracker section on init (show/hide based on whether snapshots exist)
+  renderTrackerSection();
 
   function renderRanking() {
     const content = $("ranking-content");

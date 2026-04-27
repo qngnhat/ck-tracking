@@ -1196,6 +1196,118 @@ button {
 }
 
 /* ════════════════════════════════════════
+   PAPER TRACKER
+   ════════════════════════════════════════ */
+.tracker-section {
+  margin-top: 16px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tracker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #00d2ff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tracker-header:active {
+  background: #16213e;
+}
+
+.tracker-toggle-icon {
+  font-size: 11px;
+  color: #888;
+}
+
+.tracker-body {
+  padding: 12px 14px;
+  border-top: 1px solid #2a2a3e;
+}
+
+.tracker-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.tracker-refresh-btn {
+  font-size: 12px !important;
+  padding: 8px 14px !important;
+}
+
+.tracker-mode-block {
+  margin-bottom: 16px;
+}
+
+.tracker-mode-title {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.tracker-snap {
+  background: #0f0f1e;
+  border: 1px solid #20203a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.tracker-snap-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.tracker-snap-date {
+  color: #ccc;
+  font-weight: 600;
+}
+
+.tracker-snap-regime {
+  color: #888;
+  font-size: 10px;
+  background: #2a2a3e;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.tracker-snap-agg {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.tracker-snap-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.tracker-pick {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.tracker-pick b {
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+/* ════════════════════════════════════════
    DESKTOP RESPONSIVE (>= 900px)
    ════════════════════════════════════════ */
 @media (min-width: 900px) {

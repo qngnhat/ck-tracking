@@ -757,6 +757,94 @@ window.__SSI_RANKING__ = (function () {
     return result;
   }
 
+  // ── Paper Trading Tracker ────────────────────────
+  // Auto-snapshot top picks để theo dõi performance thực tế vs backtest.
+  // - DCA: snapshot 1 lần/tháng
+  // - T+: snapshot mỗi ngày có picks
+  // Stored in localStorage. Max 24 snapshots/mode (~2 năm DCA, ~1 tháng T+).
+  const TRACKER_KEY = "paper_tracker_v1";
+  const MAX_SNAPSHOTS_DCA = 24;
+  const MAX_SNAPSHOTS_TPLUS = 60;
+
+  function loadTracker() {
+    try {
+      const raw = localStorage.getItem(TRACKER_KEY);
+      if (!raw) return { dca: [], tplus: [] };
+      const parsed = JSON.parse(raw);
+      return {
+        dca: Array.isArray(parsed.dca) ? parsed.dca : [],
+        tplus: Array.isArray(parsed.tplus) ? parsed.tplus : [],
+      };
+    } catch {
+      return { dca: [], tplus: [] };
+    }
+  }
+
+  function saveTracker(t) {
+    try {
+      localStorage.setItem(TRACKER_KEY, JSON.stringify(t));
+    } catch {}
+  }
+
+  function shouldSnapshot(mode, tracker) {
+    const arr = tracker[mode] || [];
+    if (arr.length === 0) return true;
+    const last = new Date(arr[arr.length - 1].date);
+    const now = new Date();
+    if (mode === "dca") {
+      // 1 lần/tháng
+      return last.getMonth() !== now.getMonth() || last.getFullYear() !== now.getFullYear();
+    } else {
+      // 1 lần/ngày (theo local date)
+      return last.toDateString() !== now.toDateString();
+    }
+  }
+
+  function takeSnapshot(mode, picks, regime) {
+    const tracker = loadTracker();
+    const entry = {
+      date: new Date().toISOString(),
+      regime: regime ? regime.regime : null,
+      picks: picks.map((p) => ({
+        symbol: p.symbol,
+        sector: p.sector,
+        score: p.score,
+        entryPrice: p.factors ? p.factors.currentPrice : null,
+        reasons: p.reasons || null,
+      })),
+    };
+    tracker[mode].push(entry);
+    const max = mode === "dca" ? MAX_SNAPSHOTS_DCA : MAX_SNAPSHOTS_TPLUS;
+    if (tracker[mode].length > max) {
+      tracker[mode] = tracker[mode].slice(-max);
+    }
+    saveTracker(tracker);
+  }
+
+  function clearTracker() {
+    localStorage.removeItem(TRACKER_KEY);
+  }
+
+  // Fetch current prices for unique symbols across all snapshots
+  async function fetchCurrentPrices(symbols) {
+    const result = {};
+    const batchSize = 10;
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (sym) => {
+          try {
+            const data = await ANALYSIS.fetchHistory(sym, "D", 5);
+            result[sym] = data.closes[data.closes.length - 1];
+          } catch {
+            result[sym] = null;
+          }
+        })
+      );
+    }
+    return result;
+  }
+
   return {
     UNIVERSE,
     FACTOR_NAMES,
@@ -764,5 +852,11 @@ window.__SSI_RANKING__ = (function () {
     loadTopPicksTPlus,
     getMarketRegime,
     clearCache,
+    // Paper tracker
+    loadTracker,
+    shouldSnapshot,
+    takeSnapshot,
+    clearTracker,
+    fetchCurrentPrices,
   };
 })();
