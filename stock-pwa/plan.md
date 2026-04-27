@@ -3,23 +3,67 @@
 ## Mục tiêu dài hạn
 Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **tool có cơ sở dữ liệu thực tế**, được calibrate cho đặc thù TTCK Việt Nam, và có thể đo lường hiệu quả định kỳ.
 
-## Trạng thái hiện tại
+---
 
-**Đã có:**
-- ~8 chỉ báo kỹ thuật (RSI, MACD, BB, MA20/50/200, ADX, ATR, Stochastic, MFI)
-- Cơ bản: P/E, P/B, ROE, ROA, EPS, BVPS (từ VNDirect)
-- Khối ngoại: net 5/10/20 phiên + tần suất (từ VNDirect)
-- Scoring system + text analysis
-- Chart candlestick + MA overlay, 4 khung thời gian
-- Auto-refresh trong giờ giao dịch VN
+## 📊 Tiến độ tổng quan (last updated: 2026-04-27)
 
-**Đang thiếu / Yếu:**
-- Không có backtest → KHÔNG BIẾT scoring có work không
-- Ngưỡng tín hiệu (RSI 30/70, P/E <10, ADX >25...) dùng universal, chưa calibrate cho VN
-- Trọng số scoring (+1/+2) tự bịa, không có cơ sở
-- Không xét context thị trường chung (VN-Index state)
-- Không so sánh ngành (P/E 10 của bank ≠ P/E 10 của tech)
-- **Chỉ phân tích từng mã đơn lẻ** — user phải tự nghĩ xem nên xem mã nào. Thiếu khả năng *quét toàn thị trường* để gợi ý mã đáng chú ý.
+| Phase | Status | Output |
+|---|---|---|
+| 1 — Backtest Framework | ✅ Done | 4 backtest reports trong `backtest/results/` |
+| 2 — Calibrate scoring | ⚠️ Skipped (intentional) | Phase 1.4 cho thấy combined system underperform B&H → reframe label thay vì tinh chỉnh weight |
+| 3 — Add features từ gap | Partial | A (regime) ✅, B-G chưa làm |
+| 4 — Stock Ranking T+/DCA | ✅ Done + ship | Tab "Top picks" trong PWA, validate out-of-sample |
+| 4b — T+ Validation | ✅ Done | Threshold bumped 2.0 → 4.0 dựa trên backtest |
+| 5 — Continuous Validation | Partial | Paper tracker ✅, regime detection ✅, monthly cron chưa |
+
+**Bonus features (ngoài plan ban đầu, đã ship):**
+- ✅ Search autocomplete 1700+ mã VN
+- ✅ Chart candlestick 4 resolution + auto-refresh
+- ✅ Tooltips toàn bộ chỉ báo
+- ✅ Responsive desktop 2-column grid
+- ✅ Context cards (DCA/T+ pick → giải thích why)
+- ✅ Universe Option C: VN30 actual + Extended (manual quarterly review)
+- ✅ Reframe scoring: "MUA MẠNH" → "Setup tốt" (theo Phase 1.4 insight)
+- ✅ RSI<25 weight bumped to +3 (theo Phase 1.3 winner)
+- ✅ MACD weight dropped (no edge)
+- ✅ Market regime widget VN-Index BULL/BEAR/RANGE
+- ✅ T+ universe expansion (top 120 by market cap)
+- ✅ Action card "Hành động đề xuất" per score level
+- ✅ Home tab dashboard adaptive theo thời gian/ngày
+
+**Kết quả backtest chính:**
+- ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
+- ✅ DCA Top 15 monthly: **+285% / CAGR 17.8% / Sharpe 0.82** vs EW55 +249%/0.80
+- ✅ T+ score≥4: **win rate 61%, +3.3%/lệnh, Sharpe 0.32** trên test set 2023-2026
+
+---
+
+## Trạng thái hiện tại (đã thay đổi nhiều so với khi viết plan)
+
+**Đã có (đầy đủ hơn plan ban đầu):**
+- 8 chỉ báo kỹ thuật + tooltip giải thích
+- Cơ bản: P/E, P/B, ROE, ROA, EPS, BVPS, Beta
+- Khối ngoại: net 5/10/20 phiên + tần suất + room
+- Scoring system reframed thành neutral labels
+- Chart 4 resolution + auto-refresh
+- **Top picks DCA/T+** với context cards
+- **Paper trading tracker** (snapshot + verify)
+- **Market regime widget** (BULL/BEAR/RANGE)
+- **Home dashboard** adaptive
+- **Backtest framework** đầy đủ (Python)
+
+**Đã giải quyết (so với plan gốc):**
+- ~~Không có backtest~~ → ✅ 4 backtest phases done
+- ~~Trọng số tự bịa~~ → ✅ RSI+ bumped, MACD dropped (validated)
+- ~~Không xét VN-Index state~~ → ✅ Regime widget + auto-adjust T+ threshold
+- ~~Chỉ phân tích đơn lẻ~~ → ✅ Top picks ranking ship
+
+**Còn thiếu (không critical):**
+- So sánh P/E theo ngành (Phase 2.3) — skipped vì combined scoring underperform
+- Multi-timeframe confirmation (Phase 3.B) — overkill cho daily strategy
+- Volume profile (Phase 3.C) — phức tạp, marginal
+- Risk metrics: beta hiển thị, max DD 1Y, position sizing — nice polish chưa làm
+- Monthly auto re-backtest cron (Phase 5.1) — chỉ cần khi thấy drift
 
 ---
 
@@ -336,43 +380,63 @@ Top N của mỗi ranking phải có **giới hạn 2-3 mã/ngành** để khôn
 
 ---
 
-## Thứ tự thực thi cụ thể (next concrete actions)
+## Tiến độ thực thi (đã cập nhật)
 
-### Tuần 1
-- [ ] Setup Python env với pandas, numpy, matplotlib, jupyter
-- [ ] Tạo folder `/Users/qngnhat/bong/ck_tracking/backtest/`
-- [ ] `01_data_fetch.ipynb`: fetch OHLCV 60 mã × 7 năm, save parquet
-- [ ] `02_indicators.ipynb`: port + verify indicator values khớp PWA
+### ✅ Phase 1 — Backtest Framework (DONE 2026-04-25)
+- [x] Setup Python env (pandas, numpy, matplotlib)
+- [x] Folder `backtest/` với src + data + results
+- [x] Phase 1.1: data fetch 58 mã × 8 năm (113k OHLCV rows)
+- [x] Phase 1.2: 8 indicators ported, verified vs PWA
+- [x] Phase 1.3: 21 single signals tested → **RSI<25 winner** (Sharpe 0.68)
+- [x] Phase 1.4: combined scoring → **Scenario B+ (underperform B&H)**
 
-### Tuần 2
-- [ ] `03_single_signal_backtest.ipynb`: test 10+ signal đơn lẻ
-- [ ] `04_combined_scoring_backtest.ipynb`: test hệ scoring hiện tại
-- [ ] Viết `phase1_results.md`, kết luận scenario A/B/C
+**Kết luận Phase 1**: Hệ scoring tổng hợp THUA equal-weight B&H cả universe. Tốt cho risk reduction (max DD -16% vs market -46%) nhưng không sinh alpha.
 
-### Decision point sau Phase 1
-Dựa vào kết quả Phase 1 → quyết định:
-- Scenario A (hơn baseline): sang Phase 2 (calibrate)
-- Scenario B (huề): dừng project tool TA, chuyển sang chiến lược DCA ETF thuần
-- Scenario C (thua): đơn giản hóa mạnh, chỉ giữ 2-3 signal có edge nhất
+### ⚠️ Phase 2 — SKIPPED (intentional)
+**Decision sau Phase 1.4**: skip vì tinh chỉnh weights không fix được vấn đề căn bản (cash drag — strategy chỉ long 27% thời gian). Thay vì calibrate, đã làm:
+- ✅ Reframe label "MUA MẠNH" → "Setup tốt" (neutral framing)
+- ✅ RSI<25 weight bumped (+2 → +3)
+- ✅ MACD weight dropped (no edge per Phase 1.3)
+- ✅ Disclaimer chỉ rõ: dùng tab Top picks DCA cho actual investment
 
-### Tuần 3-4 (nếu scenario A hoặc C)
-- Phase 2 — calibrate thresholds + weights
-- Update app PWA với logic mới
-- Re-backtest verify improvement
+### ✅ Phase 4 — Stock Ranking (DONE 2026-04-26)
+- [x] Phase 4 DCA: top-N monthly rebalance backtest → **+285% / 8 năm** (beat EW55)
+- [x] Phase 4 UI: tab "Top picks" với DCA/T+ toggle
+- [x] Phase 4b T+: validate ranking strategy
+- [x] Phase 4b critical fix: threshold bumped 2.0 → 4.0 (2.0 không edge)
+- [x] Context cards: click pick → analyze tab show "tại sao DCA" / "tại sao T+"
+- [x] Universe management Option C: VN30 actual (Apr 2026) + Extended
 
-### Tuần 5-7
-- Phase 3: thêm 3-5 feature dựa trên gap từ backtest (priority list)
+### Phase 3 — Features (PARTIAL)
+- [x] Phase 3.A — Market regime filter (VN-Index BULL/BEAR/RANGE widget) — Done 2026-04-27
+- [ ] Phase 3.B — Multi-timeframe confirmation — skipped (overkill)
+- [ ] Phase 3.C — Volume profile (VAP) — skipped (complex, marginal)
+- [ ] Phase 3.D — Foreign flow deeper — current implementation đủ tốt
+- [ ] Phase 3.E — Risk metrics (beta, position sizing) — chưa làm
+- [ ] Phase 3.F — Price band proximity — chưa làm
+- [ ] Phase 3.G — Dividend yield + ex-div — chưa làm
 
-### Tuần 8-10
-- Phase 4 — Stock Ranking & Screening
-  - Tuần 8: develop T+ score + backtest (notebook 07)
-  - Tuần 9: develop DCA score + backtest (notebook 08)
-  - Tuần 10: implement UI ranking trong PWA + caching
-- **Gate**: chỉ release ranking ra production nếu out-of-sample test pass
+### Phase 5 — Continuous Validation (PARTIAL)
+- [x] Phase 5.2 — Paper trading tracker (Done 2026-04-27)
+- [x] Phase 5.3 — Regime detection (combined với Phase 3.A)
+- [ ] Phase 5.1 — Monthly auto re-backtest cron — chưa làm, sẽ làm khi thấy drift
 
-### Từ tuần 11 trở đi
-- Phase 5: setup cron chạy re-backtest mỗi tháng cho cả 3 hệ
-- Paper trading + monitor drift
+### Bonus phases (không trong plan gốc, đã làm)
+- [x] T+ universe expansion: top 120 by market cap (động) — 2026-04-27
+- [x] Action card "Hành động đề xuất" per score level — 2026-04-27
+- [x] Home dashboard tab adaptive — 2026-04-27
+- [x] Universe Option C (CORE_VN30 + EXTENDED tier) — 2026-04-27
+
+### Tiếp theo (nếu cần)
+**Verification (priority cao):**
+- Forward test 3-6 tháng qua Paper Tracker → verify backtest expectations
+- Spot check data accuracy vs TradingView/Cafef
+
+**Polish (priority thấp):**
+- Risk metrics card (beta, max DD 1Y, position sizing theo ATR)
+- Foreign flow deeper analysis
+- Backtest replay mode (pick date in past, see what app would have shown)
+- Monthly re-backtest cron khi thấy live performance drift > 50% expected
 
 ---
 
