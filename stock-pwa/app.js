@@ -484,6 +484,8 @@
           "color:#ff9800;font-weight:600")}
       </div>
 
+      ${renderActionCard(r)}
+
       <!-- Chart -->
       <div class="an-card chart-card full-width">
         <div class="chart-head">
@@ -755,6 +757,61 @@
         <div class="context-disclaimer">
           ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest test set 2023-2026: setup score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — nhưng 4/10 lệnh thua, cần tuân thủ stop loss.
         </div>
+      </div>
+    `;
+  }
+
+  // ── Action card (per score level) ──
+  function renderActionCard(r) {
+    let situation, holdAction, newAction, warning, icon;
+
+    if (r.score >= 4) {
+      icon = "🟢";
+      situation = "Confluence các tín hiệu kỹ thuật tích cực mạnh — setup hiếm gặp (~7% số phiên).";
+      holdAction = "Có thể cân nhắc <b>tăng size một phần</b> (tilt buy ~30-50%) nếu mã đã trong portfolio. KHÔNG all-in.";
+      newAction = "Kiểm tra tab <b>Top picks → DCA</b> xem mã có nằm trong top không. Nếu là setup mean-reversion (RSI&lt;25 driver) → cân nhắc 1 lệnh T+ size nhỏ với SL chặt -8%.";
+      warning = "ĐỪNG bỏ kế hoạch DCA định kỳ vì 1 setup. Backtest cho thấy edge ~3-5%/cơ hội — không phải chắc thắng.";
+    } else if (r.score >= 2) {
+      icon = "🟢";
+      situation = "Vài tín hiệu tích cực nhưng chưa đủ confluence rõ rệt (~20% số phiên).";
+      holdAction = "Giữ nguyên, KHÔNG bán panic. Theo dõi để xem có lên ≥4 không.";
+      newAction = "Thêm vào <b>watchlist</b>. Chờ confluence rõ hơn (score ≥4) HOẶC giá break kháng cự với volume xác nhận trước khi vào lệnh.";
+      warning = "Setup khá phổ biến — đừng over-trade dựa trên tín hiệu yếu này.";
+    } else if (r.score >= -1) {
+      icon = "🟠";
+      situation = "Tín hiệu hỗn hợp, không có hướng rõ — phổ biến nhất (~46% số phiên).";
+      holdAction = "Giữ nguyên position. ĐỪNG panic do score trung tính.";
+      newAction = "<b>KHÔNG vào lệnh mới</b> (T+ hay swing). Nếu đang DCA định kỳ → cứ theo lịch (tránh time market).";
+      warning = "Phần lớn thời gian app sẽ trung tính — đó là chuyện bình thường, không phải thiếu tín hiệu để hành động.";
+    } else if (r.score >= -3) {
+      icon = "🔴";
+      situation = "Vài tín hiệu tiêu cực — đà giảm có thể hình thành (~21% số phiên).";
+      holdAction = "Review lại lý do mua ban đầu. Fundamentals OK → giữ. Xấu đi → cân nhắc giảm size khi mã phá hỗ trợ.";
+      newAction = "<b>KHÔNG mua mới</b> — kể cả ý định 'bắt đáy'. Đợi tín hiệu đảo chiều rõ trước.";
+      warning = "Nếu giá break dưới hỗ trợ với volume xác nhận → cắt lỗ kỷ luật. Đừng để loss cascade.";
+    } else {
+      icon = "🔴";
+      situation = "Confluence tín hiệu tiêu cực — mã có thể đang phân phối hoặc bear market (~7% số phiên).";
+      holdAction = "Cân nhắc <b>cắt lỗ / giảm tỷ trọng</b> nếu giá tiếp tục dưới hỗ trợ. Đặc biệt nếu fundamentals cũng xấu đi.";
+      newAction = "<b>TUYỆT ĐỐI không bắt đáy</b>. Đợi dấu hiệu đảo chiều rõ: RSI hồi từ &lt;30 + MACD cross up + volume xác nhận.";
+      warning = "Fundamental check: có news/scandal/báo cáo xấu không? Nếu có → có thể là 'falling knife', tránh xa.";
+    }
+
+    return `
+      <div class="an-card full-width action-card" style="border-left-color: ${r.recColor}">
+        <div class="an-title">${icon} Hành động đề xuất</div>
+        <div class="action-situation">${situation}</div>
+        <div class="action-grid">
+          <div class="action-item">
+            <div class="action-label">Nếu đang giữ mã</div>
+            <div class="action-text">${holdAction}</div>
+          </div>
+          <div class="action-item">
+            <div class="action-label">Nếu chưa giữ</div>
+            <div class="action-text">${newAction}</div>
+          </div>
+        </div>
+        <div class="action-warning">⚠️ <b>Lưu ý:</b> ${warning}</div>
       </div>
     `;
   }

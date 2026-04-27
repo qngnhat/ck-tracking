@@ -1196,6 +1196,76 @@ button {
 }
 
 /* ════════════════════════════════════════
+   ACTION CARD (Hành động đề xuất per score)
+   ════════════════════════════════════════ */
+.action-card {
+  border-left: 3px solid #00d2ff;
+}
+
+.action-situation {
+  font-size: 12px;
+  color: #d0d0d0;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.action-item {
+  background: #16213e;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.action-label {
+  font-size: 10px;
+  color: #00d2ff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.action-text {
+  font-size: 12px;
+  color: #d0d0d0;
+  line-height: 1.6;
+}
+
+.action-text b {
+  color: #fff;
+}
+
+.action-warning {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.25);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #FF9800;
+  line-height: 1.5;
+}
+
+.action-warning b {
+  color: #FFB74D;
+}
+
+/* On desktop: 2 columns for hold/new actions */
+@media (min-width: 600px) {
+  .action-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ════════════════════════════════════════
    PAPER TRACKER
    ════════════════════════════════════════ */
 .tracker-section {
