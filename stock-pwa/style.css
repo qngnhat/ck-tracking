@@ -1380,6 +1380,120 @@ button {
 }
 
 /* ════════════════════════════════════════
+   WATCHLIST
+   ════════════════════════════════════════ */
+.watchlist-toggle {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #555;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.watchlist-toggle.active {
+  color: #FFD700;
+}
+
+.watchlist-toggle:active {
+  transform: scale(1.2);
+}
+
+.an-card.full-width {
+  position: relative;
+}
+
+.pick-watchlist {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #555;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pick-watchlist.active {
+  color: #FFD700;
+}
+
+.pick-watchlist:active {
+  transform: scale(1.2);
+}
+
+.home-card-action {
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  color: #00d2ff;
+  font-size: 13px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.home-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watchlist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #20203a;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.watchlist-row:last-child {
+  border-bottom: none;
+}
+
+.watchlist-row:active {
+  background: #16213e;
+}
+
+.wl-symbol {
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  min-width: 56px;
+}
+
+.wl-sector {
+  color: #888;
+  font-size: 10px;
+  background: #0f0f1e;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.wl-price {
+  color: #ccc;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.wl-rec {
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 80px;
+  text-align: right;
+}
+
+/* ════════════════════════════════════════
    ACTION CARD (Hành động đề xuất per score)
    ════════════════════════════════════════ */
 .action-card {

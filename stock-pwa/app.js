@@ -466,9 +466,13 @@
       contextHtml = renderTplusContextCard(analyzeContextPick, analyzeContextRank, r);
     }
 
+    const inWatchlist = RANKING.isInWatchlist(r.symbol);
     root.innerHTML = contextHtml + `
       <!-- Header card -->
       <div class="an-card full-width">
+        <button class="watchlist-toggle ${inWatchlist ? 'active' : ''}" id="watchlist-toggle" data-symbol="${r.symbol}" title="${inWatchlist ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
+          ${inWatchlist ? '★' : '☆'}
+        </button>
         <div class="an-head">
           <div class="an-symbol">${r.symbol}</div>
           <div class="an-price-row">
@@ -632,6 +636,19 @@
         changeResolution(btn.dataset.res);
       });
     });
+
+    // Bind watchlist toggle
+    const wlBtn = root.querySelector("#watchlist-toggle");
+    if (wlBtn) {
+      wlBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sym = wlBtn.dataset.symbol;
+        const added = RANKING.toggleWatchlist(sym);
+        wlBtn.classList.toggle("active", added);
+        wlBtn.textContent = added ? "★" : "☆";
+        wlBtn.title = added ? "Bỏ khỏi watchlist" : "Thêm vào watchlist";
+      });
+    }
   }
 
   function clearAnalyzeContext() {
@@ -1192,6 +1209,9 @@
       lastDcaSnap
     );
 
+    const watchlist = RANKING.loadWatchlist();
+    const watchlistCount = watchlist.length;
+
     let html = `
       <div class="home-greeting">
         <div class="home-greeting-text">${greeting}</div>
@@ -1206,6 +1226,28 @@
         </ul>
       </div>
     `;
+
+    // Watchlist section
+    if (watchlistCount > 0) {
+      html += `
+        <div class="home-card watchlist-card">
+          <div class="home-card-title">
+            ⭐ Watchlist (${watchlistCount} mã)
+            <button class="home-card-action" id="watchlist-refresh-home" title="Cập nhật">↻</button>
+          </div>
+          <div id="home-watchlist-content">
+            <div class="home-card-empty">Tap ↻ để load giá hiện tại</div>
+          </div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="home-card">
+          <div class="home-card-title">⭐ Watchlist</div>
+          <div class="home-card-empty">Chưa có mã nào trong watchlist. Vào tab Phân tích → bấm ☆ để thêm.</div>
+        </div>
+      `;
+    }
 
     // 2. T+ opportunities preview
     if (tplusCached && tplusCached.picks && tplusCached.picks.length > 0) {
@@ -1312,6 +1354,74 @@
             if (input) input.focus();
           }, 100);
         }
+      });
+    });
+
+    // Watchlist refresh button + auto load if cache fresh
+    const wlRefresh = document.getElementById("watchlist-refresh-home");
+    if (wlRefresh) {
+      wlRefresh.addEventListener("click", (e) => {
+        e.stopPropagation();
+        loadWatchlistInHome(true);
+      });
+      // Auto load if cache exists
+      try {
+        const cached = JSON.parse(localStorage.getItem("watchlist_data_v1") || "null");
+        if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
+          renderWatchlistInHome(cached.data);
+        }
+      } catch {}
+    }
+  }
+
+  async function loadWatchlistInHome(forceFresh = false) {
+    const wrap = $("home-watchlist-content");
+    if (!wrap) return;
+    wrap.innerHTML = `<div class="home-card-empty">Đang tải...</div>`;
+    try {
+      const data = await RANKING.fetchWatchlistData({ useCache: !forceFresh });
+      renderWatchlistInHome(data);
+    } catch (e) {
+      wrap.innerHTML = `<div class="home-card-empty">Lỗi: ${e.message}</div>`;
+    }
+  }
+
+  function renderWatchlistInHome(data) {
+    const wrap = $("home-watchlist-content");
+    if (!wrap) return;
+    if (!data || data.length === 0) {
+      wrap.innerHTML = `<div class="home-card-empty">Watchlist trống</div>`;
+      return;
+    }
+    wrap.innerHTML = data.map((d) => {
+      if (d.error) {
+        return `<div class="watchlist-row" data-symbol="${d.symbol}">
+          <span class="wl-symbol">${d.symbol}</span>
+          <span class="home-card-empty">Lỗi: ${d.error}</span>
+        </div>`;
+      }
+      const dayCls = d.dayChange >= 0 ? "up" : "down";
+      const daySign = d.dayChange >= 0 ? "+" : "";
+      return `
+        <div class="watchlist-row" data-symbol="${d.symbol}">
+          <span class="wl-symbol">${d.symbol}</span>
+          <span class="wl-sector">${sectorLabel(d.sector)}</span>
+          <span class="wl-price">${fp(d.currentPrice)}</span>
+          <span class="pct ${dayCls}">${daySign}${d.dayChange.toFixed(2)}%</span>
+          <span class="wl-rec" style="color:${d.recColor}">${d.recommendation}</span>
+        </div>
+      `;
+    }).join("");
+
+    // Tap row → analyze
+    wrap.querySelectorAll(".watchlist-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sym = row.dataset.symbol;
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        clearAnalyzeContext();
+        analyzeSymbol(sym);
       });
     });
   }
@@ -1634,6 +1744,7 @@
         ).join("");
       }
 
+      const isWatched = RANKING.isInWatchlist(p.symbol);
       html += `
         <div class="pick-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
           <div class="pick-rank">#${i + 1}</div>
@@ -1649,6 +1760,9 @@
             </div>
             <div class="pick-tags">${tagsHtml}</div>
           </div>
+          <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
+            ${isWatched ? '★' : '☆'}
+          </button>
           <div class="pick-cta">›</div>
         </div>
       `;
@@ -1673,7 +1787,9 @@
     content.innerHTML = html;
 
     content.querySelectorAll(".pick-card").forEach((card) => {
-      card.addEventListener("click", () => {
+      card.addEventListener("click", (e) => {
+        // Skip if clicked watchlist button (handled separately)
+        if (e.target.closest(".pick-watchlist")) return;
         const sym = card.dataset.symbol;
         const rank = parseInt(card.dataset.rank, 10);
         const pick = picks.find((p) => p.symbol === sym);
@@ -1684,6 +1800,18 @@
         const input = document.getElementById("symbol-input");
         if (input) input.value = sym;
         analyzeSymbol(sym);
+      });
+    });
+
+    // Bind quick-add watchlist buttons
+    content.querySelectorAll(".pick-watchlist").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sym = btn.dataset.symbol;
+        const added = RANKING.toggleWatchlist(sym);
+        btn.classList.toggle("active", added);
+        btn.textContent = added ? "★" : "☆";
+        btn.title = added ? "Bỏ khỏi watchlist" : "Thêm vào watchlist";
       });
     });
   }

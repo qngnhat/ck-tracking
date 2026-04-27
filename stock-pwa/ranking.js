@@ -893,6 +893,130 @@ window.__SSI_RANKING__ = (function () {
     localStorage.removeItem(TRACKER_KEY);
   }
 
+  // ── Watchlist (mã user theo dõi) ────────────────────
+  const WATCHLIST_KEY = "user_watchlist_v1";
+  const WATCHLIST_DATA_KEY = "watchlist_data_v1";
+  const WATCHLIST_DATA_TTL = 30 * 60 * 1000; // 30 phút
+
+  function loadWatchlist() {
+    try {
+      const raw = localStorage.getItem(WATCHLIST_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveWatchlist(arr) {
+    try {
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(arr));
+    } catch {}
+  }
+
+  function isInWatchlist(symbol) {
+    if (!symbol) return false;
+    const sym = symbol.toUpperCase();
+    return loadWatchlist().some((w) => w.symbol === sym);
+  }
+
+  function addToWatchlist(symbol) {
+    if (!symbol) return false;
+    const sym = symbol.toUpperCase();
+    const list = loadWatchlist();
+    if (list.some((w) => w.symbol === sym)) return false;
+    list.push({ symbol: sym, addedAt: Date.now() });
+    saveWatchlist(list);
+    // Invalidate data cache (force re-fetch next time)
+    try { localStorage.removeItem(WATCHLIST_DATA_KEY); } catch {}
+    return true;
+  }
+
+  function removeFromWatchlist(symbol) {
+    if (!symbol) return false;
+    const sym = symbol.toUpperCase();
+    const list = loadWatchlist().filter((w) => w.symbol !== sym);
+    saveWatchlist(list);
+    try { localStorage.removeItem(WATCHLIST_DATA_KEY); } catch {}
+    return true;
+  }
+
+  function toggleWatchlist(symbol) {
+    if (isInWatchlist(symbol)) {
+      removeFromWatchlist(symbol);
+      return false;
+    } else {
+      addToWatchlist(symbol);
+      return true;
+    }
+  }
+
+  /**
+   * Fetch latest data + analysis for each watchlist symbol.
+   * Returns array of {symbol, sector, currentPrice, dayChange, score,
+   *   recommendation, recColor, rsi, error?}.
+   */
+  async function fetchWatchlistData(opts = {}) {
+    const { useCache = true, onProgress } = opts;
+    const list = loadWatchlist();
+    if (list.length === 0) return [];
+
+    if (useCache) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(WATCHLIST_DATA_KEY) || "null");
+        if (cached && Date.now() - cached.timestamp < WATCHLIST_DATA_TTL) {
+          // Verify cache covers current watchlist
+          const cachedSyms = new Set((cached.data || []).map((d) => d.symbol));
+          const currentSyms = new Set(list.map((w) => w.symbol));
+          if (cachedSyms.size === currentSyms.size &&
+              [...currentSyms].every((s) => cachedSyms.has(s))) {
+            return cached.data;
+          }
+        }
+      } catch {}
+    }
+
+    const result = [];
+    const batchSize = 5;
+    let done = 0;
+    for (let i = 0; i < list.length; i += batchSize) {
+      const batch = list.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (w) => {
+        try {
+          const data = await ANALYSIS.fetchHistory(w.symbol, "D", 250);
+          const r = ANALYSIS.analyze(w.symbol, data, {});
+          result.push({
+            symbol: w.symbol,
+            sector: getSector(w.symbol),
+            currentPrice: r.current,
+            dayChange: r.dayChange,
+            score: r.score,
+            recommendation: r.recommendation,
+            recColor: r.recColor,
+            rsi: r.rsi,
+            addedAt: w.addedAt,
+          });
+        } catch (e) {
+          result.push({ symbol: w.symbol, error: e.message });
+        }
+        done++;
+        if (onProgress) onProgress(done, list.length);
+      }));
+    }
+
+    // Sort by addedAt (newest first)
+    result.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+    try {
+      localStorage.setItem(WATCHLIST_DATA_KEY, JSON.stringify({
+        timestamp: Date.now(), data: result,
+      }));
+    } catch {}
+
+    return result;
+  }
+
   // Fetch current prices for unique symbols across all snapshots
   async function fetchCurrentPrices(symbols) {
     const result = {};
@@ -926,5 +1050,12 @@ window.__SSI_RANKING__ = (function () {
     takeSnapshot,
     clearTracker,
     fetchCurrentPrices,
+    // Watchlist
+    loadWatchlist,
+    isInWatchlist,
+    addToWatchlist,
+    removeFromWatchlist,
+    toggleWatchlist,
+    fetchWatchlistData,
   };
 })();
