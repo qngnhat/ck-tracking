@@ -2316,11 +2316,18 @@
   let dcaTopSymbols = new Set();
 
   function fmtMoney(vnd) {
-    if (!vnd || isNaN(vnd)) return "0";
-    if (Math.abs(vnd) >= 1e9) return (vnd / 1e9).toFixed(2) + " tỷ";
-    if (Math.abs(vnd) >= 1e6) return (vnd / 1e6).toFixed(1) + " tr";
-    if (Math.abs(vnd) >= 1e3) return (vnd / 1e3).toFixed(0) + "k";
-    return vnd.toFixed(0);
+    if (vnd === null || vnd === undefined || isNaN(vnd)) return "0";
+    const abs = Math.abs(vnd);
+    // ≥ 1 tỷ: show "X,YYY tỷ" (vi-VN locale: "," = decimal sep)
+    if (abs >= 1e9) {
+      return (vnd / 1e9).toLocaleString("vi-VN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 3,
+      }) + " tỷ";
+    }
+    // < 1 tỷ: show kVND with full precision (no rounding)
+    // 4,649,000 VND → "4.649k" (vi-VN: "." = thousand sep)
+    return Math.round(vnd / 1e3).toLocaleString("vi-VN") + "k";
   }
 
   function fmtPriceK(price) {
