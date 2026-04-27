@@ -30,6 +30,13 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ T+ universe expansion (top 120 by market cap)
 - ✅ Action card "Hành động đề xuất" per score level
 - ✅ Home tab dashboard adaptive theo thời gian/ngày
+- ✅ Watchlist + alert system (signal change detection, browser notification)
+- ✅ Paper tracker (snapshot picks, verify performance vs hypothetical)
+- ✅ Login Google OAuth qua Supabase + multi-device DB sync (RLS per user)
+- ✅ Hosted on Cloudflare Workers (after hitting Netlify free tier)
+- ✅ Portfolio Phase 1: nhập giao dịch (mua/bán), holdings, cash, P&L, action recommendation per holding
+- ✅ Autocomplete cho input mã trong transaction modal (reuse cùng filterStocks logic)
+- ✅ Company info trong analyze header (tên CTCK · ngành · sàn HOSE/HNX)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

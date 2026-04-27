@@ -467,6 +467,14 @@
     }
 
     const inWatchlist = RANKING.isInWatchlist(r.symbol);
+    const meta = getStockMeta(r.symbol) || { name: "", floor: "", sector: null };
+    const companyParts = [];
+    if (meta.name) companyParts.push(escapeHtml(meta.name));
+    if (meta.sector) companyParts.push(sectorLabel(meta.sector));
+    if (meta.floor) companyParts.push(meta.floor);
+    const companyLine = companyParts.length
+      ? `<div class="an-company-line">${companyParts.join(" · ")}</div>`
+      : "";
     root.innerHTML = contextHtml + `
       <!-- Header card -->
       <div class="an-card full-width">
@@ -475,6 +483,7 @@
         </button>
         <div class="an-head">
           <div class="an-symbol">${r.symbol}</div>
+          ${companyLine}
           <div class="an-price-row">
             <span class="an-price">${fp(r.current)}</span>
             <span class="pct ${changeClass}">${changeSign}${r.dayChange.toFixed(2)}%</span>
@@ -895,6 +904,118 @@
     } catch (_) {
       // Offline or API down — suggestions simply won't appear
     }
+  }
+
+  // ── Stock metadata helpers ──
+  const SECTOR_LABELS = {
+    bank: "Ngân hàng",
+    realestate: "Bất động sản",
+    retail: "Bán lẻ / Tiêu dùng",
+    industrial: "Công nghiệp / Thép",
+    energy: "Năng lượng / Dầu khí",
+    utility: "Tiện ích",
+    tech: "Công nghệ",
+    broker: "Chứng khoán",
+    pharma: "Dược phẩm",
+    food: "Thực phẩm",
+    aviation: "Hàng không",
+    other: "Khác",
+  };
+
+  function sectorLabel(sector) {
+    if (!sector) return "";
+    return SECTOR_LABELS[sector] || sector;
+  }
+
+  function getStockMeta(symbol) {
+    if (!symbol) return null;
+    const sym = symbol.toUpperCase();
+    const found = stockList.find((s) => s.code === sym);
+    const sector = (window.__SSI_RANKING__?.UNIVERSE || []).find((u) => u.code === sym)?.sector;
+    return {
+      code: sym,
+      name: found?.name || "",
+      floor: found?.floor || "",
+      sector: sector || null,
+    };
+  }
+
+  // Generic autocomplete attach (cho bất kỳ input nào)
+  function attachAutocomplete(inputEl, onSelect) {
+    if (!inputEl || inputEl.dataset.autocompleteBound) return;
+    inputEl.dataset.autocompleteBound = "1";
+
+    // Wrap input with relative container if not already
+    const parent = inputEl.parentElement;
+    if (parent && getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "suggestions ac-suggestions";
+    parent.appendChild(wrap);
+
+    let idx = -1;
+
+    function render(list) {
+      if (!list || list.length === 0) {
+        wrap.classList.remove("show");
+        wrap.innerHTML = "";
+        idx = -1;
+        return;
+      }
+      wrap.innerHTML = list
+        .map((s, i) => `
+          <div class="suggestion-item" data-code="${s.code}" data-idx="${i}">
+            <span class="sugg-code">${s.code}</span>
+            <span class="sugg-name">${escapeHtml(s.name || "")}</span>
+            <span class="sugg-floor">${s.floor || ""}</span>
+          </div>
+        `).join("");
+      wrap.classList.add("show");
+      idx = -1;
+    }
+
+    function hide() {
+      wrap.classList.remove("show");
+      idx = -1;
+    }
+
+    inputEl.addEventListener("input", () => render(filterStocks(inputEl.value)));
+    inputEl.addEventListener("focus", () => {
+      if (inputEl.value.trim()) render(filterStocks(inputEl.value));
+    });
+    inputEl.addEventListener("keydown", (e) => {
+      const items = wrap.querySelectorAll(".suggestion-item");
+      if (e.key === "Escape") hide();
+      else if (e.key === "ArrowDown" && items.length) {
+        e.preventDefault();
+        idx = Math.min(idx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle("active", i === idx));
+      } else if (e.key === "ArrowUp" && items.length) {
+        e.preventDefault();
+        idx = Math.max(idx - 1, -1);
+        items.forEach((el, i) => el.classList.toggle("active", i === idx));
+      } else if (e.key === "Enter" && idx >= 0 && items[idx]) {
+        e.preventDefault();
+        const code = items[idx].dataset.code;
+        inputEl.value = code;
+        hide();
+        onSelect?.(code);
+      }
+    });
+
+    wrap.addEventListener("click", (e) => {
+      const item = e.target.closest(".suggestion-item");
+      if (!item) return;
+      inputEl.value = item.dataset.code;
+      hide();
+      onSelect?.(item.dataset.code);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!wrap.contains(e.target) && e.target !== inputEl) hide();
+    });
   }
 
   function filterStocks(query) {
@@ -2275,6 +2396,11 @@
     const form = $("tx-form");
     if (!form || form.dataset.bound) return;
     form.dataset.bound = "1";
+
+    // Symbol autocomplete (gợi ý mã giống search bar)
+    attachAutocomplete($("tx-symbol"), () => {
+      $("tx-quantity")?.focus();
+    });
 
     // Side toggle
     document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((btn) => {

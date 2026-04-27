@@ -466,6 +466,12 @@ button {
   display: block;
 }
 
+/* Autocomplete used inside modals (transaction modal, etc.) */
+.ac-suggestions {
+  z-index: 220; /* above modal (201) so it overlays sibling form rows */
+  max-height: 240px;
+}
+
 .suggestion-item {
   display: flex;
   justify-content: space-between;
@@ -646,6 +652,15 @@ button {
   font-weight: 700;
   color: #fff;
   letter-spacing: 1px;
+}
+
+.an-company-line {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+  letter-spacing: 0.2px;
+  padding: 0 8px;
+  line-height: 1.4;
 }
 
 .an-price-row {
