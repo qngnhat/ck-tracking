@@ -85,6 +85,68 @@ window.__SSI_RANKING__ = (function () {
 
   const UNIVERSE = [...CORE_VN30, ...EXTENDED];
 
+  // Sector lookup từ universe — fallback "other" cho mã ngoài
+  const SECTOR_MAP = Object.fromEntries(UNIVERSE.map((u) => [u.code, u.sector]));
+  function getSector(code) {
+    return SECTOR_MAP[code] || "other";
+  }
+
+  // ── Expanded T+ Universe (top by market cap) ────────
+  // T+ scan rộng hơn để tăng cơ hội setup. DCA giữ 58 mã curated
+  // (chỉ blue-chip cho long-term hold), T+ scan top ~120 mã.
+  // Cache 7 ngày — market cap không đổi nhanh.
+  const TPLUS_UNIVERSE_KEY = "tplus_universe_v1";
+  const TPLUS_UNIVERSE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+  async function fetchTopMcapUniverse(limit = 120) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(TPLUS_UNIVERSE_KEY) || "null");
+      if (cached && Date.now() - cached.timestamp < TPLUS_UNIVERSE_TTL_MS &&
+          cached.data && cached.data.length >= limit) {
+        return cached.data.slice(0, limit);
+      }
+    } catch {}
+
+    try {
+      const fromDate = new Date(Date.now() - 5 * 24 * 3600 * 1000)
+        .toISOString().split("T")[0];
+      const url =
+        `https://api-finfo.vndirect.com.vn/v4/ratios?` +
+        `q=ratioCode:MARKETCAP~group:STOCK~reportDate:gte:${fromDate}` +
+        `&size=500&sort=value:desc`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const json = await res.json();
+      const data = json.data || [];
+      if (data.length === 0) return null;
+
+      // Latest reportDate per code (in case multiple dates returned)
+      const latestPerCode = {};
+      for (const item of data) {
+        const cur = latestPerCode[item.code];
+        if (!cur || item.reportDate > cur.reportDate) {
+          latestPerCode[item.code] = item;
+        }
+      }
+      const sorted = Object.values(latestPerCode).sort(
+        (a, b) => (b.value || 0) - (a.value || 0)
+      );
+
+      const result = sorted.slice(0, limit).map((item) => ({
+        code: item.code,
+        sector: getSector(item.code),
+        marketCap: item.value,
+      }));
+
+      localStorage.setItem(TPLUS_UNIVERSE_KEY, JSON.stringify({
+        timestamp: Date.now(), data: result,
+      }));
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
   const FACTOR_NAMES = [
     "ma200Quality", "lowDrawdown", "momentum6m",
     "trendConsistency", "liquidity", "foreignFlow60d",
@@ -699,7 +761,13 @@ window.__SSI_RANKING__ = (function () {
     }
 
     const startTime = Date.now();
-    const stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+    // T+ uses expanded universe (top ~120 by market cap) for more opportunities.
+    // Falls back to curated UNIVERSE if API fails.
+    let universeList = await fetchTopMcapUniverse(120);
+    if (!universeList || universeList.length < 50) {
+      universeList = UNIVERSE;
+    }
+    const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector }));
 
     const batchSize = 10;
     let done = 0;
