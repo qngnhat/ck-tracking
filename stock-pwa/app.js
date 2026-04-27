@@ -2920,8 +2920,20 @@
     }
     empty.style.display = "none";
 
+    // Detect duplicate transactions (caused by old migration bug)
+    const dupeCount = PORTFOLIO.countDuplicateTransactions();
+    const dupeBannerHtml = dupeCount > 0 ? `
+      <div class="dupe-banner" id="dupe-banner">
+        <div class="dupe-banner-text">
+          ⚠️ Phát hiện <b>${dupeCount}</b> giao dịch trùng lặp (do bug đồng bộ DB cũ). Khối lượng holdings có thể bị nhân đôi.
+        </div>
+        <button class="btn-primary" id="dedupe-btn">Dọn duplicates</button>
+      </div>
+    ` : "";
+
     // Show skeleton first, fetch analysis in background
     container.innerHTML = `
+      ${dupeBannerHtml}
       <div class="port-summary-card" id="port-summary-card">
         <div class="port-summary-header">
           <span class="port-summary-title">📊 Tổng quan</span>
@@ -2933,6 +2945,19 @@
         <div class="loading"><div class="spinner"></div><div>Đang phân tích từng mã...</div></div>
       </div>
     `;
+
+    // Bind dedupe button
+    const dedupeBtn = $("dedupe-btn");
+    if (dedupeBtn) {
+      dedupeBtn.onclick = async () => {
+        if (!confirm(`Sẽ xóa ${dupeCount} giao dịch trùng lặp (giữ lại 1 cho mỗi cặp). Tiếp tục?`)) return;
+        dedupeBtn.disabled = true;
+        dedupeBtn.textContent = "Đang dọn...";
+        const removed = await PORTFOLIO.dedupeTransactions();
+        alert(`Đã xóa ${removed} giao dịch trùng lặp.`);
+        renderPortfolio();
+      };
+    }
 
     // Load DCA top picks (cached) for "in-top" check
     try {
@@ -3056,10 +3081,8 @@
               <span class="holding-day pct ${dayCls}">${daySign}${dayChange.toFixed(2)}%</span>
             </div>
             <div class="holding-row2">
-              <span class="holding-qty">${h.qty.toLocaleString("vi-VN")}cp</span>
-              <span class="holding-cost">cost ${fmtPriceK(h.avg_cost)}</span>
-              <span class="holding-arrow">→</span>
-              <span class="holding-current">${fmtPriceK(cur)}</span>
+              <span class="holding-qty">KL: <b>${h.qty.toLocaleString("vi-VN")}</b></span>
+              <span class="holding-cost">Cost: <b>${fmtPriceK(h.avg_cost)}</b> → <b>${fmtPriceK(cur)}</b></span>
               <span class="holding-mv">${fmtMoney(marketValue)}</span>
             </div>
             <div class="holding-row3">

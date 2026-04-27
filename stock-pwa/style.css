@@ -2191,26 +2191,30 @@ button {
 
 .holding-row2 {
   display: flex;
-  gap: 8px;
+  gap: 18px;
   align-items: baseline;
   font-size: 12px;
-  color: #aaa;
+  color: #888;
   margin-bottom: 6px;
   flex-wrap: wrap;
 }
 
 .holding-qty {
-  color: #fff;
-  font-weight: 600;
+  color: #888;
 }
 
-.holding-arrow {
-  color: #666;
+.holding-qty b {
+  color: #fff;
+  font-weight: 700;
 }
 
-.holding-current {
+.holding-cost {
+  color: #888;
+}
+
+.holding-cost b {
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .holding-mv {
@@ -2513,6 +2517,33 @@ button {
 
 .hd-tx-del {
   color: #ff4444 !important;
+}
+
+/* Duplicate transactions warning banner */
+.dupe-banner {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dupe-banner-text {
+  flex: 1;
+  font-size: 12px;
+  color: #ffb74d;
+  line-height: 1.5;
+  min-width: 200px;
+}
+
+.dupe-banner .btn-primary {
+  padding: 6px 14px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* Chart inside holding detail modal */

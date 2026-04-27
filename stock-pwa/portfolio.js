@@ -204,7 +204,12 @@ window.__SSI_PORTFOLIO__ = (function () {
     if (!_isOnline()) return;
     const local = loadTransactions();
     if (local.length === 0) return;
-    // Insert in batches
+    // CRITICAL: skip if DB already has rows (else sync pulls them, then migrate re-inserts → dupe)
+    const existing = await _AUTH().dbSelect("transactions", {}).catch(() => null);
+    if (existing && existing.length > 0) {
+      console.log("[portfolio] DB already has txs, skip migration");
+      return;
+    }
     const batch = local.map((t) => ({
       symbol: t.symbol,
       side: t.side,
@@ -222,12 +227,56 @@ window.__SSI_PORTFOLIO__ = (function () {
   async function migrateCashToDB() {
     if (!_isOnline()) return;
     const cash = loadCash();
-    if (cash > 0) {
-      await _AUTH().dbUpsert("portfolio_meta", {
-        cash,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "user_id" }).catch(() => {});
+    if (cash <= 0) return;
+    // Skip if DB already has cash record (upsert would overwrite anyway, but be explicit)
+    const existing = await _AUTH().dbSelect("portfolio_meta", {}).catch(() => null);
+    if (existing && existing.length > 0) {
+      console.log("[portfolio] DB already has cash, skip migration");
+      return;
     }
+    await _AUTH().dbUpsert("portfolio_meta", {
+      cash,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" }).catch(() => {});
+  }
+
+  // Dedupe: remove transactions that have identical (symbol, side, qty, price, fee, trade_date, notes)
+  // Used to clean up dupes caused by migration bug. Returns number of dupes removed.
+  async function dedupeTransactions() {
+    const local = loadTransactions();
+    const seen = new Map(); // signature → first id seen
+    const toKeep = [];
+    const toDelete = [];
+    for (const t of local) {
+      const sig = `${t.symbol}|${t.side}|${t.quantity}|${t.price}|${t.fee || 0}|${t.trade_date}|${t.notes || ""}`;
+      if (!seen.has(sig)) {
+        seen.set(sig, t.id);
+        toKeep.push(t);
+      } else {
+        toDelete.push(t.id);
+      }
+    }
+    saveTransactions(toKeep);
+    if (_isOnline() && toDelete.length > 0) {
+      // Delete in DB serially (each respects RLS)
+      for (const id of toDelete) {
+        await _AUTH().dbDelete("transactions", { eq: { id } }).catch(() => {});
+      }
+    }
+    return toDelete.length;
+  }
+
+  // Detect duplicate count without modifying anything
+  function countDuplicateTransactions() {
+    const local = loadTransactions();
+    const seen = new Set();
+    let count = 0;
+    for (const t of local) {
+      const sig = `${t.symbol}|${t.side}|${t.quantity}|${t.price}|${t.fee || 0}|${t.trade_date}|${t.notes || ""}`;
+      if (seen.has(sig)) count++;
+      else seen.add(sig);
+    }
+    return count;
   }
 
   // ── Action recommendation per holding (giàu logic, dùng Setup score) ──
@@ -326,5 +375,8 @@ window.__SSI_PORTFOLIO__ = (function () {
     syncCashFromDB,
     migrateTransactionsToDB,
     migrateCashToDB,
+    // Maintenance
+    dedupeTransactions,
+    countDuplicateTransactions,
   };
 })();
