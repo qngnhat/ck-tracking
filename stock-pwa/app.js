@@ -2502,6 +2502,7 @@
 
   // ── Holding detail modal (per-symbol portfolio analysis + tx history) ──
   let hdCurrentSymbol = null;
+  let hdChartInstance = null;
 
   function openHoldingDetail(symbol) {
     hdCurrentSymbol = symbol;
@@ -2519,6 +2520,10 @@
     $("hd-modal")?.classList.remove("open");
     $("hd-modal-backdrop")?.classList.remove("open");
     hdCurrentSymbol = null;
+    if (hdChartInstance) {
+      try { hdChartInstance.remove(); } catch {}
+      hdChartInstance = null;
+    }
   }
 
   function bindHoldingDetailModal() {
@@ -2721,9 +2726,23 @@
       </div>
     `;
 
+    const chartHtml = `
+      <div class="hd-section hd-chart-section">
+        <div class="hd-section-title">📈 Biểu đồ giá</div>
+        <div class="hd-chart-legend">
+          <span class="hd-chart-leg hd-leg-cost">— Giá vốn</span>
+          ${qty > 0 && pnlPct > 0 ? `<span class="hd-chart-leg hd-leg-tp">— TP1/TP2</span>` : ""}
+          ${qty > 0 ? `<span class="hd-chart-leg hd-leg-sl">— Stop loss</span>` : ""}
+          <span class="hd-chart-leg hd-leg-ma">— MA20</span>
+        </div>
+        <div id="hd-chart-container"></div>
+      </div>
+    `;
+
     body.innerHTML = `
       ${companyLine}
       ${positionHtml}
+      ${chartHtml}
       ${actionHtml}
       ${planHtml}
       ${setupHtml}
@@ -2733,6 +2752,11 @@
         <button class="link-btn" id="hd-open-analysis">Xem phân tích đầy đủ →</button>
       </div>
     `;
+
+    // Render chart async (don't block UI)
+    renderHoldingChart(symbol, holding, plan).catch((e) => {
+      console.warn("[hd] chart render failed", e);
+    });
 
     // Bind action buttons
     $("hd-add-tx")?.addEventListener("click", () => {
@@ -2769,6 +2793,102 @@
         renderPortfolio();
       });
     });
+  }
+
+  async function renderHoldingChart(symbol, holding, plan) {
+    const container = $("hd-chart-container");
+    if (!container || !window.LightweightCharts) return;
+
+    // Clean up old
+    container.innerHTML = "";
+    if (hdChartInstance) {
+      try { hdChartInstance.remove(); } catch {}
+      hdChartInstance = null;
+    }
+
+    let data;
+    try {
+      data = await ANALYSIS.fetchHistory(symbol, "D", 120);
+    } catch (e) {
+      container.innerHTML = `<div class="hd-muted">Không tải được biểu đồ.</div>`;
+      return;
+    }
+
+    // Modal might have closed before fetch finished — bail
+    if (hdCurrentSymbol !== symbol) return;
+    const cur = $("hd-chart-container");
+    if (!cur) return;
+
+    const candles = data.times.map((t, i) => ({
+      time: t,
+      open: data.opens[i],
+      high: data.highs[i],
+      low: data.lows[i],
+      close: data.closes[i],
+    }));
+
+    hdChartInstance = window.LightweightCharts.createChart(cur, {
+      width: cur.clientWidth,
+      height: 220,
+      layout: {
+        background: { color: "#0f0f1e" },
+        textColor: "#a0a0b0",
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { color: "#1f1f2e" },
+        horzLines: { color: "#1f1f2e" },
+      },
+      rightPriceScale: { borderColor: "#2a2a3e" },
+      timeScale: { borderColor: "#2a2a3e", timeVisible: false, secondsVisible: false },
+      crosshair: { mode: 1 },
+    });
+
+    const candleSeries = hdChartInstance.addCandlestickSeries({
+      upColor: "#4CAF50", downColor: "#ff4444",
+      borderUpColor: "#4CAF50", borderDownColor: "#ff4444",
+      wickUpColor: "#4CAF50", wickDownColor: "#ff4444",
+    });
+    candleSeries.setData(candles);
+
+    // MA20 overlay
+    const ma20Pts = computeSMASeries(data.closes, data.times, 20).filter((p) => p.value !== null);
+    if (ma20Pts.length) {
+      const ma20Line = hdChartInstance.addLineSeries({
+        color: "#888", lineWidth: 1, title: "MA20",
+        priceLineVisible: false, lastValueVisible: false,
+      });
+      ma20Line.setData(ma20Pts);
+    }
+
+    // Horizontal lines: avg cost, stop loss, TP1, TP2
+    const addLine = (price, color, title) => {
+      if (!price || price <= 0 || isNaN(price)) return;
+      candleSeries.createPriceLine({
+        price,
+        color,
+        lineWidth: 2,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title,
+      });
+    };
+
+    if (holding && holding.qty > 0 && holding.avg_cost > 0) {
+      addLine(holding.avg_cost, "#00d2ff", "Vốn");
+      const cur = data.closes[data.closes.length - 1];
+      const pnl = cur - holding.avg_cost;
+      // Show TP only if currently profitable
+      if (pnl > 0) {
+        addLine(holding.avg_cost * 1.10, "#FF9800", "TP1");
+        addLine(holding.avg_cost * 1.20, "#FF9800", "TP2");
+      }
+      if (plan?.stopLoss) {
+        addLine(plan.stopLoss, "#ff4444", "SL");
+      }
+    }
+
+    hdChartInstance.timeScale().fitContent();
   }
 
   // ── Portfolio render ──

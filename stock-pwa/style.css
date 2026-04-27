@@ -2515,6 +2515,36 @@ button {
   color: #ff4444 !important;
 }
 
+/* Chart inside holding detail modal */
+.hd-chart-section {
+  padding: 10px 10px 8px;
+}
+
+#hd-chart-container {
+  width: 100%;
+  min-height: 220px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.hd-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  margin-bottom: 8px;
+  letter-spacing: 0.2px;
+}
+
+.hd-chart-leg {
+  font-weight: 600;
+}
+
+.hd-leg-cost { color: #00d2ff; }
+.hd-leg-tp { color: #FF9800; }
+.hd-leg-sl { color: #ff4444; }
+.hd-leg-ma { color: #888; }
+
 .holding-actions-row {
   display: flex;
   gap: 12px;
