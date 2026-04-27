@@ -1226,6 +1226,8 @@
       localStorage.removeItem("alerts_log_v1");
       localStorage.removeItem("alerts_state_v1");
       localStorage.removeItem("paper_tracker_v1");
+      localStorage.removeItem("portfolio_tx_v1");
+      localStorage.removeItem("portfolio_cash_v1");
     }
     localStorage.setItem(LAST_USER_KEY, userId);
 
@@ -1235,6 +1237,8 @@
       RANKING.syncAlertsFromDB(),
       RANKING.syncAlertStateFromDB(),
       RANKING.syncTrackerFromDB(),
+      window.__SSI_PORTFOLIO__?.syncTransactionsFromDB(),
+      window.__SSI_PORTFOLIO__?.syncCashFromDB(),
     ]);
 
     // Phase 2: migrate any local-only data → DB (case: user was guest with data)
@@ -1249,12 +1253,15 @@
         RANKING.migrateAlertsToDB(),
         RANKING.migrateAlertStateToDB(),
         RANKING.migrateTrackerToDB(),
+        window.__SSI_PORTFOLIO__?.migrateTransactionsToDB(),
+        window.__SSI_PORTFOLIO__?.migrateCashToDB(),
       ]);
       // Re-sync after migration để pickup migrated data với DB-assigned IDs
       await Promise.all([
         RANKING.syncWatchlistFromDB(),
         RANKING.syncAlertsFromDB(),
         RANKING.syncTrackerFromDB(),
+        window.__SSI_PORTFOLIO__?.syncTransactionsFromDB(),
       ]);
       localStorage.setItem(MIGRATED_KEY, "1");
     }
@@ -2176,6 +2183,372 @@
   // Initial intro load button (delegated since it may be re-rendered)
   document.addEventListener("click", (e) => {
     if (e.target && e.target.id === "ranking-load-btn") loadRanking();
+  });
+
+  // ════════════════════════════════════════════════════
+  // ── PORTFOLIO TAB ──
+  // ════════════════════════════════════════════════════
+  const PORTFOLIO = window.__SSI_PORTFOLIO__;
+  let editingTxId = null;
+  // Cache analysis results per symbol khi render holdings
+  const portfolioAnalysisCache = {};
+  let dcaTopSymbols = new Set();
+
+  function fmtMoney(vnd) {
+    if (!vnd || isNaN(vnd)) return "0";
+    if (Math.abs(vnd) >= 1e9) return (vnd / 1e9).toFixed(2) + " tỷ";
+    if (Math.abs(vnd) >= 1e6) return (vnd / 1e6).toFixed(1) + " tr";
+    if (Math.abs(vnd) >= 1e3) return (vnd / 1e3).toFixed(0) + "k";
+    return vnd.toFixed(0);
+  }
+
+  function fmtPriceK(price) {
+    // Price in k-VND (display)
+    if (!price || isNaN(price)) return "--";
+    return price.toFixed(2);
+  }
+
+  // Click handlers cho add buttons (delegated since portfolio re-renders)
+  function openTxModal(editTx = null) {
+    editingTxId = editTx?.id || null;
+    const modal = $("tx-modal");
+    const backdrop = $("tx-modal-backdrop");
+    if (!modal || !backdrop) return;
+    modal.classList.add("open");
+    backdrop.classList.add("open");
+
+    // Pre-fill or reset
+    $("tx-modal-title").textContent = editTx ? "Sửa giao dịch" : "Thêm giao dịch";
+    $("tx-symbol").value = editTx?.symbol || "";
+    $("tx-quantity").value = editTx?.quantity || "";
+    $("tx-price").value = editTx?.price || "";
+    $("tx-fee").value = editTx?.fee || 0;
+    $("tx-date").value = editTx
+      ? new Date(editTx.trade_date).toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0];
+    $("tx-notes").value = editTx?.notes || "";
+    // Side toggle
+    document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.side === (editTx?.side || "buy"));
+    });
+    updateTxSummary();
+    setTimeout(() => $("tx-symbol").focus(), 50);
+  }
+
+  function closeTxModal() {
+    $("tx-modal")?.classList.remove("open");
+    $("tx-modal-backdrop")?.classList.remove("open");
+    editingTxId = null;
+  }
+
+  function updateTxSummary() {
+    const qty = Number($("tx-quantity").value) || 0;
+    const price = Number($("tx-price").value) || 0;
+    const fee = Number($("tx-fee").value) || 0;
+    const total = qty * price * 1000 + fee * 1000; // price in k → VND
+    const summary = $("tx-summary");
+    if (summary) {
+      summary.textContent = qty && price
+        ? `Tổng: ${fmtMoney(total)}đ`
+        : "";
+    }
+  }
+
+  function bindTxModal() {
+    const form = $("tx-form");
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+
+    // Side toggle
+    document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((b) =>
+          b.classList.remove("active")
+        );
+        btn.classList.add("active");
+      });
+    });
+
+    // Live summary
+    ["tx-quantity", "tx-price", "tx-fee"].forEach((id) => {
+      $(id)?.addEventListener("input", updateTxSummary);
+    });
+
+    // Cancel + close
+    $("tx-cancel")?.addEventListener("click", closeTxModal);
+    $("tx-modal-close")?.addEventListener("click", closeTxModal);
+    $("tx-modal-backdrop")?.addEventListener("click", closeTxModal);
+
+    // Submit
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const side = document.querySelector("#tx-side-toggle .seg-btn.active")?.dataset.side || "buy";
+      const symbol = $("tx-symbol").value.trim().toUpperCase();
+      const qty = Number($("tx-quantity").value);
+      const price = Number($("tx-price").value);
+      const fee = Number($("tx-fee").value || 0);
+      const date = $("tx-date").value
+        ? new Date($("tx-date").value).toISOString()
+        : new Date().toISOString();
+      const notes = $("tx-notes").value.trim() || null;
+
+      if (!symbol || !qty || !price) {
+        alert("Điền đủ Mã, KL, Giá.");
+        return;
+      }
+
+      // If editing, delete old then add new (simpler than update)
+      if (editingTxId) {
+        await PORTFOLIO.deleteTransaction(editingTxId);
+      }
+
+      await PORTFOLIO.addTransaction({
+        symbol, side, quantity: qty, price, fee,
+        trade_date: date, notes,
+      });
+
+      closeTxModal();
+      renderPortfolio();
+    });
+  }
+
+  // Cash modal
+  function openCashModal() {
+    const modal = $("cash-modal");
+    const backdrop = $("cash-modal-backdrop");
+    if (!modal || !backdrop) return;
+    modal.classList.add("open");
+    backdrop.classList.add("open");
+    $("cash-amount").value = (PORTFOLIO.loadCash() / 1000).toFixed(0); // VND → k
+    setTimeout(() => $("cash-amount").focus(), 50);
+  }
+
+  function closeCashModal() {
+    $("cash-modal")?.classList.remove("open");
+    $("cash-modal-backdrop")?.classList.remove("open");
+  }
+
+  function bindCashModal() {
+    const form = $("cash-form");
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+    $("cash-cancel")?.addEventListener("click", closeCashModal);
+    $("cash-modal-close")?.addEventListener("click", closeCashModal);
+    $("cash-modal-backdrop")?.addEventListener("click", closeCashModal);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const k = Number($("cash-amount").value) || 0;
+      await PORTFOLIO.updateCash(k * 1000); // k → VND
+      closeCashModal();
+      renderPortfolio();
+    });
+  }
+
+  // ── Portfolio render ──
+  async function renderPortfolio() {
+    const container = $("portfolio-content");
+    const empty = $("portfolio-empty");
+    if (!container || !empty) return;
+
+    bindTxModal();
+    bindCashModal();
+
+    const holdings = PORTFOLIO.currentHoldings();
+    const cash = PORTFOLIO.loadCash();
+    const allTxs = PORTFOLIO.loadTransactions();
+
+    if (holdings.length === 0 && allTxs.length === 0 && cash === 0) {
+      empty.style.display = "block";
+      container.innerHTML = "";
+      return;
+    }
+    empty.style.display = "none";
+
+    // Show skeleton first, fetch analysis in background
+    container.innerHTML = `
+      <div class="port-summary-card" id="port-summary-card">
+        <div class="port-summary-header">
+          <span class="port-summary-title">📊 Tổng quan</span>
+          <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+        </div>
+        <div class="port-summary-loading">Đang tải giá hiện tại...</div>
+      </div>
+      <div id="holdings-list">
+        <div class="loading"><div class="spinner"></div><div>Đang phân tích từng mã...</div></div>
+      </div>
+    `;
+
+    // Load DCA top picks (cached) for "in-top" check
+    try {
+      const cached = JSON.parse(localStorage.getItem("dca_top_picks_v1") || "null");
+      if (cached?.data?.picks) {
+        dcaTopSymbols = new Set(cached.data.picks.map((p) => p.symbol));
+      }
+    } catch {}
+
+    // Fetch current price + analysis for each holding (parallel)
+    const enriched = await Promise.all(
+      holdings.map(async (h) => {
+        try {
+          // Use cached if available
+          if (!portfolioAnalysisCache[h.symbol] ||
+              Date.now() - portfolioAnalysisCache[h.symbol]._ts > 30 * 60 * 1000) {
+            const data = await ANALYSIS.fetchHistory(h.symbol, "D", 250);
+            const r = ANALYSIS.analyze(h.symbol, data, {});
+            portfolioAnalysisCache[h.symbol] = { ...r, _ts: Date.now() };
+          }
+          return { ...h, analysis: portfolioAnalysisCache[h.symbol] };
+        } catch (e) {
+          return { ...h, analysis: null, error: e.message };
+        }
+      })
+    );
+
+    // Compute totals
+    let totalCost = 0, totalMarket = 0;
+    for (const h of enriched) {
+      totalCost += h.cost_basis;
+      if (h.analysis) {
+        totalMarket += h.qty * h.analysis.current * 1000; // price in k-VND × qty
+      }
+    }
+    const totalRealized = enriched.reduce((s, h) => s + (h.realized_pnl || 0) * 1000, 0); // k-VND
+
+    // Wait: we compute cost_basis using qty * avg_cost where avg_cost stored in k-VND (raw price). Convert at display.
+    // Actually let's normalize: in transactions, price is k-VND (since user inputs that). cost_basis = qty * avg_cost (k-VND). Multiply by 1000 to get VND.
+    totalCost *= 1000;
+
+    const unrealized = totalMarket - totalCost;
+    const unrealizedPct = totalCost > 0 ? (unrealized / totalCost) * 100 : 0;
+    const nav = totalMarket + cash;
+
+    // Render summary
+    const summaryCard = $("port-summary-card");
+    if (summaryCard) {
+      const pnlCls = unrealized >= 0 ? "up" : "down";
+      const pnlSign = unrealized >= 0 ? "+" : "";
+      summaryCard.innerHTML = `
+        <div class="port-summary-header">
+          <span class="port-summary-title">📊 Tổng quan</span>
+          <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+        </div>
+        <div class="port-summary-grid">
+          <div class="port-stat">
+            <div class="port-stat-label">Tổng vốn</div>
+            <div class="port-stat-value">${fmtMoney(totalCost)}</div>
+          </div>
+          <div class="port-stat">
+            <div class="port-stat-label">Giá trị thị trường</div>
+            <div class="port-stat-value">${fmtMoney(totalMarket)}</div>
+          </div>
+          <div class="port-stat">
+            <div class="port-stat-label">Lãi/Lỗ chưa thực hiện</div>
+            <div class="port-stat-value pct ${pnlCls}">${pnlSign}${unrealizedPct.toFixed(2)}%</div>
+            <div class="port-stat-sub">${pnlSign}${fmtMoney(unrealized)}</div>
+          </div>
+          <div class="port-stat">
+            <div class="port-stat-label">Cash <button class="port-stat-edit" id="edit-cash-btn">✎</button></div>
+            <div class="port-stat-value">${fmtMoney(cash)}</div>
+          </div>
+        </div>
+        <div class="port-summary-foot">
+          NAV: <b>${fmtMoney(nav)}</b>
+          ${totalRealized !== 0 ? ` · Lãi/lỗ thực hiện: <b>${totalRealized >= 0 ? "+" : ""}${fmtMoney(totalRealized)}</b>` : ""}
+          · ${enriched.length} mã
+        </div>
+      `;
+      $("add-tx-top")?.addEventListener("click", () => openTxModal());
+      $("edit-cash-btn")?.addEventListener("click", openCashModal);
+    }
+
+    // Render holdings list
+    const list = $("holdings-list");
+    if (list) {
+      // Sort: by P&L % desc (winners first)
+      enriched.sort((a, b) => {
+        const pnlA = a.analysis ? (a.analysis.current - a.avg_cost) / a.avg_cost : 0;
+        const pnlB = b.analysis ? (b.analysis.current - b.avg_cost) / b.avg_cost : 0;
+        return pnlB - pnlA;
+      });
+
+      list.innerHTML = enriched.map((h) => {
+        const ana = h.analysis;
+        const cur = ana?.current || 0;
+        const dayChange = ana?.dayChange || 0;
+        const marketValue = h.qty * cur * 1000;
+        const costBasis = h.cost_basis * 1000;
+        const pnl = marketValue - costBasis;
+        const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+        const pnlCls = pnl >= 0 ? "up" : "down";
+        const pnlSign = pnl >= 0 ? "+" : "";
+        const dayCls = dayChange >= 0 ? "up" : "down";
+        const daySign = dayChange >= 0 ? "+" : "";
+
+        const inDcaTop = dcaTopSymbols.has(h.symbol);
+        const action = ana ? PORTFOLIO.recommendAction(h, ana, inDcaTop) : null;
+        const setupLabel = ana?.recommendation || "--";
+        const setupColor = ana?.recColor || "#888";
+
+        return `
+          <div class="holding-card" data-symbol="${h.symbol}">
+            <div class="holding-row1">
+              <span class="holding-symbol">${h.symbol}</span>
+              <span class="holding-setup" style="color:${setupColor}">${setupLabel}</span>
+              <span class="holding-day pct ${dayCls}">${daySign}${dayChange.toFixed(2)}%</span>
+            </div>
+            <div class="holding-row2">
+              <span class="holding-qty">${h.qty.toLocaleString("vi-VN")}cp</span>
+              <span class="holding-cost">cost ${fmtPriceK(h.avg_cost)}</span>
+              <span class="holding-arrow">→</span>
+              <span class="holding-current">${fmtPriceK(cur)}</span>
+              <span class="holding-mv">${fmtMoney(marketValue)}</span>
+            </div>
+            <div class="holding-row3">
+              <span class="holding-pnl pct ${pnlCls}">${pnlSign}${pnlPct.toFixed(2)}% (${pnlSign}${fmtMoney(pnl)})</span>
+            </div>
+            ${action ? `
+              <div class="holding-action" style="border-left-color: ${action.color}">
+                <span class="holding-action-icon">${action.icon}</span>
+                <span class="holding-action-text">${action.text}</span>
+              </div>
+            ` : ""}
+            <div class="holding-actions-row">
+              <button class="link-btn holding-analyze">Phân tích</button>
+              <button class="link-btn holding-add-tx">+ Giao dịch</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // Bind row buttons
+      list.querySelectorAll(".holding-card").forEach((card) => {
+        const sym = card.dataset.symbol;
+        card.querySelector(".holding-analyze")?.addEventListener("click", () => {
+          switchTab("analyze");
+          const input = document.getElementById("symbol-input");
+          if (input) input.value = sym;
+          clearAnalyzeContext();
+          analyzeSymbol(sym);
+        });
+        card.querySelector(".holding-add-tx")?.addEventListener("click", () => {
+          // Open modal pre-filled with symbol
+          openTxModal();
+          $("tx-symbol").value = sym;
+        });
+      });
+    }
+  }
+
+  // Bind portfolio empty state add button
+  document.addEventListener("click", (e) => {
+    if (e.target?.id === "portfolio-empty-add") openTxModal();
+  });
+
+  // Re-render portfolio when switching to that tab
+  document.addEventListener("click", (e) => {
+    if (e.target.matches?.('.tab-btn[data-tab="portfolio"]')) {
+      setTimeout(renderPortfolio, 50);
+    }
   });
 
   // ── Init ──

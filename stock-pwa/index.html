@@ -29,11 +29,95 @@
       </button>
     </div>
     <div class="tab-nav">
-      <button class="tab-btn active" data-tab="home">🏠 Trang chủ</button>
+      <button class="tab-btn active" data-tab="home">🏠</button>
       <button class="tab-btn" data-tab="analyze">📊 Phân tích</button>
       <button class="tab-btn" data-tab="ranking">🏆 Top picks</button>
+      <button class="tab-btn" data-tab="portfolio">💼 Danh mục</button>
     </div>
   </header>
+
+  <!-- Portfolio tab -->
+  <div class="tab-content tab-portfolio">
+    <main id="portfolio-container">
+      <div class="empty-state ranking-intro" id="portfolio-empty" style="display:none">
+        <div class="empty-icon">💼</div>
+        <h2>Danh mục đầu tư</h2>
+        <p>Nhập các giao dịch (mua/bán) để theo dõi P&amp;L thực tế + nhận khuyến nghị riêng cho từng mã đang sở hữu.</p>
+        <button class="btn-primary" id="portfolio-empty-add">+ Thêm giao dịch đầu tiên</button>
+      </div>
+      <div id="portfolio-content"></div>
+    </main>
+  </div>
+
+  <!-- Transaction modal -->
+  <div class="modal-backdrop" id="tx-modal-backdrop"></div>
+  <div class="modal" id="tx-modal">
+    <div class="modal-head">
+      <span class="modal-title" id="tx-modal-title">Thêm giao dịch</span>
+      <button class="modal-close" id="tx-modal-close">✕</button>
+    </div>
+    <form class="modal-body" id="tx-form">
+      <div class="form-row">
+        <label>Loại</label>
+        <div class="seg-toggle" id="tx-side-toggle">
+          <button type="button" class="seg-btn active" data-side="buy">Mua</button>
+          <button type="button" class="seg-btn" data-side="sell">Bán</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Mã CP</label>
+        <input type="text" id="tx-symbol" placeholder="VD: VCB" autocomplete="off" autocapitalize="characters" required>
+      </div>
+      <div class="form-row two-col">
+        <div>
+          <label>Khối lượng</label>
+          <input type="number" id="tx-quantity" min="1" step="1" required>
+        </div>
+        <div>
+          <label>Giá (k VND)</label>
+          <input type="number" id="tx-price" min="0" step="0.01" required>
+        </div>
+      </div>
+      <div class="form-row two-col">
+        <div>
+          <label>Ngày</label>
+          <input type="date" id="tx-date">
+        </div>
+        <div>
+          <label>Phí (k VND, optional)</label>
+          <input type="number" id="tx-fee" min="0" step="0.01" value="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Ghi chú (optional)</label>
+        <input type="text" id="tx-notes" placeholder="VD: mua theo Top picks">
+      </div>
+      <div class="form-summary" id="tx-summary"></div>
+      <div class="form-actions">
+        <button type="button" class="link-btn" id="tx-cancel">Huỷ</button>
+        <button type="submit" class="btn-primary" id="tx-submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Cash modal -->
+  <div class="modal-backdrop" id="cash-modal-backdrop"></div>
+  <div class="modal" id="cash-modal">
+    <div class="modal-head">
+      <span class="modal-title">Cập nhật cash</span>
+      <button class="modal-close" id="cash-modal-close">✕</button>
+    </div>
+    <form class="modal-body" id="cash-form">
+      <div class="form-row">
+        <label>Số dư tiền mặt (k VND)</label>
+        <input type="number" id="cash-amount" min="0" step="1000">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="link-btn" id="cash-cancel">Huỷ</button>
+        <button type="submit" class="btn-primary">Lưu</button>
+      </div>
+    </form>
+  </div>
 
   <!-- Auth dropdown (logged in) -->
   <div class="auth-dropdown" id="auth-dropdown">
@@ -207,6 +291,7 @@
   <script src="auth.js"></script>
   <script src="analysis.js"></script>
   <script src="ranking.js"></script>
+  <script src="portfolio.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

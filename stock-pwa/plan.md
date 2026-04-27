@@ -433,6 +433,7 @@ Top N của mỗi ranking phải có **giới hạn 2-3 mã/ngành** để khôn
 - [x] Supabase Phase B: DB sync watchlist + alerts + alert_state + tracker. Migration logic local→DB lần đầu login. Multi-user clear logic (LAST_USER_KEY) — 2026-04-27
 - [x] Supabase verified end-to-end: Google OAuth + watchlist write-through + multi-device sync — 2026-04-27
 - [x] Migrate hosting Netlify → Cloudflare Workers (Netlify free tier hết quota). URL `stock-pwa.qngnhat.workers.dev`. Unlimited bandwidth + 500 builds/month — 2026-04-27
+- [x] Portfolio Phase 1: tab "Danh mục" với transactions (buy/sell), holdings auto-compute (weighted avg, Option A), cash field, summary card, per-holding action recommendation, DB sync — 2026-04-27
 
 ### Tiếp theo (nếu cần)
 **Verification (priority cao):**
