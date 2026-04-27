@@ -11,7 +11,9 @@ Chi tiết roadmap + tiến độ: [stock-pwa/plan.md](stock-pwa/plan.md).
 
 ## stock-pwa — Web app
 
-PWA chạy ở [https://gentle-pothos-70fc88.netlify.app](https://gentle-pothos-70fc88.netlify.app) (deployed via Netlify, auto-deploy từ branch `main`).
+PWA chạy ở [https://stock-pwa.qngnhat.workers.dev](https://stock-pwa.qngnhat.workers.dev) (deployed via Cloudflare Workers, auto-deploy từ branch `main`).
+
+**Login Google** + sync data đa thiết bị qua Supabase (free tier).
 
 ### Tính năng chính
 
@@ -72,8 +74,9 @@ Tất cả từ **VNDirect public API** (miễn phí, ổn định):
 
 - **Frontend**: vanilla JS (no framework), CSS Grid, PWA (service worker, manifest)
 - **Chart**: [Lightweight Charts](https://www.tradingview.com/lightweight-charts/) của TradingView
-- **Hosting**: Netlify auto-deploy
-- **Cache**: localStorage (DCA 24h, T+ 1h, regime 1h, universe list 7 ngày)
+- **Hosting**: Cloudflare Workers (auto-deploy từ branch `main`)
+- **Auth + DB**: Supabase (Google OAuth + Postgres + Row Level Security)
+- **Cache**: localStorage primary (DCA 24h, T+ 1h, regime 1h, universe list 7 ngày), DB write-through cho user data (watchlist, alerts, tracker)
 
 ---
 
