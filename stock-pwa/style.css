@@ -82,6 +82,68 @@ button {
   display: block;
 }
 
+/* ── Market Regime Widget ── */
+.regime-widget {
+  background: #16213e;
+  border-left: 3px solid #FF9800;
+  padding: 10px 16px;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.regime-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.regime-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.regime-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.regime-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.regime-label {
+  color: #888;
+  font-size: 11px;
+}
+
+.regime-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.regime-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  margin-left: auto;
+}
+
+.regime-row2 {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.regime-row2 b {
+  color: #ccc;
+  font-weight: 600;
+}
+
 .app-title {
   display: flex;
   align-items: center;
@@ -1140,6 +1202,7 @@ button {
   /* Constrain content width — centered */
   .app-header,
   .search-bar,
+  .regime-widget,
   #main-container,
   #ranking-container {
     max-width: 1100px;
@@ -1228,6 +1291,7 @@ button {
 @media (min-width: 1300px) {
   .app-header,
   .search-bar,
+  .regime-widget,
   #main-container,
   #ranking-container {
     max-width: 1240px;

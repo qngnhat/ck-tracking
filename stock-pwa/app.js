@@ -982,6 +982,50 @@
   });
 
   // ════════════════════════════════════════════════════
+  // ── MARKET REGIME WIDGET ──
+  // ════════════════════════════════════════════════════
+  async function loadMarketRegime() {
+    const widget = $("regime-widget");
+    if (!widget) return;
+    try {
+      const r = await RANKING.getMarketRegime();
+      if (!r) return;
+      widget.style.display = "block";
+      widget.style.borderLeftColor = r.color;
+
+      $("regime-icon").textContent =
+        r.regime === "BULL" ? "📈"
+          : r.regime === "BEAR" ? "📉"
+          : r.regime === "BULL_WEAK" ? "↗"
+          : r.regime === "BEAR_WEAK" ? "↘"
+          : "↔";
+
+      $("regime-value").textContent = r.currentValue.toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+
+      const dayChangeEl = $("regime-day-change");
+      const sign = r.dayChange >= 0 ? "+" : "";
+      dayChangeEl.textContent = `${sign}${r.dayChange.toFixed(2)}%`;
+      dayChangeEl.className = `pct ${r.dayChange >= 0 ? "up" : "down"}`;
+
+      const tagEl = $("regime-tag");
+      tagEl.textContent = r.label;
+      tagEl.style.color = r.color;
+      tagEl.style.background = `${r.color}22`;
+      tagEl.style.borderColor = `${r.color}55`;
+
+      const ret3mSign = r.ret3m >= 0 ? "+" : "";
+      const distSign = r.distMa200 >= 0 ? "+" : "";
+      $("regime-detail").innerHTML =
+        `MA200: <b>${distSign}${r.distMa200.toFixed(1)}%</b> · ` +
+        `3 tháng: <b>${ret3mSign}${r.ret3m.toFixed(1)}%</b> · ` +
+        `Volatility: <b>${r.atrPct.toFixed(2)}%</b>`;
+    } catch {
+      // silent fail
+    }
+  }
+  loadMarketRegime();
+
+  // ════════════════════════════════════════════════════
   // ── RANKING TAB ──
   // ════════════════════════════════════════════════════
   let rankingState = {

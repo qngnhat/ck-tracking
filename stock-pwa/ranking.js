@@ -162,6 +162,25 @@ window.__SSI_RANKING__ = (function () {
     return e;
   }
 
+  function calcAtr(highs, lows, closes, period = 14) {
+    const n = closes.length;
+    if (n < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < n; i++) {
+      const tr = Math.max(
+        highs[i] - lows[i],
+        Math.abs(highs[i] - closes[i - 1]),
+        Math.abs(lows[i] - closes[i - 1])
+      );
+      trs.push(tr);
+    }
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) {
+      atr = (atr * (period - 1) + trs[i]) / period;
+    }
+    return atr;
+  }
+
   function calcMacd(closes, fast = 12, slow = 26, signal = 9) {
     if (closes.length < slow + signal) return null;
     // Build MACD line series, then signal EMA
@@ -556,6 +575,99 @@ window.__SSI_RANKING__ = (function () {
     localStorage.removeItem(CACHE_KEY_TPLUS);
   }
 
+  // ── Market Regime Detection ──────────────────────
+  // Phân loại thị trường VN-Index thành BULL/BEAR/RANGE
+  // dựa trên MA50/MA200 + 3-month return + volatility.
+  // Cache 1 giờ.
+  const REGIME_CACHE_KEY = "vnindex_regime_v1";
+  const REGIME_CACHE_TTL_MS = 1 * 3600 * 1000;
+
+  async function getMarketRegime() {
+    try {
+      const cached = JSON.parse(localStorage.getItem(REGIME_CACHE_KEY) || "null");
+      if (cached && Date.now() - cached.timestamp < REGIME_CACHE_TTL_MS) {
+        return cached.data;
+      }
+    } catch {}
+
+    try {
+      const data = await ANALYSIS.fetchHistory("VNINDEX", "D", 320);
+      const closes = data.closes;
+      const highs = data.highs;
+      const lows = data.lows;
+      const n = closes.length;
+      if (n < 200) return null;
+
+      const current = closes[n - 1];
+      const prev = closes[n - 2];
+      const dayChange = ((current - prev) / prev) * 100;
+
+      const ma50 = sma(closes, 50, n);
+      const ma200 = sma(closes, 200, n);
+
+      const m3Idx = Math.max(0, n - 63);
+      const ret3m = closes[m3Idx] > 0 ? (current / closes[m3Idx] - 1) * 100 : 0;
+      const m1Idx = Math.max(0, n - 21);
+      const ret1m = closes[m1Idx] > 0 ? (current / closes[m1Idx] - 1) * 100 : 0;
+
+      const atr14 = calcAtr(highs, lows, closes, 14);
+      const atrPct = atr14 ? (atr14 / current) * 100 : 0;
+
+      const distMa200 = ma200 ? ((current - ma200) / ma200) * 100 : 0;
+      const distMa50 = ma50 ? ((current - ma50) / ma50) * 100 : 0;
+
+      // Classify regime
+      const aboveMa200 = ma200 && current > ma200;
+      const ma50Above200 = ma50 && ma200 && ma50 > ma200;
+
+      let regime, label, color;
+      if (aboveMa200 && ma50Above200 && ret3m > 5) {
+        regime = "BULL";
+        label = ret3m > 20 ? "Bull mạnh" : "Bull";
+        color = "#4CAF50";
+      } else if (!aboveMa200 && !ma50Above200 && ret3m < -5) {
+        regime = "BEAR";
+        label = ret3m < -20 ? "Bear mạnh" : "Bear";
+        color = "#ff4444";
+      } else if (aboveMa200 && ret3m > 0) {
+        regime = "BULL_WEAK";
+        label = "Bull yếu";
+        color = "#8BC34A";
+      } else if (!aboveMa200 && ret3m < 0) {
+        regime = "BEAR_WEAK";
+        label = "Bear yếu";
+        color = "#FF5722";
+      } else {
+        regime = "RANGE";
+        label = "Đi ngang";
+        color = "#FF9800";
+      }
+
+      const result = {
+        regime,
+        label,
+        color,
+        currentValue: current,
+        dayChange,
+        ma50, ma200,
+        distMa50, distMa200,
+        ret1m, ret3m,
+        atrPct,
+        timestamp: Date.now(),
+      };
+
+      try {
+        localStorage.setItem(REGIME_CACHE_KEY, JSON.stringify({
+          timestamp: Date.now(), data: result,
+        }));
+      } catch {}
+
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
   // ── T+ ranking main ───────────────────────────────
   // Min score threshold (validated by Phase 4b backtest):
   //   - 2.0: no edge vs random (avg +1.10% / Sharpe 0.11)
@@ -570,6 +682,12 @@ window.__SSI_RANKING__ = (function () {
       useCache = true,
       onProgress,
     } = opts;
+
+    // Bear regime → raise threshold để chỉ pick setup cực mạnh
+    const regime = await getMarketRegime().catch(() => null);
+    const minScore = (regime && (regime.regime === "BEAR" || regime.regime === "BEAR_WEAK"))
+      ? 5.0
+      : TPLUS_MIN_SCORE;
 
     if (useCache) {
       try {
@@ -607,7 +725,7 @@ window.__SSI_RANKING__ = (function () {
 
     // Filter by min score, sort by score
     const valid = stocks
-      .filter((s) => s.tplusFactors && s.tplusFactors.score >= TPLUS_MIN_SCORE)
+      .filter((s) => s.tplusFactors && s.tplusFactors.score >= minScore)
       .sort((a, b) => b.tplusFactors.score - a.tplusFactors.score);
 
     const picks = valid.slice(0, topN).map((s) => ({
@@ -622,6 +740,8 @@ window.__SSI_RANKING__ = (function () {
       picks,
       allCount: stocks.length,
       eligibleCount: valid.length,
+      regime,
+      minScore,
       timestamp: Date.now(),
       duration: Date.now() - startTime,
       fromCache: false,
@@ -642,6 +762,7 @@ window.__SSI_RANKING__ = (function () {
     FACTOR_NAMES,
     loadTopPicks,
     loadTopPicksTPlus,
+    getMarketRegime,
     clearCache,
   };
 })();
