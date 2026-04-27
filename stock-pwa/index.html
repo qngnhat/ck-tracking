@@ -84,8 +84,8 @@
           <input type="date" id="tx-date">
         </div>
         <div>
-          <label>Phí (k VND, optional)</label>
-          <input type="number" id="tx-fee" min="0" step="any" value="0">
+          <label>Phí (VND, optional)</label>
+          <input type="number" id="tx-fee" min="0" step="any" value="0" placeholder="VD: 15000">
         </div>
       </div>
       <div class="form-row">
@@ -121,8 +121,8 @@
     </div>
     <form class="modal-body" id="cash-form">
       <div class="form-row">
-        <label>Số dư tiền mặt (k VND)</label>
-        <input type="number" id="cash-amount" min="0" step="1000">
+        <label>Số dư tiền mặt (VND)</label>
+        <input type="number" id="cash-amount" min="0" step="any" placeholder="VD: 1000315">
       </div>
       <div class="form-actions">
         <button type="button" class="link-btn" id="cash-cancel">Huỷ</button>

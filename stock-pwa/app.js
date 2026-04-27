@@ -20,7 +20,11 @@
   // ── Formatters ──
   function fp(n) {
     if (n === null || n === undefined || isNaN(n)) return "--";
-    return n.toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+    // Round to 4 decimals to absorb float artifacts, then trim trailing zeros via locale
+    return n.toLocaleString("vi-VN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
   }
 
   function fmtVol(n) {
@@ -2330,9 +2334,12 @@
   }
 
   function fmtPriceK(price) {
-    // Price in k-VND (display)
+    // Price in k-VND (display) — full precision, trim trailing zeros
     if (!price || isNaN(price)) return "--";
-    return price.toFixed(2);
+    return price.toLocaleString("vi-VN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
   }
 
   // Click handlers cho add buttons (delegated since portfolio re-renders)
@@ -2365,7 +2372,7 @@
     setEl("tx-symbol", editTx?.symbol || "");
     setEl("tx-quantity", editTx?.quantity || "");
     setEl("tx-price", editTx?.price || "");
-    setEl("tx-fee", editTx?.fee || 0);
+    setEl("tx-fee", editTx ? Math.round((editTx.fee || 0) * 1000) : 0); // k-VND → VND for input
     setEl("tx-date", editTx
       ? new Date(editTx.trade_date).toISOString().split("T")[0]
       : new Date().toISOString().split("T")[0]);
@@ -2388,8 +2395,8 @@
   function updateTxSummary() {
     const qty = Number($("tx-quantity").value) || 0;
     const price = Number($("tx-price").value) || 0;
-    const fee = Number($("tx-fee").value) || 0;
-    const total = qty * price * 1000 + fee * 1000; // price in k → VND
+    const feeVnd = Number($("tx-fee").value) || 0;
+    const total = qty * price * 1000 + feeVnd; // price in k → VND, fee already VND
     const summary = $("tx-summary");
     if (summary) {
       summary.textContent = qty && price
@@ -2435,7 +2442,7 @@
       const symbol = $("tx-symbol").value.trim().toUpperCase();
       const qty = Number($("tx-quantity").value);
       const price = Number($("tx-price").value);
-      const fee = Number($("tx-fee").value || 0);
+      const fee = (Number($("tx-fee").value) || 0) / 1000; // VND input → k-VND storage
       const date = $("tx-date").value
         ? new Date($("tx-date").value).toISOString()
         : new Date().toISOString();
@@ -2468,7 +2475,7 @@
     if (!modal || !backdrop) return;
     modal.classList.add("open");
     backdrop.classList.add("open");
-    $("cash-amount").value = (PORTFOLIO.loadCash() / 1000).toFixed(0); // VND → k
+    $("cash-amount").value = Math.round(PORTFOLIO.loadCash()); // already VND
     setTimeout(() => $("cash-amount").focus(), 50);
   }
 
@@ -2486,8 +2493,8 @@
     $("cash-modal-backdrop")?.addEventListener("click", closeCashModal);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const k = Number($("cash-amount").value) || 0;
-      await PORTFOLIO.updateCash(k * 1000); // k → VND
+      const vnd = Number($("cash-amount").value) || 0;
+      await PORTFOLIO.updateCash(vnd); // already VND
       closeCashModal();
       renderPortfolio();
     });
