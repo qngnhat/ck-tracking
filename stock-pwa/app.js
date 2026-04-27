@@ -1100,6 +1100,109 @@
   loadMarketRegime();
 
   // ════════════════════════════════════════════════════
+  // ── AUTH (Supabase) ──
+  // ════════════════════════════════════════════════════
+  const AUTH = window.__SSI_AUTH__;
+
+  function renderAuthUI() {
+    const btn = $("auth-btn");
+    const dropdown = $("auth-dropdown");
+    if (!btn) return;
+
+    if (!AUTH || !AUTH.isConfigured()) {
+      btn.style.display = "none";
+      return;
+    }
+
+    if (AUTH.isLoggedIn()) {
+      const user = AUTH.getUser();
+      const meta = user?.user_metadata || {};
+      const avatar = meta.avatar_url;
+      const name = meta.full_name || meta.name || user.email?.split("@")[0] || "User";
+      const email = user.email || "";
+
+      btn.classList.add("logged-in");
+      btn.innerHTML = avatar
+        ? `<img src="${avatar}" class="auth-avatar-img" alt="${name}">`
+        : `<span class="auth-avatar-letter">${name[0].toUpperCase()}</span>`;
+      btn.title = name;
+
+      // Fill dropdown
+      const av = $("auth-avatar");
+      if (av) {
+        if (avatar) {
+          av.style.backgroundImage = `url(${avatar})`;
+          av.textContent = "";
+        } else {
+          av.style.backgroundImage = "";
+          av.textContent = name[0].toUpperCase();
+        }
+      }
+      const nameEl = $("auth-name");
+      const emailEl = $("auth-email");
+      if (nameEl) nameEl.textContent = name;
+      if (emailEl) emailEl.textContent = email;
+    } else {
+      btn.classList.remove("logged-in");
+      btn.innerHTML = `<span class="auth-text">Đăng nhập</span>`;
+      btn.title = "Đăng nhập";
+      if (dropdown) dropdown.classList.remove("open");
+    }
+  }
+
+  // Bind auth UI
+  if (AUTH) {
+    const authBtn = $("auth-btn");
+    if (authBtn) {
+      authBtn.addEventListener("click", () => {
+        if (!AUTH.isConfigured()) {
+          alert("Chưa cấu hình Supabase. Đọc supabase-setup.md để setup.");
+          return;
+        }
+        if (AUTH.isLoggedIn()) {
+          // Toggle dropdown
+          const dd = $("auth-dropdown");
+          if (dd) dd.classList.toggle("open");
+        } else {
+          AUTH.signInWithGoogle();
+        }
+      });
+    }
+
+    const signoutBtn = $("auth-signout");
+    if (signoutBtn) {
+      signoutBtn.addEventListener("click", async () => {
+        await AUTH.signOut();
+        const dd = $("auth-dropdown");
+        if (dd) dd.classList.remove("open");
+        renderAuthUI();
+      });
+    }
+
+    // Close dropdown on outside click
+    document.addEventListener("click", (e) => {
+      const dd = $("auth-dropdown");
+      const btn = $("auth-btn");
+      if (!dd || !btn) return;
+      if (dd.classList.contains("open") &&
+          !dd.contains(e.target) && !btn.contains(e.target)) {
+        dd.classList.remove("open");
+      }
+    });
+
+    // Listen auth state
+    AUTH.onAuthChange((event, session) => {
+      console.log("[auth] state change:", event, session?.user?.email);
+      renderAuthUI();
+    });
+
+    // Initialize
+    AUTH.init().then(() => renderAuthUI());
+  } else {
+    renderAuthUI();
+  }
+
+  // ════════════════════════════════════════════════════
   // ── ALERT SYSTEM ──
   // ════════════════════════════════════════════════════
   function updateBellBadge() {

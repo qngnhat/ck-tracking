@@ -429,6 +429,7 @@ Top N của mỗi ranking phải có **giới hạn 2-3 mã/ngành** để khôn
 - [x] Watchlist personal: ☆ toggle trong Phân tích + section Home + quick-add Top picks — 2026-04-27
 - [x] Alert system: detect score crossing → bell + badge + alert panel + browser notification opt-in — 2026-04-27
 - [x] T+ universe full HOSE+HNX (~700 mã, skip UPCOM penny) — 2026-04-27
+- [x] Supabase Auth Phase A: Google OAuth + login UI + auth.js wrapper — 2026-04-27 (cần user setup credentials)
 
 ### Tiếp theo (nếu cần)
 **Verification (priority cao):**

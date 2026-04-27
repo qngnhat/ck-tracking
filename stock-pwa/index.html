@@ -24,6 +24,9 @@
         <span class="bell-icon">🔔</span>
         <span class="bell-badge" id="bell-badge" style="display:none">0</span>
       </button>
+      <button class="auth-btn" id="auth-btn" title="Đăng nhập">
+        <span class="auth-text">Đăng nhập</span>
+      </button>
     </div>
     <div class="tab-nav">
       <button class="tab-btn active" data-tab="home">🏠 Trang chủ</button>
@@ -31,6 +34,20 @@
       <button class="tab-btn" data-tab="ranking">🏆 Top picks</button>
     </div>
   </header>
+
+  <!-- Auth dropdown (logged in) -->
+  <div class="auth-dropdown" id="auth-dropdown">
+    <div class="auth-user-info">
+      <div class="auth-avatar" id="auth-avatar">?</div>
+      <div>
+        <div class="auth-name" id="auth-name">--</div>
+        <div class="auth-email" id="auth-email">--</div>
+      </div>
+    </div>
+    <div class="auth-actions">
+      <button class="link-btn" id="auth-signout">Đăng xuất</button>
+    </div>
+  </div>
 
   <!-- Alert panel (slide-down) -->
   <div class="alert-panel" id="alert-panel">
@@ -185,6 +202,9 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
   <script src="analysis.js"></script>
   <script src="ranking.js"></script>
   <script src="app.js"></script>
