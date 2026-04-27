@@ -1021,7 +1021,7 @@
   // ── TAB NAVIGATION ──
   // ════════════════════════════════════════════════════
   const RANKING = window.__SSI_RANKING__;
-  let currentTab = "analyze";
+  let currentTab = "home";
 
   function switchTab(tab) {
     if (tab === currentTab) return;
@@ -1081,6 +1081,250 @@
     }
   }
   loadMarketRegime();
+
+  // ════════════════════════════════════════════════════
+  // ── HOME DASHBOARD ──
+  // ════════════════════════════════════════════════════
+  function isMarketOpenNow() {
+    const vn = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+    const day = vn.getDay();
+    if (day === 0 || day === 6) return false;
+    const min = vn.getHours() * 60 + vn.getMinutes();
+    if (min >= 540 && min <= 690) return true;
+    if (min >= 780 && min <= 885) return true;
+    return false;
+  }
+
+  function getGreeting() {
+    const h = new Date().getHours();
+    if (h < 5) return "Khuya rồi";
+    if (h < 12) return "Chào buổi sáng";
+    if (h < 14) return "Chào buổi trưa";
+    if (h < 18) return "Chào buổi chiều";
+    if (h < 22) return "Chào buổi tối";
+    return "Khuya rồi";
+  }
+
+  function fmtFullDate(d = new Date()) {
+    const days = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"];
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${days[d.getDay()]}, ${dd}/${mm}/${d.getFullYear()}`;
+  }
+
+  function buildTodayActions(regime, dcaCount, tplusCount, lastDcaSnap) {
+    const now = new Date();
+    const dom = now.getDate();
+    const dow = now.getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const open = isMarketOpenNow();
+    const actions = [];
+
+    // Trading state
+    if (isWeekend) {
+      actions.push({ icon: "🌴", text: "Cuối tuần — TTCK đóng cửa. Có thể review tracker hoặc plan tuần sau." });
+    } else if (open) {
+      if (tplusCount > 0) {
+        actions.push({ icon: "⚡", text: `Đang trong giờ giao dịch — có <b>${tplusCount} setup T+</b> chất lượng. Check Top picks → T+.` });
+      } else {
+        actions.push({ icon: "💤", text: "Trong giờ giao dịch nhưng không có setup T+ chất lượng. Đợi cơ hội rõ hơn." });
+      }
+    } else {
+      actions.push({ icon: "💤", text: "Ngoài giờ giao dịch hôm nay. Plan cho phiên kế nếu cần." });
+    }
+
+    // DCA timing
+    if (!isWeekend && dom <= 5) {
+      const lastSnapDate = lastDcaSnap ? new Date(lastDcaSnap.date) : null;
+      const sameMonth = lastSnapDate &&
+        lastSnapDate.getMonth() === now.getMonth() &&
+        lastSnapDate.getFullYear() === now.getFullYear();
+      if (!sameMonth) {
+        actions.push({ icon: "🔄", text: "<b>Đầu tháng</b> — đến lúc rebalance DCA. Mở Top picks → DCA, so list mới với portfolio hiện tại." });
+      } else {
+        actions.push({ icon: "✅", text: "Đã có DCA snapshot tháng này — tốt." });
+      }
+    } else if (dom >= 28) {
+      actions.push({ icon: "📅", text: "Cuối tháng — chuẩn bị cho rebalance DCA tuần tới." });
+    }
+
+    // Regime advisory
+    if (regime) {
+      if (regime.regime === "BEAR" || regime.regime === "BEAR_WEAK") {
+        actions.push({ icon: "⚠️", text: `Thị trường <b>${regime.label}</b> — T+ rủi ro cao, threshold đã auto bump lên ≥5.0. Tập trung DCA quality.` });
+      } else if (regime.regime === "BULL") {
+        actions.push({ icon: "🚀", text: `Thị trường <b>${regime.label}</b> — uptrend rõ, các setup mean-reversion có thể là nhịp pull back ngắn.` });
+      }
+    }
+
+    return actions;
+  }
+
+  async function renderHome() {
+    const container = $("home-container");
+    if (!container) return;
+
+    // 1. Greeting card (immediate)
+    const greeting = getGreeting();
+    const dateStr = fmtFullDate();
+
+    // Get cached data (no fresh fetch on home)
+    let regime = null;
+    try {
+      const cached = JSON.parse(localStorage.getItem("vnindex_regime_v1") || "null");
+      regime = cached?.data || null;
+    } catch {}
+
+    let dcaCached = null, tplusCached = null;
+    try {
+      dcaCached = JSON.parse(localStorage.getItem("dca_top_picks_v1") || "null")?.data;
+      tplusCached = JSON.parse(localStorage.getItem("tplus_top_picks_v1") || "null")?.data;
+    } catch {}
+
+    const tracker = RANKING.loadTracker();
+    const lastDcaSnap = tracker.dca?.[tracker.dca.length - 1] || null;
+    const lastTplusSnap = tracker.tplus?.[tracker.tplus.length - 1] || null;
+
+    const actions = buildTodayActions(
+      regime,
+      dcaCached?.eligibleCount || 0,
+      tplusCached?.eligibleCount || 0,
+      lastDcaSnap
+    );
+
+    let html = `
+      <div class="home-greeting">
+        <div class="home-greeting-text">${greeting}</div>
+        <div class="home-date">${dateStr}</div>
+      </div>
+
+      <!-- Hôm nay nên làm -->
+      <div class="home-card">
+        <div class="home-card-title">📋 Hôm nay nên làm</div>
+        <ul class="home-actions">
+          ${actions.map((a) => `<li><span class="home-action-icon">${a.icon}</span><span>${a.text}</span></li>`).join("")}
+        </ul>
+      </div>
+    `;
+
+    // 2. T+ opportunities preview
+    if (tplusCached && tplusCached.picks && tplusCached.picks.length > 0) {
+      const top3 = tplusCached.picks.slice(0, 3);
+      html += `
+        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="tplus">
+          <div class="home-card-title">⚡ Cơ hội T+ (${tplusCached.picks.length} mã)</div>
+          ${top3.map((p, i) => `
+            <div class="home-pick-row">
+              <span class="home-pick-rank">#${i + 1}</span>
+              <span class="home-pick-symbol">${p.symbol}</span>
+              <span class="home-pick-score">+${p.score.toFixed(1)}</span>
+              <span class="home-pick-tags">${(p.reasons || []).slice(0, 2).join(", ")}</span>
+            </div>
+          `).join("")}
+          <div class="home-card-cta">Xem đầy đủ →</div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="tplus">
+          <div class="home-card-title">⚡ Cơ hội T+</div>
+          <div class="home-card-empty">Chưa có data hoặc không có setup chất lượng. Tap để quét.</div>
+        </div>
+      `;
+    }
+
+    // 3. DCA top picks preview
+    if (dcaCached && dcaCached.picks && dcaCached.picks.length > 0) {
+      const top5 = dcaCached.picks.slice(0, 5);
+      html += `
+        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="dca">
+          <div class="home-card-title">📈 Top 5 mã DCA</div>
+          ${top5.map((p, i) => `
+            <div class="home-pick-row">
+              <span class="home-pick-rank">#${i + 1}</span>
+              <span class="home-pick-symbol">${p.symbol}</span>
+              <span class="home-pick-sector">${sectorLabel(p.sector)}</span>
+              <span class="home-pick-score">+${p.score.toFixed(2)}</span>
+            </div>
+          `).join("")}
+          <div class="home-card-cta">Xem đầy đủ →</div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="dca">
+          <div class="home-card-title">📈 Top picks DCA</div>
+          <div class="home-card-empty">Chưa load. Tap để xem ranking đầy đủ.</div>
+        </div>
+      `;
+    }
+
+    // 4. Tracker summary
+    const dcaSnaps = tracker.dca?.length || 0;
+    const tplusSnaps = tracker.tplus?.length || 0;
+    if (dcaSnaps + tplusSnaps > 0) {
+      html += `
+        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-tracker="1">
+          <div class="home-card-title">📊 Tracker performance</div>
+          <div class="home-tracker-row">
+            <div class="home-tracker-item">
+              <div class="home-tracker-num">${dcaSnaps}</div>
+              <div class="home-tracker-label">DCA snapshots</div>
+            </div>
+            <div class="home-tracker-item">
+              <div class="home-tracker-num">${tplusSnaps}</div>
+              <div class="home-tracker-label">T+ snapshots</div>
+            </div>
+          </div>
+          <div class="home-card-cta">Xem performance →</div>
+        </div>
+      `;
+    }
+
+    // 5. Quick search
+    html += `
+      <div class="home-card home-card-clickable" data-target-tab="analyze" data-focus-search="1">
+        <div class="home-card-title">🔍 Phân tích nhanh</div>
+        <div class="home-card-empty">Tap để mở phân tích chi tiết 1 mã cổ phiếu.</div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+
+    // Bind clickable cards
+    container.querySelectorAll(".home-card-clickable").forEach((card) => {
+      card.addEventListener("click", () => {
+        const targetTab = card.dataset.targetTab;
+        if (targetTab) switchTab(targetTab);
+        if (card.dataset.targetMode) {
+          // Switch ranking mode after tab switch
+          setTimeout(() => switchRankingMode(card.dataset.targetMode), 50);
+        }
+        if (card.dataset.targetTracker) {
+          setTimeout(() => {
+            const trackerHeader = document.getElementById("tracker-header");
+            if (trackerHeader) trackerHeader.click();
+          }, 100);
+        }
+        if (card.dataset.focusSearch) {
+          setTimeout(() => {
+            const input = document.getElementById("symbol-input");
+            if (input) input.focus();
+          }, 100);
+        }
+      });
+    });
+  }
+
+  // Render home initially + re-render when switching to home tab
+  renderHome();
+  const originalSwitchTab = switchTab;
+  // Re-render home on returning to it (data may be cached now)
+  document.addEventListener("click", (e) => {
+    if (e.target.matches?.('.tab-btn[data-tab="home"]')) {
+      setTimeout(renderHome, 50);
+    }
+  });
 
   // ════════════════════════════════════════════════════
   // ── RANKING TAB ──
