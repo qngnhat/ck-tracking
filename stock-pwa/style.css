@@ -2265,10 +2265,15 @@ button {
   max-height: 90vh;
   overflow-y: auto;
   padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  /* Closed modal must not intercept clicks (in case content makes it visible) */
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .modal.open {
   transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .modal-head {

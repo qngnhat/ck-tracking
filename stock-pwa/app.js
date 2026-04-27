@@ -2377,6 +2377,15 @@
     if (holdings.length === 0 && allTxs.length === 0 && cash === 0) {
       empty.style.display = "block";
       container.innerHTML = "";
+      // Direct bind cho safety (delegation đôi khi không fire trong PWA)
+      const emptyBtn = $("portfolio-empty-add");
+      if (emptyBtn && !emptyBtn.dataset.bound) {
+        emptyBtn.dataset.bound = "1";
+        emptyBtn.onclick = () => {
+          console.log("[portfolio] empty-add direct clicked");
+          openTxModal();
+        };
+      }
       return;
     }
     empty.style.display = "none";
@@ -2474,7 +2483,11 @@
           · ${enriched.length} mã
         </div>
       `;
-      // (add-tx-top + edit-cash-btn handled by global delegated listener)
+      // Direct bind sau render (safety: delegation không phải lúc nào cũng fire)
+      const addBtn = $("add-tx-top");
+      if (addBtn) addBtn.onclick = () => openTxModal();
+      const cashBtn = $("edit-cash-btn");
+      if (cashBtn) cashBtn.onclick = () => openCashModal();
     }
 
     // Render holdings list
@@ -2572,12 +2585,14 @@
   });
 
   // Re-render portfolio when switching to that tab
-  document.addEventListener("click", (e) => {
-    const btn = e.target.closest?.('.tab-btn[data-tab="portfolio"]');
-    if (btn) {
+  // Direct bind on tab button (more reliable than delegation)
+  const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
+  if (portfolioTab) {
+    portfolioTab.addEventListener("click", () => {
+      console.log("[portfolio] tab clicked, render in 50ms");
       setTimeout(renderPortfolio, 50);
-    }
-  });
+    });
+  }
 
   // ── Init ──
   renderHistory();
