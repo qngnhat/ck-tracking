@@ -2210,29 +2210,46 @@
 
   // Click handlers cho add buttons (delegated since portfolio re-renders)
   function openTxModal(editTx = null) {
+    console.log("[portfolio] openTxModal called", { editTx });
     editingTxId = editTx?.id || null;
     const modal = $("tx-modal");
     const backdrop = $("tx-modal-backdrop");
-    if (!modal || !backdrop) return;
+    if (!modal || !backdrop) {
+      console.error("[portfolio] modal not found in DOM", { modal, backdrop });
+      return;
+    }
+
+    // Ensure form bound (in case portfolio tab never rendered yet)
+    bindTxModal();
+
     modal.classList.add("open");
     backdrop.classList.add("open");
 
-    // Pre-fill or reset
-    $("tx-modal-title").textContent = editTx ? "Sửa giao dịch" : "Thêm giao dịch";
-    $("tx-symbol").value = editTx?.symbol || "";
-    $("tx-quantity").value = editTx?.quantity || "";
-    $("tx-price").value = editTx?.price || "";
-    $("tx-fee").value = editTx?.fee || 0;
-    $("tx-date").value = editTx
+    // Pre-fill or reset (defensive null checks)
+    const setEl = (id, val) => {
+      const el = $(id);
+      if (el) el.value = val;
+    };
+    const setText = (id, txt) => {
+      const el = $(id);
+      if (el) el.textContent = txt;
+    };
+    setText("tx-modal-title", editTx ? "Sửa giao dịch" : "Thêm giao dịch");
+    setEl("tx-symbol", editTx?.symbol || "");
+    setEl("tx-quantity", editTx?.quantity || "");
+    setEl("tx-price", editTx?.price || "");
+    setEl("tx-fee", editTx?.fee || 0);
+    setEl("tx-date", editTx
       ? new Date(editTx.trade_date).toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0];
-    $("tx-notes").value = editTx?.notes || "";
+      : new Date().toISOString().split("T")[0]);
+    setEl("tx-notes", editTx?.notes || "");
     // Side toggle
     document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.side === (editTx?.side || "buy"));
     });
     updateTxSummary();
-    setTimeout(() => $("tx-symbol").focus(), 50);
+    const sym = $("tx-symbol");
+    if (sym) setTimeout(() => sym.focus(), 50);
   }
 
   function closeTxModal() {
@@ -2457,8 +2474,7 @@
           · ${enriched.length} mã
         </div>
       `;
-      $("add-tx-top")?.addEventListener("click", () => openTxModal());
-      $("edit-cash-btn")?.addEventListener("click", openCashModal);
+      // (add-tx-top + edit-cash-btn handled by global delegated listener)
     }
 
     // Render holdings list
@@ -2539,14 +2555,26 @@
     }
   }
 
-  // Bind portfolio empty state add button
+  // Bind portfolio buttons (delegated, since portfolio re-renders)
   document.addEventListener("click", (e) => {
-    if (e.target?.id === "portfolio-empty-add") openTxModal();
+    if (e.target.closest?.("#portfolio-empty-add")) {
+      console.log("[portfolio] empty-add clicked");
+      openTxModal();
+    }
+    if (e.target.closest?.("#add-tx-top")) {
+      console.log("[portfolio] add-tx-top clicked");
+      openTxModal();
+    }
+    if (e.target.closest?.("#edit-cash-btn")) {
+      console.log("[portfolio] edit-cash clicked");
+      openCashModal();
+    }
   });
 
   // Re-render portfolio when switching to that tab
   document.addEventListener("click", (e) => {
-    if (e.target.matches?.('.tab-btn[data-tab="portfolio"]')) {
+    const btn = e.target.closest?.('.tab-btn[data-tab="portfolio"]');
+    if (btn) {
       setTimeout(renderPortfolio, 50);
     }
   });
