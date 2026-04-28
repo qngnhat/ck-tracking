@@ -240,6 +240,45 @@ window.__SSI_RANKING__ = (function () {
     return atr;
   }
 
+  function calcAdx(highs, lows, closes, period = 14) {
+    const n = closes.length;
+    if (n < period * 2 + 1) return null;
+    const trs = [], plusDMs = [], minusDMs = [];
+    for (let i = 1; i < n; i++) {
+      const tr = Math.max(
+        highs[i] - lows[i],
+        Math.abs(highs[i] - closes[i - 1]),
+        Math.abs(lows[i] - closes[i - 1])
+      );
+      const upMove = highs[i] - highs[i - 1];
+      const downMove = lows[i - 1] - lows[i];
+      const plusDM = upMove > downMove && upMove > 0 ? upMove : 0;
+      const minusDM = downMove > upMove && downMove > 0 ? downMove : 0;
+      trs.push(tr); plusDMs.push(plusDM); minusDMs.push(minusDM);
+    }
+    let sTR = trs.slice(0, period).reduce((a, b) => a + b, 0);
+    let sPlus = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+    let sMinus = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+    const dxs = [];
+    for (let i = period; i < trs.length; i++) {
+      sTR = sTR - sTR / period + trs[i];
+      sPlus = sPlus - sPlus / period + plusDMs[i];
+      sMinus = sMinus - sMinus / period + minusDMs[i];
+      const plusDI = sTR === 0 ? 0 : (100 * sPlus) / sTR;
+      const minusDI = sTR === 0 ? 0 : (100 * sMinus) / sTR;
+      const diSum = plusDI + minusDI;
+      const dx = diSum === 0 ? 0 : (100 * Math.abs(plusDI - minusDI)) / diSum;
+      dxs.push({ plusDI, minusDI, dx });
+    }
+    if (dxs.length < period) return null;
+    let adx = dxs.slice(0, period).reduce((a, b) => a + b.dx, 0) / period;
+    for (let i = period; i < dxs.length; i++) {
+      adx = (adx * (period - 1) + dxs[i].dx) / period;
+    }
+    const last = dxs[dxs.length - 1];
+    return { adx, plusDI: last.plusDI, minusDI: last.minusDI };
+  }
+
   function calcMacd(closes, fast = 12, slow = 26, signal = 9) {
     if (closes.length < slow + signal) return null;
     // Build MACD line series, then signal EMA
@@ -348,6 +387,30 @@ window.__SSI_RANKING__ = (function () {
         score += 1.5;
         reasons.push("NN đảo chiều mua");
       }
+    }
+
+    // 8. ADX penalty: trend giảm RẤT mạnh + -DI dominant → mean-rev "bắt dao rơi"
+    //    Magnitude nhỏ để không kill RSI edge — giảm confidence, không xóa pick
+    const adxData = calcAdx(highs, lows, closes, 14);
+    if (adxData && adxData.adx > 45 && adxData.minusDI > adxData.plusDI) {
+      score -= 1;
+      reasons.push(`ADX ${adxData.adx.toFixed(0)} -DI mạnh — bắt dao rơi`);
+    }
+
+    // 9. Volume confirmation: bar gần đây vol < 0.8 TB → setup kém tin cậy
+    if (volRatio > 0 && volRatio < 0.8) {
+      score -= 0.5;
+      reasons.push(`Vol thấp ${volRatio.toFixed(1)}x — thiếu xác nhận`);
+    }
+
+    // 10. Deep downtrend: giá cách MA50 -12% trở lên → downside còn xa
+    let ma50 = null;
+    if (n >= 50) {
+      ma50 = closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+    }
+    if (ma50 && currentClose < ma50 * 0.88) {
+      score -= 0.5;
+      reasons.push("Cách MA50 -12% — downtrend chưa hết");
     }
 
     // ── Hard filters ──

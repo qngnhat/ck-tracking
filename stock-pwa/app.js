@@ -1896,6 +1896,53 @@
     return rankingState[rankingState.mode];
   }
 
+  // ── Holiday banner: cảnh báo nghỉ lễ VN cho T+ ──
+  // Format YYYY-MM-DD, ngày đầu của cluster nghỉ
+  const VN_HOLIDAYS = [
+    "2026-04-30", // 30/4
+    "2026-05-01", // 1/5 (cluster 30/4-1/5, có thể kéo dài qua weekend)
+    "2026-09-02", // Quốc khánh
+    "2027-01-01", // Tết DL
+    "2027-02-15", // Tết ÂL (mùng 1, dự kiến)
+  ];
+
+  function nextVnHoliday(maxDays = 5) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ms = 24 * 3600 * 1000;
+    let nearest = null;
+    for (const h of VN_HOLIDAYS) {
+      const d = new Date(h + "T00:00:00");
+      const diff = Math.round((d - today) / ms);
+      if (diff >= 0 && diff <= maxDays && (!nearest || diff < nearest.daysAway)) {
+        nearest = { date: h, daysAway: diff };
+      }
+    }
+    return nearest;
+  }
+
+  function renderHolidayBanner(mode) {
+    const banner = $("holiday-banner");
+    if (!banner) return;
+    if (mode !== "tplus") {
+      banner.style.display = "none";
+      return;
+    }
+    const h = nextVnHoliday(5);
+    if (!h) {
+      banner.style.display = "none";
+      return;
+    }
+    const niceDate = new Date(h.date + "T00:00:00")
+      .toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+    if (h.daysAway === 0) {
+      banner.innerHTML = `📅 Hôm nay <b>${niceDate}</b> là ngày nghỉ lễ — TT đóng cửa.`;
+    } else {
+      banner.innerHTML = `⚠️ <b>${h.daysAway} ngày nữa nghỉ lễ ${niceDate}</b> — T+ hold qua nghỉ rủi ro gap mở cửa. Cân nhắc giảm size, đóng vị thế trước, hoặc tránh mở mới.`;
+    }
+    banner.style.display = "block";
+  }
+
   function switchRankingMode(mode) {
     if (mode === rankingState.mode) return;
     rankingState.mode = mode;
@@ -1919,6 +1966,9 @@
     document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => {
       b.classList.toggle("active", parseInt(b.dataset.n, 10) === tn);
     });
+
+    // Holiday warning (T+ only)
+    renderHolidayBanner(mode);
 
     // Render or show intro
     if (curState().loaded) {

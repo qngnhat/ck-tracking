@@ -2525,6 +2525,23 @@ button {
   color: #ff4444 !important;
 }
 
+/* Holiday warning banner (T+ ranking) */
+.holiday-banner {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: #ffb74d;
+  line-height: 1.5;
+}
+
+.holiday-banner b {
+  color: #ffd180;
+  font-weight: 700;
+}
+
 /* Duplicate transactions warning banner */
 .dupe-banner {
   background: rgba(255, 152, 0, 0.1);
