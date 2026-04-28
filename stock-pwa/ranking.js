@@ -858,6 +858,16 @@ window.__SSI_RANKING__ = (function () {
       universeList = UNIVERSE; // 58 mã DCA
     }
     const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector || "khác" }));
+
+    // Fetch VN-Index for relative strength
+    let vniRet1w = 0, vniRet1m = 0;
+    try {
+      const vniData = await ANALYSIS.fetchHistory("VNINDEX", "D", 100);
+      const vniCloses = vniData.closes;
+      const vn = vniCloses.length;
+      if (vn >= 6) vniRet1w = (vniCloses[vn - 1] / vniCloses[vn - 6] - 1) * 100;
+      if (vn >= 22) vniRet1m = (vniCloses[vn - 1] / vniCloses[vn - 22] - 1) * 100;
+    } catch {}
     let done = 0;
     const batchSize = 20;
 
@@ -893,6 +903,39 @@ window.__SSI_RANKING__ = (function () {
               avgVol /= 20;
               stock.volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
             }
+
+            // ── Pattern detection (Phase 3 — momentum scanner) ──
+            // 1. Cross MA20 up: close > MA20 today + close ≤ MA20 yesterday
+            if (n >= 21) {
+              const ma20Today = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+              const ma20Yest = closes.slice(n - 21, n - 1).reduce((a, b) => a + b, 0) / 20;
+              stock.crossMa20Up = (cur > ma20Today) && (closes[n - 2] <= ma20Yest);
+              stock.aboveMa20 = cur > ma20Today;
+            }
+
+            // 2. Breakout 52W high: cur tại high52w + dayChange tích cực
+            stock.breakout52w = stock.atHigh52w && (stock.dayChange ?? 0) > 0;
+
+            // 3. Reversal candidate: RSI<30 (proxy: tính nhanh) + dayChange > 1%
+            // RSI compute simplified for snapshot speed
+            if (n >= 15) {
+              let gains = 0, losses = 0;
+              for (let k = n - 14; k < n; k++) {
+                const diff = closes[k] - closes[k - 1];
+                if (diff > 0) gains += diff;
+                else losses -= diff;
+              }
+              const avgG = gains / 14, avgL = losses / 14;
+              if (avgL > 0) {
+                const rs = avgG / avgL;
+                stock.rsi14 = 100 - 100 / (1 + rs);
+              } else {
+                stock.rsi14 = 100;
+              }
+              stock.reversalCandidate = stock.rsi14 < 30 && (stock.dayChange ?? 0) > 1
+                && (stock.volRatio || 0) > 1;
+            }
+
             // Foreign net buy 5 phiên gần (skip cho full scan để giảm 2× API call)
             if (universe !== "full") {
               try {
@@ -980,6 +1023,48 @@ window.__SSI_RANKING__ = (function () {
     const at52wHigh = valid.filter((s) => s.atHigh52w).slice(0, 8);
     const at52wLow = valid.filter((s) => s.atLow52w).slice(0, 8);
 
+    // Trending/momentum lists
+    const crossMa20 = valid
+      .filter((s) => s.crossMa20Up)
+      .sort((a, b) => (b.volRatio || 0) - (a.volRatio || 0))
+      .slice(0, 8);
+    const breakouts = valid
+      .filter((s) => s.breakout52w)
+      .sort((a, b) => (b.dayChange || 0) - (a.dayChange || 0))
+      .slice(0, 8);
+    const reversals = valid
+      .filter((s) => s.reversalCandidate)
+      .sort((a, b) => (a.rsi14 || 100) - (b.rsi14 || 100))
+      .slice(0, 8);
+
+    // Sector rotation quadrant: relative perf vs VN-Index
+    // X = sector_1M_rel = sector_avg1m - vniRet1m
+    // Y = sector_1W_rel = sector_avg1w - vniRet1w
+    // Quadrants: Leading (++), Improving (-+), Lagging (--), Weakening (+-)
+    const sectorRotation = { leading: [], improving: [], lagging: [], weakening: [] };
+    for (const sec of sectorStats) {
+      if (sec.count < 2) continue; // skip sector quá ít data
+      const x = sec.avg1m - vniRet1m; // 1M relative
+      const y = sec.avg1w - vniRet1w; // 1W relative (momentum)
+      const entry = {
+        sector: sec.sector,
+        count: sec.count,
+        rel1m: x,
+        rel1w: y,
+        avg1m: sec.avg1m,
+        avg1w: sec.avg1w,
+      };
+      if (x >= 0 && y >= 0) sectorRotation.leading.push(entry);
+      else if (x < 0 && y >= 0) sectorRotation.improving.push(entry);
+      else if (x < 0 && y < 0) sectorRotation.lagging.push(entry);
+      else sectorRotation.weakening.push(entry);
+    }
+    // Sort within each quadrant
+    sectorRotation.leading.sort((a, b) => (b.rel1m + b.rel1w) - (a.rel1m + a.rel1w));
+    sectorRotation.improving.sort((a, b) => b.rel1w - a.rel1w);
+    sectorRotation.lagging.sort((a, b) => (a.rel1m + a.rel1w) - (b.rel1m + b.rel1w)); // worst first
+    sectorRotation.weakening.sort((a, b) => a.rel1w - b.rel1w); // momentum drop nhất first
+
     const result = {
       universe,
       stocks,
@@ -999,6 +1084,11 @@ window.__SSI_RANKING__ = (function () {
       volSurges,
       at52wHigh,
       at52wLow,
+      // Phase 3 — momentum patterns + sector rotation
+      trending: { crossMa20, breakouts, reversals },
+      sectorRotation,
+      vniRet1w,
+      vniRet1m,
       timestamp: Date.now(),
       duration: Date.now() - startTime,
       fromCache: false,

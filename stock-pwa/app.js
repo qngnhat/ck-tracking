@@ -2396,6 +2396,8 @@
     const universeLabel = snapshot.universe === "full" ? `Full HOSE+HNX (~${b.total} mã)` : `DCA universe (${b.total} mã)`;
 
     const comparisonHtml = renderSectorComparisonTable(snapshot);
+    const trendingHtml = renderTrendingLists(snapshot);
+    const rotationHtml = renderSectorRotation(snapshot);
 
     return `
       <div class="home-card snap-card">
@@ -2406,15 +2408,120 @@
         ${universeToggle}
         ${breadthHtml}
         ${distHtml}
+        ${rotationHtml}
         ${sectorHtml}
         ${comparisonHtml}
         ${leadersHtml}
         ${laggardsHtml}
+        ${trendingHtml}
         ${surgesHtml}
         ${high52wHtml}
         ${low52wHtml}
         ${ffHtml}
         <div class="mo-disclaimer">Universe: ${universeLabel} · Cập nhật ${ageTxt}</div>
+      </div>
+    `;
+  }
+
+  // ── Trending / momentum scanner (Phase 3) ──
+  function renderTrendingLists(snapshot) {
+    const t = snapshot?.trending || {};
+    const cm20 = t.crossMa20 || [];
+    const bo = t.breakouts || [];
+    const rev = t.reversals || [];
+    if (cm20.length === 0 && bo.length === 0 && rev.length === 0) return "";
+
+    const renderList = (title, items, formatter) => {
+      if (items.length === 0) return "";
+      return `
+        <div class="snap-section">
+          <div class="snap-title">${title} (${items.length})</div>
+          <div class="snap-stocks">
+            ${items.map(formatter).join("")}
+          </div>
+        </div>
+      `;
+    };
+
+    const cm20Html = renderList("📈 Đang vào uptrend (cross MA20 + vol)", cm20, (s) => {
+      const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+      const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+      return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+        <span class="snap-stock-sym">${s.symbol}</span>
+        <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+        <span class="snap-stock-vol">${(s.volRatio || 0).toFixed(1)}×</span>
+        <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}%</span>
+      </div>`;
+    });
+
+    const boHtml = renderList("🚀 Phá đỉnh 52W gần đây", bo, (s) => {
+      const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+      const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+      const w1Cls = (s.ret1w ?? 0) >= 0 ? "up" : "down";
+      const w1Sign = (s.ret1w ?? 0) >= 0 ? "+" : "";
+      return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+        <span class="snap-stock-sym">${s.symbol}</span>
+        <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+        <span class="snap-stock-1w pct ${w1Cls}">${w1Sign}${(s.ret1w ?? 0).toFixed(1)}% 1W</span>
+        <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}%</span>
+      </div>`;
+    });
+
+    const revHtml = renderList("🔄 Reversal candidates (RSI<30 + bounce)", rev, (s) => {
+      const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+      const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+      return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+        <span class="snap-stock-sym">${s.symbol}</span>
+        <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+        <span class="snap-stock-vol">RSI ${(s.rsi14 || 0).toFixed(0)}</span>
+        <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}%</span>
+      </div>`;
+    });
+
+    return `${cm20Html}${boHtml}${revHtml}`;
+  }
+
+  // ── Sector rotation 4 quadrants ──
+  function renderSectorRotation(snapshot) {
+    const r = snapshot?.sectorRotation;
+    if (!r) return "";
+    const total = r.leading.length + r.improving.length + r.lagging.length + r.weakening.length;
+    if (total === 0) return "";
+
+    const renderQuadrant = (label, icon, items, color, desc) => {
+      const itemsHtml = items.length > 0
+        ? items.map((s) => {
+            const cls = (s.rel1w ?? 0) >= 0 ? "up" : "down";
+            const sign = (s.rel1w ?? 0) >= 0 ? "+" : "";
+            return `<div class="rot-sector" data-sector="${s.sector}">
+              <span class="rot-sec-name">${sectorLabel(s.sector)}</span>
+              <span class="rot-sec-rel pct ${cls}">${sign}${(s.rel1w ?? 0).toFixed(1)}%</span>
+            </div>`;
+          }).join("")
+        : `<div class="rot-empty">—</div>`;
+      return `
+        <div class="rot-quadrant" style="border-color:${color}55">
+          <div class="rot-q-head" style="color:${color}">${icon} ${label}</div>
+          <div class="rot-q-desc">${desc}</div>
+          <div class="rot-q-list">${itemsHtml}</div>
+        </div>
+      `;
+    };
+
+    const ret1m = snapshot.vniRet1m ?? 0;
+    const ret1w = snapshot.vniRet1w ?? 0;
+    const indexHint = `VN-Index: 1W ${ret1w >= 0 ? "+" : ""}${ret1w.toFixed(2)}% · 1M ${ret1m >= 0 ? "+" : ""}${ret1m.toFixed(2)}%`;
+
+    return `
+      <div class="snap-section">
+        <div class="snap-title">🔄 Sector rotation (relative vs VN-Index)</div>
+        <div class="rot-hint">${indexHint} · X = 1M rel · Y = 1W rel (momentum)</div>
+        <div class="rot-grid">
+          ${renderQuadrant("Improving", "📈", r.improving, "#FF9800", "Yếu vs index nhưng momentum đảo chiều — watchlist")}
+          ${renderQuadrant("Leading", "🏆", r.leading, "#4CAF50", "Mạnh + momentum tốt — focus")}
+          ${renderQuadrant("Lagging", "📉", r.lagging, "#ff5722", "Yếu + momentum yếu — tránh")}
+          ${renderQuadrant("Weakening", "⚠️", r.weakening, "#FFC107", "Mạnh nhưng momentum yếu — cẩn thận TP")}
+        </div>
       </div>
     `;
   }

@@ -148,6 +148,23 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
     - Cột: Sector, N (count), Today, 1W, 1M (color-coded green/red)
     - Sorted by avg 1W desc, click row → drill-down modal
   - Reuse data từ snapshot (không scan thêm)
+- ✅ **Market Snapshot Phase 3 — momentum scanner + sector rotation**:
+  - **Pattern detection per stock** trong scan loop:
+    - `crossMa20Up`: cross MA20 từ dưới lên + vol up
+    - `breakout52w`: cross 52W high + dayChange tích cực
+    - `reversalCandidate`: RSI<30 + dayChange > 1% + vol > avg
+  - **3 trending lists**:
+    - 📈 Đang vào uptrend (cross MA20)
+    - 🚀 Phá đỉnh 52W gần đây
+    - 🔄 Reversal candidates (oversold bouncing)
+  - **Sector rotation 4-quadrant**:
+    - Fetch VN-Index để compute relative perf
+    - X-axis: sector_1M - vniRet1M (relative perf)
+    - Y-axis: sector_1W - vniRet1W (momentum)
+    - 4 buckets: 🏆 Leading (++), 📈 Improving (-+), 📉 Lagging (--), ⚠️ Weakening (+-)
+    - Each quadrant: list sectors trong group + rel1W%
+    - Click sector → drill-down modal
+  - All compute from existing snapshot scan (no extra fetches except VNINDEX)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

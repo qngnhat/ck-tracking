@@ -2642,6 +2642,80 @@ button {
   font-weight: 700;
 }
 
+/* Sector rotation quadrant */
+.rot-hint {
+  font-size: 10px;
+  color: #888;
+  margin-bottom: 8px;
+  letter-spacing: 0.2px;
+}
+
+.rot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rot-quadrant {
+  background: #0f0f1e;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.rot-q-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.rot-q-desc {
+  font-size: 9px;
+  color: #888;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.rot-q-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rot-sector {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.rot-sector:hover {
+  background: rgba(0, 210, 255, 0.08);
+}
+
+.rot-sec-name {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.rot-sec-rel {
+  font-weight: 700;
+  font-size: 10px;
+}
+
+.rot-empty {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  padding: 4px 0;
+  font-style: italic;
+}
+
 /* Sector comparison table (multi-timeframe) */
 .sct-table {
   display: flex;
