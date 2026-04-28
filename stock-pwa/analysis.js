@@ -631,10 +631,12 @@ window.__SSI_ANALYSIS__ = (function () {
 
     // ── Risk flags (cho verdict layer + UI chips) ──
     // Tách thành flags object thay vì grep reasons string — dễ scale/test
+    const sessionTurnover = current * currentVol * 1000; // price k-VND × vol → VND
     const flags = {
       bearTrap: !!(adx && adx.adx > 45 && adx.minusDI > adx.plusDI),
       lowVol: volRatio > 0 && volRatio < 0.8,
       deepDowntrend: !!(ma50 && current < ma50 * 0.88),
+      lowSessionLiq: sessionTurnover < 2e9,
     };
 
     const result = {

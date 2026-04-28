@@ -802,6 +802,7 @@
     if (flags.bearTrap) chips.push({ label: "⚠️ Bắt dao rơi", color: "#ff5722" });
     if (flags.lowVol) chips.push({ label: "Vol thấp", color: "#ff9800" });
     if (flags.deepDowntrend) chips.push({ label: "Downtrend mạnh", color: "#ff9800" });
+    if (flags.lowSessionLiq) chips.push({ label: "🐢 Kẹt hàng", color: "#ff9800" });
     if (chips.length === 0) return "";
     return `<div class="risk-chips">${chips.map((c) =>
       `<span class="risk-chip" style="border-color:${c.color}55;color:${c.color}">${c.label}</span>`

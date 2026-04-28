@@ -435,11 +435,23 @@ window.__SSI_RANKING__ = (function () {
     // Day change
     const dayChange = n >= 2 ? (currentClose - closes[n - 2]) / closes[n - 2] : 0;
 
+    // Session turnover phiên hiện tại (price × vol × 1000 để ra VND vì price k-VND)
+    // Khác với avgTurnover (20-day avg) — phiên hôm nay có thể rất khác avg
+    const sessionTurnover = currentClose * volumes[n - 1] * 1000;
+    const lowSessionLiq = sessionTurnover < 2e9; // < 2 tỷ phiên này = vào dễ ra khó
+
+    // Penalty nếu phiên này thanh khoản kém (không bị filter cứng)
+    if (lowSessionLiq && !filterIlliquid && score > -900) {
+      score -= 0.5;
+      reasons.push("TKL phiên này <2 tỷ — kẹt hàng");
+    }
+
     // Risk flags (đồng nhất với analysis.js — UI consume)
     const flags = {
       bearTrap: !!(adxData && adxData.adx > 45 && adxData.minusDI > adxData.plusDI),
       lowVol: volRatio > 0 && volRatio < 0.8,
       deepDowntrend: !!(ma50 && currentClose < ma50 * 0.88),
+      lowSessionLiq,
     };
 
     return {
