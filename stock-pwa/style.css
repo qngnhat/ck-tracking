@@ -2595,6 +2595,36 @@ button {
   color: #ff4444 !important;
 }
 
+/* Market regime hint (T+ ranking) */
+.regime-hint-banner {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Rank priority sub-label trong ranking list */
+.pick-rank-tag {
+  font-size: 9px;
+  font-weight: 700;
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.pick-rank-priority { color: #4CAF50; }
+.pick-rank-backup { color: #FF9800; }
+
+/* Anti-FOMO line trong T+ context plan */
+.anti-fomo {
+  color: #ff5722 !important;
+  border-top: 1px dashed rgba(255, 87, 34, 0.3);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
 /* Holiday warning banner (T+ ranking) */
 .holiday-banner {
   background: rgba(255, 152, 0, 0.1);

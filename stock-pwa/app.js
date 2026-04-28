@@ -844,7 +844,12 @@
   }
 
   function renderTplusContextCard(pick, rank, r) {
-    const reasons = pick.reasons || [];
+    const allReasons = pick.reasons || [];
+    // Filter ra reasons đã được hiển thị qua chip — tránh duplicate (ChatGPT đề xuất)
+    const chipKeywords = ["Vol thấp", "Cách MA50", "ADX", "TKL phiên này"];
+    const reasons = allReasons.filter((rr) =>
+      !chipKeywords.some((kw) => rr.includes(kw))
+    );
     const f = pick.factors || {};
     const cur = f.currentPrice || r.current;
 
@@ -858,8 +863,8 @@
     const { tp1, tp2 } = computeTpTargets({ ...r, current: cur });
     const tp1UseMa = r.ma20 && r.ma20 > cur && r.ma20 <= cur * 1.10;
     const tp2UseRes = r.resistance && r.resistance > tp1 && r.resistance <= cur * 1.18;
-    const tp1Note = tp1UseMa ? "hồi về MA20" : "Mục tiêu gần (~10%)";
-    const tp2Note = tp2UseRes ? "kháng cự gần" : "Mục tiêu tối đa (~18%)";
+    const tp1Note = tp1UseMa ? "hồi về MA20 — khả năng cao" : "Mục tiêu gần (~10%) — khả năng cao";
+    const tp2Note = tp2UseRes ? "kháng cự gần — cần thị trường thuận lợi" : "Mục tiêu tối đa (~18%) — cần thị trường thuận lợi";
     const targets = [
       `Mục tiêu 1: <b>${fp(tp1)}</b> (${tp1Note}, +${(((tp1 - cur) / cur) * 100).toFixed(1)}%)`,
       `Mục tiêu 2: <b>${fp(tp2)}</b> (${tp2Note}, +${(((tp2 - cur) / cur) * 100).toFixed(1)}%)`,
@@ -921,6 +926,7 @@
             ${targets.map((t) => `<li>${t}</li>`).join("")}
             <li>Hold: <b>${hold.min}-${hold.max} phiên</b> ${hold.icon} <i>${hold.label}</i> — ${hold.hint}</li>
             <li>Exit khi: RSI hồi &gt;50 HOẶC đạt mục tiêu HOẶC dính SL</li>
+            <li class="anti-fomo">❌ <b>KHÔNG vào khi</b>: gap down kèm vol tăng (lực bán đè giá)${flags.bearTrap ? ` HOẶC -DI tiếp tục mạnh hơn +DI` : ""}</li>
           </ul>
         </div>
         <div class="context-disclaimer">
@@ -2043,6 +2049,39 @@
     return nearest;
   }
 
+  // Market regime hint cho T+ tab (mapping regime → đề xuất hành động)
+  async function renderRegimeHint(mode) {
+    const banner = $("regime-hint-banner");
+    if (!banner) return;
+    if (mode !== "tplus") {
+      banner.style.display = "none";
+      return;
+    }
+    try {
+      const regime = await RANKING.getMarketRegime();
+      if (!regime) { banner.style.display = "none"; return; }
+      const r = regime.regime;
+      let advice, color;
+      if (r === "BULL" || r === "BULL_WEAK") {
+        advice = `${regime.label} — ưu tiên breakout / pullback. Mean-rev cũng OK.`;
+        color = "#4CAF50";
+      } else if (r === "BEAR" || r === "BEAR_WEAK") {
+        advice = `${regime.label} — <b>hạn chế bắt đáy</b>. Setup cần threshold cao + Confirmed entry.`;
+        color = "#ff5722";
+      } else {
+        advice = `${regime.label} — phù hợp mean-reversion (môi trường lý tưởng cho T+).`;
+        color = "#FF9800";
+      }
+      banner.innerHTML = `📊 <b>Market: ${regime.label}</b> — ${advice.replace(`${regime.label} — `, "")}`;
+      banner.style.borderColor = `${color}55`;
+      banner.style.background = `${color}15`;
+      banner.style.color = color;
+      banner.style.display = "block";
+    } catch {
+      banner.style.display = "none";
+    }
+  }
+
   function renderHolidayBanner(mode) {
     const banner = $("holiday-banner");
     if (!banner) return;
@@ -2089,8 +2128,9 @@
       b.classList.toggle("active", parseInt(b.dataset.n, 10) === tn);
     });
 
-    // Holiday warning (T+ only)
+    // Holiday warning (T+ only) + market regime hint
     renderHolidayBanner(mode);
+    renderRegimeHint(mode);
 
     // Render or show intro
     if (curState().loaded) {
@@ -2365,10 +2405,17 @@
         ).join("");
       }
 
+      // Rank priority sub-label (chỉ T+; DCA dùng rebalance logic khác)
+      let priorityLabel = "";
+      if (mode === "tplus") {
+        if (i === 0 && p.score >= 5) priorityLabel = `<div class="pick-rank-tag pick-rank-priority">Ưu tiên cao</div>`;
+        else if (i <= 1) priorityLabel = `<div class="pick-rank-tag pick-rank-backup">Backup</div>`;
+      }
+
       const isWatched = RANKING.isInWatchlist(p.symbol);
       html += `
         <div class="pick-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
-          <div class="pick-rank">#${i + 1}</div>
+          <div class="pick-rank">#${i + 1}${priorityLabel}</div>
           <div class="pick-main">
             <div class="pick-row1">
               <span class="pick-symbol">${p.symbol}</span>

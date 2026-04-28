@@ -56,6 +56,19 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ TP wording: "Mục tiêu gần (~10%)" / "Mục tiêu tối đa (~18%)" — bỏ jargon "trần T+ realistic/stretch"
 - ✅ Verdict desc tách câu: "Có thể vào (spec nhỏ). Thận trọng: ưu tiên chờ xác nhận." — giảm conflict với entry option
 - ✅ Hold action có SL number + TP1 cụ thể — actionable ngay, user không phải tự cuộn xuống tìm
+- ✅ `estimateHoldProfile(r)` — 4 preset (Bear trap / Bounce nhanh / Hồi chậm / Standard) thay 1 dòng cứng "Hold 5-15 phiên"
+- ✅ `lowSessionLiq` flag (current price × vol < 2 tỷ) + chip "🐢 Kẹt hàng" — phát hiện mã vào dễ ra khó dù avg turnover OK
+- ✅ **Decision layer rewrite**: hard/soft flag distinction → penalty ảnh hưởng VERDICT (không chỉ chip)
+  - Hard: `bearTrap`, `lowSessionLiq` (1 cái → downgrade)
+  - Soft: `lowVol`, `deepDowntrend` (≥2 mới downgrade)
+  - Score≥4 + (hard≥1 || soft≥2) → Watchlist (thay vì Spec Buy)
+  - Size hint embed vào verdict desc dynamic theo flagCount + ATR
+  - Entry order theo flagCount: risk → Confirmed first
+- ✅ Filter reasons khỏi chip duplicate trong T+ context
+- ✅ Rank priority sub-label (#1 Ưu tiên cao / #2 Backup) trong ranking list
+- ✅ Anti-FOMO line "❌ KHÔNG vào khi: gap down kèm vol tăng" trong Plan giao dịch (thêm "-DI mạnh hơn +DI" nếu bearTrap)
+- ✅ TP wording probability hint: TP1 "khả năng cao", TP2 "cần thị trường thuận lợi"
+- ✅ Market regime hint trong T+ tab dùng `getMarketRegime()`: BULL/BEAR/RANGE → action hint phù hợp
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
