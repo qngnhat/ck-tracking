@@ -121,6 +121,15 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - **L4 — Tactical hint composite**: phân tích regime + flags + holiday + portfolio cash → action gợi ý
   - Reuse cached data (vnindex_regime + tplus + dca picks) — không trigger heavy scan
   - Disclaimer: "tổng hợp tín hiệu kỹ thuật, không phải lời khuyên đầu tư"
+- ✅ **Market Snapshot section trên home** (sector heat + leaders + foreign flow):
+  - `RANKING.loadMarketSnapshot()`: scan 58 DCA universe, compute per-mã 1W/1M return, dayChange, 52W high/low, foreign net buy 5d. Cache 1h.
+  - 🔥 **Sector heat map**: top 3 + bottom 2 sector by avg 1W return (xanh/đỏ tier)
+  - 🚀 **Leaders**: top 5 mã 1W return + dayChange today
+  - 📉 **Laggards**: top 3 mã yếu nhất 1W
+  - 💰 **Foreign flow leaders**: top 3 mã NN gom mạnh nhất 5 phiên (tỷ VND)
+  - 🌡️ **Breadth quick line**: % mã tăng today/week, count 52W high/low
+  - Click mã row → navigate analyze tab
+  - Button ↻ scan với progress (X/58 mã)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

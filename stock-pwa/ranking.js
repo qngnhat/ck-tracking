@@ -823,6 +823,142 @@ window.__SSI_RANKING__ = (function () {
     }
   }
 
+  // ── Market snapshot: scan DCA universe để có per-mã metrics ──
+  // Reused cho home Market Outlook (sector heat, leaders, foreign flow)
+  // Cache 1h. Heavy scan first time (58 mã × fetchHistory).
+  const SNAPSHOT_CACHE_KEY = "market_snapshot_v1";
+  const SNAPSHOT_CACHE_TTL_MS = 1 * 3600 * 1000;
+
+  async function loadMarketSnapshot(opts = {}) {
+    const { useCache = true, onProgress } = opts;
+    if (useCache) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(SNAPSHOT_CACHE_KEY) || "null");
+        if (cached && Date.now() - cached.timestamp < SNAPSHOT_CACHE_TTL_MS) {
+          return { ...cached.data, fromCache: true };
+        }
+      } catch {}
+    }
+
+    const startTime = Date.now();
+    const stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+    let done = 0;
+    const batchSize = 20;
+
+    for (let i = 0; i < stocks.length; i += batchSize) {
+      const batch = stocks.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (stock) => {
+          try {
+            const data = await ANALYSIS.fetchHistory(stock.symbol, "D", 100);
+            const closes = data.closes;
+            const volumes = data.volumes;
+            const n = closes.length;
+            if (n < 30) {
+              stock.error = "insufficient data";
+              return;
+            }
+            const cur = closes[n - 1];
+            stock.close = cur;
+            stock.dayChange = n >= 2 ? ((cur - closes[n - 2]) / closes[n - 2]) * 100 : 0;
+            stock.ret1w = n >= 6 ? ((cur - closes[n - 6]) / closes[n - 6]) * 100 : null;
+            stock.ret1m = n >= 22 ? ((cur - closes[n - 22]) / closes[n - 22]) * 100 : null;
+            // 52W high/low check (need 252 days; use min(252, n))
+            const lookback = Math.min(252, n);
+            const recent = closes.slice(n - lookback);
+            const high52w = Math.max(...recent);
+            const low52w = Math.min(...recent);
+            stock.atHigh52w = cur >= high52w * 0.98;
+            stock.atLow52w = cur <= low52w * 1.02;
+            // Volume ratio
+            if (n >= 21) {
+              let avgVol = 0;
+              for (let k = n - 21; k < n - 1; k++) avgVol += volumes[k];
+              avgVol /= 20;
+              stock.volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
+            }
+            // Foreign net buy 5 phiên gần (chỉ DCA universe có data này pre-scan)
+            try {
+              const foreign = await fetchForeignDaily(stock.symbol, 5).catch(() => null);
+              if (foreign && foreign.length > 0) {
+                stock.netForeign5d = foreign.reduce((s, d) => s + (d.netVal || 0), 0);
+              }
+            } catch {}
+          } catch (e) {
+            stock.error = e.message;
+          }
+          done++;
+          if (onProgress) onProgress(done, stocks.length);
+        })
+      );
+    }
+
+    // Aggregate per sector
+    const sectorMap = {};
+    for (const s of stocks) {
+      if (s.error || s.ret1w == null) continue;
+      const sec = s.sector || "khác";
+      if (!sectorMap[sec]) sectorMap[sec] = { sector: sec, count: 0, sum1w: 0, sum1m: 0, sumDay: 0 };
+      sectorMap[sec].count++;
+      sectorMap[sec].sum1w += s.ret1w;
+      if (s.ret1m != null) sectorMap[sec].sum1m += s.ret1m;
+      sectorMap[sec].sumDay += s.dayChange || 0;
+    }
+    const sectorStats = Object.values(sectorMap)
+      .map((s) => ({
+        ...s,
+        avg1w: s.sum1w / s.count,
+        avg1m: s.count > 0 ? s.sum1m / s.count : 0,
+        avgDay: s.sumDay / s.count,
+      }))
+      .sort((a, b) => b.avg1w - a.avg1w);
+
+    // Leaders/laggards
+    const valid = stocks.filter((s) => !s.error && s.ret1w != null);
+    const leaders = [...valid].sort((a, b) => b.ret1w - a.ret1w).slice(0, 5);
+    const laggards = [...valid].sort((a, b) => a.ret1w - b.ret1w).slice(0, 3);
+
+    // Foreign flow leaders (top 3 NN buy net 5 phiên)
+    const ffLeaders = valid
+      .filter((s) => s.netForeign5d != null && s.netForeign5d > 0)
+      .sort((a, b) => b.netForeign5d - a.netForeign5d)
+      .slice(0, 3);
+
+    // Breadth: % mã giảm vs tăng today, % above ma proxy via positive 1W
+    const upToday = valid.filter((s) => (s.dayChange || 0) > 0).length;
+    const downToday = valid.filter((s) => (s.dayChange || 0) < 0).length;
+    const upWeek = valid.filter((s) => s.ret1w > 0).length;
+    const newHighs = valid.filter((s) => s.atHigh52w).length;
+    const newLows = valid.filter((s) => s.atLow52w).length;
+
+    const result = {
+      stocks,
+      sectorStats,
+      leaders,
+      laggards,
+      ffLeaders,
+      breadth: {
+        total: valid.length,
+        upToday, downToday,
+        upWeek,
+        newHighs, newLows,
+        upTodayPct: valid.length > 0 ? (upToday / valid.length) * 100 : 0,
+        upWeekPct: valid.length > 0 ? (upWeek / valid.length) * 100 : 0,
+      },
+      timestamp: Date.now(),
+      duration: Date.now() - startTime,
+      fromCache: false,
+    };
+
+    try {
+      localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify({
+        timestamp: Date.now(), data: result,
+      }));
+    } catch {}
+
+    return result;
+  }
+
   // ── T+ ranking main ───────────────────────────────
   // Min score threshold (validated by Phase 4b backtest):
   //   - 2.0: no edge vs random (avg +1.10% / Sharpe 0.11)
@@ -1507,6 +1643,7 @@ window.__SSI_RANKING__ = (function () {
     loadTopPicks,
     loadTopPicksTPlus,
     getMarketRegime,
+    loadMarketSnapshot,
     clearCache,
     // Paper tracker
     loadTracker,

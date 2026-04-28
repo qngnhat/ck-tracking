@@ -1987,6 +1987,137 @@
     `;
   }
 
+  // ── Market snapshot section: sector heat + leaders + foreign flow ──
+  function renderMarketSnapshotSection(snapshot) {
+    if (!snapshot) {
+      return `
+        <div class="home-card snap-card">
+          <div class="home-card-title">
+            🚀 Sector heat & Mã dẫn dắt
+            <button class="home-card-action" id="snap-load-btn" title="Quét universe">↻ Quét</button>
+          </div>
+          <div class="home-card-empty">Chưa có data — bấm ↻ để scan 58 mã DCA universe (~30s).</div>
+        </div>
+      `;
+    }
+
+    const ageMin = Math.round((Date.now() - snapshot.timestamp) / 60000);
+    const ageTxt = ageMin < 60 ? `${ageMin} phút trước` : `${Math.round(ageMin / 60)}h trước`;
+
+    // Sector heat: top 3 + bottom 2 by avg 1W
+    const sectorTop = snapshot.sectorStats.slice(0, 3);
+    const sectorBottom = snapshot.sectorStats.slice(-2).reverse();
+    const sectorHtml = `
+      <div class="snap-section">
+        <div class="snap-title">🔥 Sector heat (1W return)</div>
+        <div class="snap-sectors">
+          ${sectorTop.map((s) => {
+            const cls = s.avg1w >= 0 ? "up" : "down";
+            const sign = s.avg1w >= 0 ? "+" : "";
+            return `<div class="snap-sector-row snap-up">
+              <span class="snap-sector-name">${sectorLabel(s.sector)}</span>
+              <span class="snap-sector-pct pct ${cls}">${sign}${s.avg1w.toFixed(2)}%</span>
+              <span class="snap-sector-count">${s.count} mã</span>
+            </div>`;
+          }).join("")}
+          ${sectorBottom.length > 0 ? `<div class="snap-divider"></div>` : ""}
+          ${sectorBottom.map((s) => {
+            const cls = s.avg1w >= 0 ? "up" : "down";
+            const sign = s.avg1w >= 0 ? "+" : "";
+            return `<div class="snap-sector-row snap-down">
+              <span class="snap-sector-name">${sectorLabel(s.sector)}</span>
+              <span class="snap-sector-pct pct ${cls}">${sign}${s.avg1w.toFixed(2)}%</span>
+              <span class="snap-sector-count">${s.count} mã</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    `;
+
+    // Leaders & laggards
+    const leadersHtml = `
+      <div class="snap-section">
+        <div class="snap-title">🚀 Top 5 mã dẫn dắt (1W)</div>
+        <div class="snap-stocks">
+          ${snapshot.leaders.map((s) => {
+            const cls = s.ret1w >= 0 ? "up" : "down";
+            const sign = s.ret1w >= 0 ? "+" : "";
+            const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+            const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+            return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-1w pct ${cls}">${sign}${s.ret1w.toFixed(1)}%</span>
+              <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}% hôm nay</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    `;
+
+    const laggardsHtml = snapshot.laggards.length > 0 ? `
+      <div class="snap-section">
+        <div class="snap-title">📉 Top 3 mã yếu (1W)</div>
+        <div class="snap-stocks">
+          ${snapshot.laggards.map((s) => {
+            const cls = "down";
+            const sign = "";
+            const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+            const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+            return `<div class="snap-stock-row snap-stock-weak" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-1w pct ${cls}">${sign}${s.ret1w.toFixed(1)}%</span>
+              <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}% hôm nay</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    // Foreign flow leaders
+    const ffHtml = snapshot.ffLeaders.length > 0 ? `
+      <div class="snap-section">
+        <div class="snap-title">💰 Top 3 NN gom mạnh (5 phiên)</div>
+        <div class="snap-stocks">
+          ${snapshot.ffLeaders.map((s) => {
+            const billions = (s.netForeign5d / 1e9).toFixed(1);
+            return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-ff up">+${billions} tỷ</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    // Breadth quick line
+    const b = snapshot.breadth;
+    const breadthHtml = `
+      <div class="snap-breadth">
+        🌡️ Breadth: <b>${b.upToday}/${b.total}</b> mã tăng hôm nay (${b.upTodayPct.toFixed(0)}%)
+        · Tuần: ${b.upWeek}/${b.total} (${b.upWeekPct.toFixed(0)}%)
+        · 52W: <b class="up">${b.newHighs} đỉnh</b> / <b class="down">${b.newLows} đáy</b>
+      </div>
+    `;
+
+    return `
+      <div class="home-card snap-card">
+        <div class="home-card-title">
+          🚀 Sector heat & Mã dẫn dắt
+          <button class="home-card-action" id="snap-load-btn" title="Refresh ${ageTxt}">↻</button>
+        </div>
+        ${breadthHtml}
+        ${sectorHtml}
+        ${leadersHtml}
+        ${laggardsHtml}
+        ${ffHtml}
+        <div class="mo-disclaimer">Universe: 58 mã DCA · Cập nhật ${ageTxt}</div>
+      </div>
+    `;
+  }
+
   async function renderHome() {
     const container = $("home-container");
     if (!container) return;
@@ -2026,6 +2157,14 @@
     const outlook = computeMarketOutlook(regime, tplusCached, dcaCached);
     const outlookHtml = renderMarketOutlookSection(outlook);
 
+    // Market snapshot (sector heat + leaders) — chỉ hiện nếu có cache, else placeholder
+    let snapshot = null;
+    try {
+      const snapCached = JSON.parse(localStorage.getItem("market_snapshot_v1") || "null");
+      if (snapCached?.data) snapshot = snapCached.data;
+    } catch {}
+    const snapshotHtml = renderMarketSnapshotSection(snapshot);
+
     let html = `
       <div class="home-greeting">
         <div class="home-greeting-text">${greeting}</div>
@@ -2041,6 +2180,8 @@
       </div>
 
       ${outlookHtml}
+
+      ${snapshotHtml}
     `;
 
     // Watchlist section
@@ -2188,6 +2329,43 @@
         }
       } catch {}
     }
+
+    // Market snapshot scan button
+    const snapBtn = document.getElementById("snap-load-btn");
+    if (snapBtn) {
+      snapBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        snapBtn.disabled = true;
+        const oldText = snapBtn.textContent;
+        snapBtn.textContent = "0/58";
+        try {
+          await RANKING.loadMarketSnapshot({
+            useCache: false,
+            onProgress: (done, total) => {
+              snapBtn.textContent = `${done}/${total}`;
+            },
+          });
+          renderHome(); // re-render with new data
+        } catch (err) {
+          snapBtn.textContent = oldText;
+          snapBtn.disabled = false;
+          alert("Lỗi quét: " + err.message);
+        }
+      });
+    }
+
+    // Stock rows in snapshot → navigate to analyze
+    container.querySelectorAll(".snap-stock-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sym = row.dataset.symbol;
+        if (!sym) return;
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        clearAnalyzeContext();
+        analyzeSymbol(sym);
+      });
+    });
   }
 
   async function loadWatchlistInHome(forceFresh = false) {

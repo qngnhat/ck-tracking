@@ -2642,6 +2642,139 @@ button {
   font-weight: 700;
 }
 
+/* Market Snapshot section (sector heat + leaders) */
+.snap-card {
+  background: #14142a;
+}
+
+.snap-breadth {
+  font-size: 12px;
+  color: #aaa;
+  padding: 8px 0;
+  border-bottom: 1px solid #20203a;
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.snap-breadth b.up { color: #4CAF50; }
+.snap-breadth b.down { color: #ff4444; }
+
+.snap-section {
+  padding: 8px 0;
+  border-bottom: 1px solid #20203a;
+}
+
+.snap-section:last-of-type {
+  border-bottom: none;
+}
+
+.snap-title {
+  font-size: 11px;
+  color: #00d2ff;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.snap-sectors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.snap-sector-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.snap-sector-row.snap-up {
+  background: rgba(76, 175, 80, 0.06);
+}
+
+.snap-sector-row.snap-down {
+  background: rgba(255, 68, 68, 0.06);
+}
+
+.snap-sector-name {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.snap-sector-pct {
+  font-weight: 700;
+}
+
+.snap-sector-count {
+  color: #888;
+  font-size: 11px;
+}
+
+.snap-divider {
+  height: 1px;
+  background: #20203a;
+  margin: 4px 0;
+}
+
+.snap-stocks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snap-stock-row {
+  display: grid;
+  grid-template-columns: 50px 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.snap-stock-row:hover {
+  background: rgba(0, 210, 255, 0.06);
+}
+
+.snap-stock-row.snap-stock-weak {
+  background: rgba(255, 68, 68, 0.04);
+}
+
+.snap-stock-sym {
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.snap-stock-sector {
+  color: #888;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snap-stock-1w {
+  font-weight: 700;
+}
+
+.snap-stock-day {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.snap-stock-ff {
+  font-weight: 700;
+  font-size: 11px;
+}
+
 /* Market Outlook section (home tab) */
 .mo-card {
   background: #14142a;
