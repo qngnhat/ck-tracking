@@ -1987,8 +1987,15 @@
     `;
   }
 
-  // ── Market snapshot section: sector heat + leaders + foreign flow ──
+  // ── Market snapshot section: sector heat + leaders + distribution + 52W ──
   function renderMarketSnapshotSection(snapshot) {
+    const universeToggle = `
+      <div class="snap-universe-toggle">
+        <button class="snap-uni-btn ${snapshot?.universe !== "full" ? "active" : ""}" data-universe="dca" id="snap-uni-dca">DCA-58</button>
+        <button class="snap-uni-btn ${snapshot?.universe === "full" ? "active" : ""}" data-universe="full" id="snap-uni-full">Full ~700</button>
+      </div>
+    `;
+
     if (!snapshot) {
       return `
         <div class="home-card snap-card">
@@ -1996,7 +2003,8 @@
             🚀 Sector heat & Mã dẫn dắt
             <button class="home-card-action" id="snap-load-btn" title="Quét universe">↻ Quét</button>
           </div>
-          <div class="home-card-empty">Chưa có data — bấm ↻ để scan 58 mã DCA universe (~30s).</div>
+          ${universeToggle}
+          <div class="home-card-empty">Chưa có data — bấm ↻ để scan. DCA-58 ~30s, Full ~700 ~5 phút (foreign flow skip cho speed).</div>
         </div>
       `;
     }
@@ -2102,18 +2110,113 @@
       </div>
     `;
 
+    // Distribution stats today (histogram bars)
+    const dist = snapshot.distribution || {};
+    const distTotal = b.total || 1;
+    const distEntries = [
+      { key: "strong_down", label: "≤ -5%", color: "#ff3030", count: dist.strong_down || 0 },
+      { key: "down", label: "-5% to -2%", color: "#ff6347", count: dist.down || 0 },
+      { key: "mild_down", label: "-2% to 0%", color: "#ff9999", count: dist.mild_down || 0 },
+      { key: "flat", label: "≈ 0%", color: "#888888", count: dist.flat || 0 },
+      { key: "mild_up", label: "0% to +2%", color: "#90ee90", count: dist.mild_up || 0 },
+      { key: "up", label: "+2% to +5%", color: "#4caf50", count: dist.up || 0 },
+      { key: "strong_up", label: "≥ +5%", color: "#1b8a3a", count: dist.strong_up || 0 },
+    ];
+    const maxDist = Math.max(...distEntries.map((e) => e.count), 1);
+    const distBars = distEntries.map((e) => {
+      const pct = (e.count / maxDist) * 100;
+      return `
+        <div class="dist-bar-row">
+          <span class="dist-label">${e.label}</span>
+          <div class="dist-bar-track">
+            <div class="dist-bar-fill" style="width:${pct}%; background:${e.color}"></div>
+          </div>
+          <span class="dist-count">${e.count}</span>
+        </div>
+      `;
+    }).join("");
+    const distHtml = `
+      <div class="snap-section">
+        <div class="snap-title">📊 Phân bố biến động hôm nay (${distTotal} mã)</div>
+        <div class="snap-dist">${distBars}</div>
+      </div>
+    `;
+
+    // Volume surge list
+    const surges = snapshot.volSurges || [];
+    const surgesHtml = surges.length > 0 ? `
+      <div class="snap-section">
+        <div class="snap-title">⚡ Volume surge (vol ≥ 2× TB)</div>
+        <div class="snap-stocks">
+          ${surges.map((s) => {
+            const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+            const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+            return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-vol">${(s.volRatio || 0).toFixed(1)}×</span>
+              <span class="snap-stock-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}%</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    // 52W high list
+    const at52H = snapshot.at52wHigh || [];
+    const high52wHtml = at52H.length > 0 ? `
+      <div class="snap-section">
+        <div class="snap-title">🚀 Đang ở đỉnh 52W (${at52H.length})</div>
+        <div class="snap-stocks">
+          ${at52H.map((s) => {
+            const cls = (s.ret1w ?? 0) >= 0 ? "up" : "down";
+            const sign = (s.ret1w ?? 0) >= 0 ? "+" : "";
+            return `<div class="snap-stock-row" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-1w pct ${cls}">${sign}${(s.ret1w ?? 0).toFixed(1)}% 1W</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    // 52W low list
+    const at52L = snapshot.at52wLow || [];
+    const low52wHtml = at52L.length > 0 ? `
+      <div class="snap-section">
+        <div class="snap-title">📉 Đang ở đáy 52W (${at52L.length})</div>
+        <div class="snap-stocks">
+          ${at52L.map((s) => {
+            return `<div class="snap-stock-row snap-stock-weak" data-symbol="${s.symbol}">
+              <span class="snap-stock-sym">${s.symbol}</span>
+              <span class="snap-stock-sector">${sectorLabel(s.sector)}</span>
+              <span class="snap-stock-1w pct down">${(s.ret1w ?? 0).toFixed(1)}% 1W</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    const universeLabel = snapshot.universe === "full" ? `Full HOSE+HNX (~${b.total} mã)` : `DCA universe (${b.total} mã)`;
+
     return `
       <div class="home-card snap-card">
         <div class="home-card-title">
           🚀 Sector heat & Mã dẫn dắt
           <button class="home-card-action" id="snap-load-btn" title="Refresh ${ageTxt}">↻</button>
         </div>
+        ${universeToggle}
         ${breadthHtml}
+        ${distHtml}
         ${sectorHtml}
         ${leadersHtml}
         ${laggardsHtml}
+        ${surgesHtml}
+        ${high52wHtml}
+        ${low52wHtml}
         ${ffHtml}
-        <div class="mo-disclaimer">Universe: 58 mã DCA · Cập nhật ${ageTxt}</div>
+        <div class="mo-disclaimer">Universe: ${universeLabel} · Cập nhật ${ageTxt}</div>
       </div>
     `;
   }
@@ -2157,12 +2260,22 @@
     const outlook = computeMarketOutlook(regime, tplusCached, dcaCached);
     const outlookHtml = renderMarketOutlookSection(outlook);
 
-    // Market snapshot (sector heat + leaders) — chỉ hiện nếu có cache, else placeholder
+    // Market snapshot (sector heat + leaders + distribution + 52W) — load cache theo universe pref
     let snapshot = null;
+    const preferredUniverse = localStorage.getItem("snap_universe_pref") || "dca";
+    const cacheKey = preferredUniverse === "full" ? "market_snapshot_full_v1" : "market_snapshot_dca_v1";
     try {
-      const snapCached = JSON.parse(localStorage.getItem("market_snapshot_v1") || "null");
+      const snapCached = JSON.parse(localStorage.getItem(cacheKey) || "null");
       if (snapCached?.data) snapshot = snapCached.data;
     } catch {}
+    // Fallback: nếu cache preferred không có, thử cache còn lại
+    if (!snapshot) {
+      const altKey = preferredUniverse === "full" ? "market_snapshot_dca_v1" : "market_snapshot_full_v1";
+      try {
+        const altCached = JSON.parse(localStorage.getItem(altKey) || "null");
+        if (altCached?.data) snapshot = altCached.data;
+      } catch {}
+    }
     const snapshotHtml = renderMarketSnapshotSection(snapshot);
 
     let html = `
@@ -2330,17 +2443,30 @@
       } catch {}
     }
 
+    // Universe toggle: chọn DCA-58 hoặc Full ~700
+    container.querySelectorAll(".snap-uni-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const uni = btn.dataset.universe;
+        if (!uni) return;
+        localStorage.setItem("snap_universe_pref", uni);
+        renderHome(); // switch hiển thị cache của universe khác
+      });
+    });
+
     // Market snapshot scan button
     const snapBtn = document.getElementById("snap-load-btn");
     if (snapBtn) {
       snapBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        const uni = localStorage.getItem("snap_universe_pref") || "dca";
         snapBtn.disabled = true;
         const oldText = snapBtn.textContent;
-        snapBtn.textContent = "0/58";
+        snapBtn.textContent = uni === "full" ? "0/?" : "0/58";
         try {
           await RANKING.loadMarketSnapshot({
             useCache: false,
+            universe: uni,
             onProgress: (done, total) => {
               snapBtn.textContent = `${done}/${total}`;
             },

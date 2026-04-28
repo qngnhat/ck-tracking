@@ -823,25 +823,41 @@ window.__SSI_RANKING__ = (function () {
     }
   }
 
-  // ── Market snapshot: scan DCA universe để có per-mã metrics ──
-  // Reused cho home Market Outlook (sector heat, leaders, foreign flow)
-  // Cache 1h. Heavy scan first time (58 mã × fetchHistory).
-  const SNAPSHOT_CACHE_KEY = "market_snapshot_v1";
-  const SNAPSHOT_CACHE_TTL_MS = 1 * 3600 * 1000;
+  // ── Market snapshot: scan universe để có per-mã metrics ──
+  // 2 modes: "dca" (58 mã, fast ~30s) hoặc "full" (~700 mã, slow ~5min).
+  // Cache riêng key per mode. Full scan TTL dài hơn (4h vs 1h).
+  const SNAPSHOT_CACHE_KEYS = {
+    dca: "market_snapshot_dca_v1",
+    full: "market_snapshot_full_v1",
+  };
+  const SNAPSHOT_TTL_DCA_MS = 1 * 3600 * 1000;       // 1h
+  const SNAPSHOT_TTL_FULL_MS = 4 * 3600 * 1000;      // 4h (rare scan, persist longer)
 
   async function loadMarketSnapshot(opts = {}) {
-    const { useCache = true, onProgress } = opts;
+    const { useCache = true, onProgress, universe = "dca" } = opts;
+    const cacheKey = SNAPSHOT_CACHE_KEYS[universe] || SNAPSHOT_CACHE_KEYS.dca;
+    const ttlMs = universe === "full" ? SNAPSHOT_TTL_FULL_MS : SNAPSHOT_TTL_DCA_MS;
+
     if (useCache) {
       try {
-        const cached = JSON.parse(localStorage.getItem(SNAPSHOT_CACHE_KEY) || "null");
-        if (cached && Date.now() - cached.timestamp < SNAPSHOT_CACHE_TTL_MS) {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+        if (cached && Date.now() - cached.timestamp < ttlMs) {
           return { ...cached.data, fromCache: true };
         }
       } catch {}
     }
 
     const startTime = Date.now();
-    const stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+    let universeList;
+    if (universe === "full") {
+      universeList = await fetchFullUniverse();
+      if (!universeList || universeList.length < 100) {
+        universeList = UNIVERSE; // fallback nếu fetch fail
+      }
+    } else {
+      universeList = UNIVERSE; // 58 mã DCA
+    }
+    const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector || "khác" }));
     let done = 0;
     const batchSize = 20;
 
@@ -877,13 +893,15 @@ window.__SSI_RANKING__ = (function () {
               avgVol /= 20;
               stock.volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
             }
-            // Foreign net buy 5 phiên gần (chỉ DCA universe có data này pre-scan)
-            try {
-              const foreign = await fetchForeignDaily(stock.symbol, 5).catch(() => null);
-              if (foreign && foreign.length > 0) {
-                stock.netForeign5d = foreign.reduce((s, d) => s + (d.netVal || 0), 0);
-              }
-            } catch {}
+            // Foreign net buy 5 phiên gần (skip cho full scan để giảm 2× API call)
+            if (universe !== "full") {
+              try {
+                const foreign = await fetchForeignDaily(stock.symbol, 5).catch(() => null);
+                if (foreign && foreign.length > 0) {
+                  stock.netForeign5d = foreign.reduce((s, d) => s + (d.netVal || 0), 0);
+                }
+              } catch {}
+            }
           } catch (e) {
             stock.error = e.message;
           }
@@ -924,14 +942,46 @@ window.__SSI_RANKING__ = (function () {
       .sort((a, b) => b.netForeign5d - a.netForeign5d)
       .slice(0, 3);
 
-    // Breadth: % mã giảm vs tăng today, % above ma proxy via positive 1W
+    // Breadth: % mã giảm vs tăng today
     const upToday = valid.filter((s) => (s.dayChange || 0) > 0).length;
     const downToday = valid.filter((s) => (s.dayChange || 0) < 0).length;
     const upWeek = valid.filter((s) => s.ret1w > 0).length;
     const newHighs = valid.filter((s) => s.atHigh52w).length;
     const newLows = valid.filter((s) => s.atLow52w).length;
 
+    // Distribution stats (today): bao nhiêu mã trong từng range %
+    const dist = {
+      strong_down: 0,  // <= -5%
+      down: 0,         // -5% < x <= -2%
+      mild_down: 0,    // -2% < x < 0
+      flat: 0,         // x == 0
+      mild_up: 0,      // 0 < x < 2
+      up: 0,           // 2 <= x < 5
+      strong_up: 0,    // >= 5%
+    };
+    for (const s of valid) {
+      const c = s.dayChange ?? 0;
+      if (c <= -5) dist.strong_down++;
+      else if (c <= -2) dist.down++;
+      else if (c < 0) dist.mild_down++;
+      else if (c === 0) dist.flat++;
+      else if (c < 2) dist.mild_up++;
+      else if (c < 5) dist.up++;
+      else dist.strong_up++;
+    }
+
+    // Volume surge: vol >= 2x avg + dayChange > 0 (catalyst đẹp)
+    const volSurges = valid
+      .filter((s) => (s.volRatio || 0) >= 2)
+      .sort((a, b) => (b.volRatio || 0) - (a.volRatio || 0))
+      .slice(0, 8);
+
+    // 52W high/low lists (ưu tiên show top 5 mỗi list)
+    const at52wHigh = valid.filter((s) => s.atHigh52w).slice(0, 8);
+    const at52wLow = valid.filter((s) => s.atLow52w).slice(0, 8);
+
     const result = {
+      universe,
       stocks,
       sectorStats,
       leaders,
@@ -945,13 +995,17 @@ window.__SSI_RANKING__ = (function () {
         upTodayPct: valid.length > 0 ? (upToday / valid.length) * 100 : 0,
         upWeekPct: valid.length > 0 ? (upWeek / valid.length) * 100 : 0,
       },
+      distribution: dist,
+      volSurges,
+      at52wHigh,
+      at52wLow,
       timestamp: Date.now(),
       duration: Date.now() - startTime,
       fromCache: false,
     };
 
     try {
-      localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify({
+      localStorage.setItem(cacheKey, JSON.stringify({
         timestamp: Date.now(), data: result,
       }));
     } catch {}

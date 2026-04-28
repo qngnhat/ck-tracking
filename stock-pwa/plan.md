@@ -130,6 +130,14 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - 🌡️ **Breadth quick line**: % mã tăng today/week, count 52W high/low
   - Click mã row → navigate analyze tab
   - Button ↻ scan với progress (X/58 mã)
+- ✅ **Market Snapshot Phase 1 enhancement**:
+  - **Universe toggle** DCA-58 (cache 1h) vs Full HOSE+HNX ~700 (cache 4h, foreign skip cho speed)
+  - localStorage `snap_universe_pref` lưu lựa chọn user; auto-load cache theo pref
+  - **Distribution histogram** today: 7 range bars (≤-5%, -5/-2%, -2/0%, ≈0%, 0/+2%, +2/+5%, ≥+5%) với count + color gradient
+  - **Volume surge list**: top 8 mã vol ≥ 2× TB (catalyst signal)
+  - **52W high list**: mã đang ở đỉnh 52W (+1W return)
+  - **52W low list**: mã đang ở đáy 52W (cảnh báo phân phối)
+  - All click-able → navigate analyze tab
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

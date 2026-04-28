@@ -2642,6 +2642,83 @@ button {
   font-weight: 700;
 }
 
+/* Universe toggle (DCA / Full) */
+.snap-universe-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 4px;
+  background: #0f0f1e;
+  border-radius: 6px;
+  width: fit-content;
+}
+
+.snap-uni-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.snap-uni-btn:hover {
+  color: #ccc;
+}
+
+.snap-uni-btn.active {
+  background: #00d2ff;
+  color: #0a0a14;
+}
+
+/* Distribution histogram (today's daily change ranges) */
+.snap-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dist-bar-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 30px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.dist-label {
+  color: #888;
+  text-align: right;
+}
+
+.dist-bar-track {
+  height: 14px;
+  background: #0f0f1e;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dist-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.dist-count {
+  color: #ddd;
+  font-weight: 600;
+  text-align: right;
+}
+
+.snap-stock-vol {
+  color: #00d2ff;
+  font-weight: 700;
+  font-size: 11px;
+}
+
 /* Market Snapshot section (sector heat + leaders) */
 .snap-card {
   background: #14142a;
