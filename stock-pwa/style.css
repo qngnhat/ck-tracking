@@ -1760,6 +1760,76 @@ button {
    ════════════════════════════════════════ */
 .action-card {
   border-left: 3px solid #00d2ff;
+  padding: 12px 14px;
+}
+
+.action-hold {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.action-hold .action-label {
+  color: #00d2ff;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.action-hold .action-text {
+  color: #d0d0d0;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Verdict badge + risk chips (decision layer) */
+.verdict-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0 10px;
+}
+
+.verdict-badge {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.verdict-desc {
+  font-weight: 400;
+  opacity: 0.85;
+  font-size: 11px;
+}
+
+.risk-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.risk-chip {
+  font-size: 10px;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .action-situation {

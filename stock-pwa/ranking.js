@@ -435,9 +435,17 @@ window.__SSI_RANKING__ = (function () {
     // Day change
     const dayChange = n >= 2 ? (currentClose - closes[n - 2]) / closes[n - 2] : 0;
 
+    // Risk flags (đồng nhất với analysis.js — UI consume)
+    const flags = {
+      bearTrap: !!(adxData && adxData.adx > 45 && adxData.minusDI > adxData.plusDI),
+      lowVol: volRatio > 0 && volRatio < 0.8,
+      deepDowntrend: !!(ma50 && currentClose < ma50 * 0.88),
+    };
+
     return {
       score,
       reasons,
+      flags,
       currentPrice: currentClose,
       dayChange,
       rsiToday,

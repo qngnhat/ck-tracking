@@ -87,14 +87,19 @@ window.__SSI_ANALYSIS__ = (function () {
 
     // Recent swing highs/lows
     const sortedHighs = [...recentHighs].sort((a, b) => b - a);
-    const sortedLows = [...recentLows].sort((a, b) => a - b);
+    const sortedLowsAsc = [...recentLows].sort((a, b) => a - b);
 
     // Resistance = nearest high above current
     const resistance = sortedHighs.find(h => h > current) || sortedHighs[0];
-    // Support = nearest low below current
-    const support = sortedLows.reverse().find(l => l < current) || sortedLows[0];
+    // Support = nearest swing low BELOW current. Có thể null nếu giá vừa rơi
+    // xuyên qua tất cả swing low gần đây (case crash mạnh).
+    const supportRaw = [...sortedLowsAsc].reverse().find(l => l < current);
+    const support = supportRaw ?? null;
+    // effectiveSupport: anchor cho SL/buy-zone math, luôn < current.
+    // Khi support null → fallback current * 0.93 (xấp xỉ -7%) hoặc lowest low (cái nào thấp hơn).
+    const effectiveSupport = supportRaw ?? Math.min(current * 0.93, sortedLowsAsc[0]);
 
-    return { support, resistance };
+    return { support, resistance, effectiveSupport };
   }
 
   // ── 52-week high/low ──
@@ -380,7 +385,7 @@ window.__SSI_ANALYSIS__ = (function () {
     const macd = calculateMACD(closes);
     const bb = calculateBB(closes);
     const performance = calculatePerformance(closes);
-    const { support, resistance } = findSupportResistance(highs, lows, closes);
+    const { support, resistance, effectiveSupport } = findSupportResistance(highs, lows, closes);
     const w52 = find52Week(highs, lows);
     const avgVol = avgVolume(volumes);
     const currentVol = volumes[volumes.length - 1];
@@ -598,23 +603,39 @@ window.__SSI_ANALYSIS__ = (function () {
     }
 
     // ── Suggested buy price ──
+    // Hai nhánh: bình thường (support+MA20 đều DƯỚI current → DCA pullback)
+    // vs crashed (không có anchor dưới → vùng quan sát hẹp đối xứng)
     let buyZoneLow, buyZoneHigh;
     if (score >= 2) {
-      // Buy zone: between support and MA20 (or current)
-      buyZoneLow = Math.max(support, current * 0.97);
-      buyZoneHigh = Math.min(ma20 || current, current * 1.01);
-      if (buyZoneLow > buyZoneHigh) {
-        buyZoneLow = support;
-        buyZoneHigh = current;
+      const ma20Below = ma20 && ma20 < current ? ma20 : null;
+      const supBelow = support && support < current ? support : null;
+      if (supBelow && ma20Below) {
+        // Normal pullback: anchor giữa support thật và MA20
+        buyZoneLow = Math.max(supBelow, current * 0.95);
+        buyZoneHigh = Math.min(ma20Below, current * 1.00);
+      } else {
+        // Crashed / không có anchor: zone hẹp đối xứng quanh current
+        buyZoneLow = current * 0.97;
+        buyZoneHigh = current * 1.02;
       }
     }
 
-    // Stop loss: use ATR-based (2x ATR) if available, else support-based
+    // Stop loss: dùng effectiveSupport (luôn < current) thay vì support raw
+    // Clamp ATR < current để tránh edge case ATR quá nhỏ
+    const slAnchor = effectiveSupport ?? current * 0.93;
     const stopLossATR = atr ? current - 2 * atr : null;
-    const stopLossSupport = support * 0.97;
-    const stopLoss = stopLossATR && stopLossATR > 0
-      ? Math.max(stopLossATR, stopLossSupport) // whichever is tighter (higher)
+    const stopLossSupport = slAnchor * 0.97;
+    const stopLoss = stopLossATR && stopLossATR > 0 && stopLossATR < current
+      ? Math.max(stopLossATR, stopLossSupport) // tighter (closer to current)
       : stopLossSupport;
+
+    // ── Risk flags (cho verdict layer + UI chips) ──
+    // Tách thành flags object thay vì grep reasons string — dễ scale/test
+    const flags = {
+      bearTrap: !!(adx && adx.adx > 45 && adx.minusDI > adx.plusDI),
+      lowVol: volRatio > 0 && volRatio < 0.8,
+      deepDowntrend: !!(ma50 && current < ma50 * 0.88),
+    };
 
     const result = {
       symbol,
@@ -660,6 +681,7 @@ window.__SSI_ANALYSIS__ = (function () {
       buyZoneLow,
       buyZoneHigh,
       stopLoss,
+      flags,
     };
 
     result.textAnalysis = generateTextAnalysis(result);

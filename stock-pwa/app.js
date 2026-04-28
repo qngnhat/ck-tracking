@@ -494,6 +494,7 @@
           </div>
         </div>
         <div class="an-recommend-big" style="color:${r.recColor}">${r.recommendation}</div>
+        ${analyzeContext === "tplus" ? "" : renderVerdictBadge(r.score, r.flags)}
         <div class="an-reasons">${r.reasons.map((x) => `• ${x}`).join("<br>") || "Không có tín hiệu rõ"}</div>
         ${buyZoneHtml}
         ${row("Stop loss", fp(r.stopLoss),
@@ -738,6 +739,54 @@
     `;
   }
 
+  // ── Verdict + Risk chips (decision layer) ──
+  // Verdict: 3 loại Spec Buy / Watchlist / Avoid dựa thuần trên score
+  // Risk chips: dựa trên flags object (bearTrap/lowVol/deepDowntrend) — render
+  // riêng để user biết WHY cần chú ý dù verdict nói "Buy".
+  function getVerdict(score) {
+    if (score === null || score === undefined || isNaN(score)) return null;
+    if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
+      desc: "Tránh — chờ tín hiệu đảo chiều rõ" };
+    if (score >= 4) return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
+      desc: "Có thể spec buy size nhỏ (mean-rev confluence)" };
+    return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
+      desc: "Chờ confluence rõ hơn HOẶC trigger đảo chiều" };
+  }
+
+  // Volatility label từ ATR% — chỉ là proxy biến động, KHÔNG phải "risk cao = setup xấu"
+  function getVolatilityLabel(atrPct) {
+    if (atrPct == null) return null;
+    if (atrPct >= 4) return { txt: "Biến động cao — chia size 1/3", color: "#ff5722" };
+    if (atrPct >= 2.5) return { txt: "Biến động vừa", color: "#ff9800" };
+    return { txt: "Biến động thấp", color: "#4CAF50" };
+  }
+
+  function renderRiskChips(flags) {
+    if (!flags) return "";
+    const chips = [];
+    if (flags.bearTrap) chips.push({ label: "⚠️ Bắt dao rơi", color: "#ff5722" });
+    if (flags.lowVol) chips.push({ label: "Vol thấp", color: "#ff9800" });
+    if (flags.deepDowntrend) chips.push({ label: "Downtrend mạnh", color: "#ff9800" });
+    if (chips.length === 0) return "";
+    return `<div class="risk-chips">${chips.map((c) =>
+      `<span class="risk-chip" style="border-color:${c.color}55;color:${c.color}">${c.label}</span>`
+    ).join("")}</div>`;
+  }
+
+  function renderVerdictBadge(score, flags) {
+    const v = getVerdict(score);
+    if (!v) return "";
+    const chipsHtml = renderRiskChips(flags);
+    return `
+      <div class="verdict-block">
+        <div class="verdict-badge" style="background:${v.color}22;border-color:${v.color};color:${v.color}">
+          ${v.icon} <b>${v.tag}</b> · <span class="verdict-desc">${v.desc}</span>
+        </div>
+        ${chipsHtml}
+      </div>
+    `;
+  }
+
   function renderTplusContextCard(pick, rank, r) {
     const reasons = pick.reasons || [];
     const f = pick.factors || {};
@@ -749,25 +798,50 @@
     const slFinal = slFromAtr ? Math.max(slFromAtr, slFromPct) : slFromPct;
     const slPct = ((slFinal - cur) / cur) * 100;
 
-    const targets = [];
-    if (r.ma20 && r.ma20 > cur) {
-      const upPct = ((r.ma20 - cur) / cur) * 100;
-      targets.push(`Mục tiêu 1: <b>${fp(r.ma20)}</b> (hồi về MA20, +${upPct.toFixed(1)}%)`);
-    }
-    if (r.resistance && r.resistance > cur) {
-      const upPct = ((r.resistance - cur) / cur) * 100;
-      targets.push(`Mục tiêu 2: <b>${fp(r.resistance)}</b> (kháng cự gần, +${upPct.toFixed(1)}%)`);
-    }
+    // T+ TP cap — dựa trên backtest stat: 61% win, avg winner ~8.7%
+    // TP1 = MA20 if reachable trong cap, else cap +10% (realistic, dễ chạm)
+    // TP2 = resistance if reachable trong cap, else cap +18% (stretch goal)
+    const tp1Cap = cur * 1.10;
+    const tp2Cap = cur * 1.18;
+    const tp1UseMa = r.ma20 && r.ma20 > cur && r.ma20 <= tp1Cap;
+    const tp1 = tp1UseMa ? r.ma20 : tp1Cap;
+    const tp1Note = tp1UseMa ? "hồi về MA20" : "trần T+ realistic (~10%)";
+    const tp2UseRes = r.resistance && r.resistance > tp1 && r.resistance <= tp2Cap;
+    const tp2 = tp2UseRes ? r.resistance : tp2Cap;
+    const tp2Note = tp2UseRes ? "kháng cự gần" : "trần T+ stretch (~18%)";
+    const targets = [
+      `Mục tiêu 1: <b>${fp(tp1)}</b> (${tp1Note}, +${(((tp1 - cur) / cur) * 100).toFixed(1)}%)`,
+      `Mục tiêu 2: <b>${fp(tp2)}</b> (${tp2Note}, +${(((tp2 - cur) / cur) * 100).toFixed(1)}%)`,
+    ];
+
+    // Entry — 2 option để user chọn theo risk profile
+    const aggLow = cur * 0.98;
+    const aggHigh = cur * 1.02;
+
+    // Subtitle context-aware
+    const subtitle = (r.dayChange ?? 0) <= -3
+      ? "Cơ hội mean-reversion — đang rơi mạnh, ưu tiên chờ xác nhận"
+      : "Cơ hội mean-reversion ngắn hạn";
+
+    // Volatility label từ ATR% (proxy biến động — KHÔNG phải Risk)
+    const vol = getVolatilityLabel(r.atrPct);
+    const volHtml = vol
+      ? ` <span class="context-risk" style="color:${vol.color}">· ${vol.txt}</span>` : "";
+
+    // Verdict + risk chips (dùng pick.flags từ ranking, fallback r.flags từ analyze)
+    const flags = pick.flags || r.flags || {};
+    const verdictHtml = renderVerdictBadge(pick.score ?? r.score, flags);
 
     const rankTxt = rank ? `Pick #${rank}` : "";
 
     return `
       <div class="an-card context-card context-tplus">
+        ${verdictHtml}
         <div class="context-header">
           <span class="context-icon">⚡</span>
           <div>
-            <div class="context-title">T+ ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</div>
-            <div class="context-subtitle">Cơ hội mean-reversion ngắn hạn</div>
+            <div class="context-title">T+ ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}${volHtml}</div>
+            <div class="context-subtitle">${subtitle}</div>
           </div>
         </div>
         <div class="context-section">
@@ -777,7 +851,8 @@
         <div class="context-section">
           <div class="context-section-title">Plan giao dịch</div>
           <ul class="context-bullets">
-            <li>Vùng vào: <b>~${fp(cur)}</b> (giá hiện tại)</li>
+            <li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in từng phần, không all-in</i></li>
+            <li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
             ${targets.map((t) => `<li>${t}</li>`).join("")}
             <li>Hold: <b>15-30 phiên</b></li>
@@ -785,63 +860,42 @@
           </ul>
         </div>
         <div class="context-disclaimer">
-          ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest test set 2023-2026: setup score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — nhưng 4/10 lệnh thua, cần tuân thủ stop loss.
+          ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest 2023-2026: score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — 4/10 lệnh thua, tuân thủ SL.
         </div>
       </div>
     `;
   }
 
-  // ── Action card (per score level) ──
+  // ── Action card (rút gọn) ──
+  // Verdict badge đã cover quyết định cho user CHƯA giữ → không duplicate ở đây.
+  // Chỉ giữ "Nếu đang giữ" (managing position là context khác) + 1 warning.
   function renderActionCard(r) {
-    let situation, holdAction, newAction, warning, icon;
+    let holdAction, warning;
 
     if (r.score >= 4) {
-      icon = "🟢";
-      situation = "Confluence các tín hiệu kỹ thuật tích cực mạnh — setup hiếm gặp (~7% số phiên).";
       holdAction = "Có thể cân nhắc <b>tăng size một phần</b> (tilt buy ~30-50%) nếu mã đã trong portfolio. KHÔNG all-in.";
-      newAction = "Kiểm tra tab <b>Top picks → DCA</b> xem mã có nằm trong top không. Nếu là setup mean-reversion (RSI&lt;25 driver) → cân nhắc 1 lệnh T+ size nhỏ với SL chặt -8%.";
-      warning = "ĐỪNG bỏ kế hoạch DCA định kỳ vì 1 setup. Backtest cho thấy edge ~3-5%/cơ hội — không phải chắc thắng.";
+      warning = "ĐỪNG bỏ kế hoạch DCA định kỳ vì 1 setup. Edge ~3-5%/cơ hội — không phải chắc thắng.";
     } else if (r.score >= 2) {
-      icon = "🟢";
-      situation = "Vài tín hiệu tích cực nhưng chưa đủ confluence rõ rệt (~20% số phiên).";
-      holdAction = "Giữ nguyên, KHÔNG bán panic. Theo dõi để xem có lên ≥4 không.";
-      newAction = "Thêm vào <b>watchlist</b>. Chờ confluence rõ hơn (score ≥4) HOẶC giá break kháng cự với volume xác nhận trước khi vào lệnh.";
-      warning = "Setup khá phổ biến — đừng over-trade dựa trên tín hiệu yếu này.";
+      holdAction = "Giữ nguyên, KHÔNG bán panic. Theo dõi xem có lên ≥4 không.";
+      warning = "Setup khá phổ biến — đừng over-trade dựa trên tín hiệu yếu.";
     } else if (r.score >= -1) {
-      icon = "🟠";
-      situation = "Tín hiệu hỗn hợp, không có hướng rõ — phổ biến nhất (~46% số phiên).";
       holdAction = "Giữ nguyên position. ĐỪNG panic do score trung tính.";
-      newAction = "<b>KHÔNG vào lệnh mới</b> (T+ hay swing). Nếu đang DCA định kỳ → cứ theo lịch (tránh time market).";
-      warning = "Phần lớn thời gian app sẽ trung tính — đó là chuyện bình thường, không phải thiếu tín hiệu để hành động.";
+      warning = "Phần lớn thời gian app sẽ trung tính — đó là bình thường.";
     } else if (r.score >= -3) {
-      icon = "🔴";
-      situation = "Vài tín hiệu tiêu cực — đà giảm có thể hình thành (~21% số phiên).";
-      holdAction = "Review lại lý do mua ban đầu. Fundamentals OK → giữ. Xấu đi → cân nhắc giảm size khi mã phá hỗ trợ.";
-      newAction = "<b>KHÔNG mua mới</b> — kể cả ý định 'bắt đáy'. Đợi tín hiệu đảo chiều rõ trước.";
-      warning = "Nếu giá break dưới hỗ trợ với volume xác nhận → cắt lỗ kỷ luật. Đừng để loss cascade.";
+      holdAction = "Review thesis ban đầu. Fundamentals OK → giữ. Xấu đi → giảm size khi phá hỗ trợ.";
+      warning = "Nếu giá break dưới hỗ trợ với vol xác nhận → cắt lỗ kỷ luật.";
     } else {
-      icon = "🔴";
-      situation = "Confluence tín hiệu tiêu cực — mã có thể đang phân phối hoặc bear market (~7% số phiên).";
       holdAction = "Cân nhắc <b>cắt lỗ / giảm tỷ trọng</b> nếu giá tiếp tục dưới hỗ trợ. Đặc biệt nếu fundamentals cũng xấu đi.";
-      newAction = "<b>TUYỆT ĐỐI không bắt đáy</b>. Đợi dấu hiệu đảo chiều rõ: RSI hồi từ &lt;30 + MACD cross up + volume xác nhận.";
-      warning = "Fundamental check: có news/scandal/báo cáo xấu không? Nếu có → có thể là 'falling knife', tránh xa.";
+      warning = "Check news/scandal/báo cáo xấu — có thể là 'falling knife'.";
     }
 
     return `
       <div class="an-card full-width action-card" style="border-left-color: ${r.recColor}">
-        <div class="an-title">${icon} Hành động đề xuất</div>
-        <div class="action-situation">${situation}</div>
-        <div class="action-grid">
-          <div class="action-item">
-            <div class="action-label">Nếu đang giữ mã</div>
-            <div class="action-text">${holdAction}</div>
-          </div>
-          <div class="action-item">
-            <div class="action-label">Nếu chưa giữ</div>
-            <div class="action-text">${newAction}</div>
-          </div>
+        <div class="action-hold">
+          <span class="action-label">Nếu đang giữ:</span>
+          <span class="action-text">${holdAction}</span>
         </div>
-        <div class="action-warning">⚠️ <b>Lưu ý:</b> ${warning}</div>
+        <div class="action-warning">⚠️ ${warning}</div>
       </div>
     `;
   }

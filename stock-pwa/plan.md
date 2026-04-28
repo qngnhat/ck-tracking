@@ -40,6 +40,18 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ fmtMoney hiện full VND (4.649.000đ) thay vì làm tròn (4.6 tr)
 - ✅ Holding detail modal: vị thế + portfolio-specific action plan (TP zones, stop loss, vùng mua thêm) + tx history với edit/xóa per-row
 - ✅ Cash card cả ô click được (thay vì chỉ icon ✎)
+- ✅ Fix display bugs cho mã crash (KDC case): tách `support` (pivot thật, có thể null) khỏi `effectiveSupport` (anchor cho SL/buy-zone math) — Stop loss không còn nhảy lên ABOVE current
+- ✅ Buy zone: chia 2 nhánh DCA pullback (anchor support+MA20) vs crashed (zone hẹp ±2-3%)
+- ✅ T+ TP cap +7%/+12% (thay vì MA20/resistance có thể +25%) — khớp horizon T+ 1-3 phiên
+- ✅ T+ entry: "Vùng quan sát ±2% + Trigger: nến rút chân/volume xác nhận" thay vì "vào ngay current"
+- ✅ T+ subtitle context-aware: rơi mạnh ≥3% → "chờ xác nhận đảo chiều"
+- ✅ T+ Risk badge từ ATR% (cao/vừa/thấp) — proxy biến động cho size lệnh
+- ✅ Decision layer: Verdict badge (🟢 Spec Buy / 🟡 Watchlist / 🔴 Avoid) + Risk chips (Bắt dao rơi / Vol thấp / Downtrend mạnh) tách độc lập với Setup label
+- ✅ `flags` object share giữa `analyze()` và `computeTPlusFactors` — thay grep `reasons.includes()` brittle bằng boolean fields
+- ✅ T+ TP cap chỉnh từ +7/+12 → **+10/+18** (sát backtest stat: avg winner ~8.7%)
+- ✅ T+ Entry 2 option: Aggressive scale-in (current ±2%) + Confirmed (chờ trigger nến/vol) — không ép user một hướng
+- ✅ Đổi "Risk cao" → "Biến động cao — chia size 1/3" (ATR% là proxy biến động, không phải risk)
+- ✅ Action card rút gọn: bỏ situation + newAction (đã được verdict cover), giữ "Nếu đang giữ" + 1-line warning
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
