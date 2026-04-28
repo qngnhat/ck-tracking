@@ -138,6 +138,16 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - **52W high list**: mã đang ở đỉnh 52W (+1W return)
   - **52W low list**: mã đang ở đáy 52W (cảnh báo phân phối)
   - All click-able → navigate analyze tab
+- ✅ **Market Snapshot Phase 2 — sector deep dive + comparison table**:
+  - **Sector detail modal**: click sector heat row → mở modal full-screen
+    - Header summary: avg today/1W/1M, % mã tăng hôm nay
+    - Sort bar: 1W / 1M / Today / Vol (click switch)
+    - Stock table per sector: symbol, 52W flag, price, day%, 1W%, 1M%, vol×
+    - Click stock row → navigate analyze tab
+  - **Sector comparison table** trong home: list all sectors với multi-timeframe
+    - Cột: Sector, N (count), Today, 1W, 1M (color-coded green/red)
+    - Sorted by avg 1W desc, click row → drill-down modal
+  - Reuse data từ snapshot (không scan thêm)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

@@ -1987,6 +1987,201 @@
     `;
   }
 
+  // ── Sector detail modal (deep dive) ──
+  let sectorModalCurrent = null;
+  function openSectorDetail(sectorKey, snapshot) {
+    sectorModalCurrent = { sectorKey, snapshot };
+    const modal = $("sector-modal");
+    const backdrop = $("sector-modal-backdrop");
+    if (!modal || !backdrop) return;
+    bindSectorModal();
+    renderSectorDetailBody(sectorKey, snapshot);
+    modal.classList.add("open");
+    backdrop.classList.add("open");
+  }
+
+  function closeSectorModal() {
+    $("sector-modal")?.classList.remove("open");
+    $("sector-modal-backdrop")?.classList.remove("open");
+    sectorModalCurrent = null;
+  }
+
+  function bindSectorModal() {
+    const modal = $("sector-modal");
+    if (!modal || modal.dataset.bound) return;
+    modal.dataset.bound = "1";
+    $("sector-modal-close")?.addEventListener("click", closeSectorModal);
+    $("sector-modal-backdrop")?.addEventListener("click", closeSectorModal);
+  }
+
+  let sectorSortMode = "ret1w"; // ret1w | ret1m | dayChange | volRatio
+
+  function renderSectorDetailBody(sectorKey, snapshot) {
+    const body = $("sector-modal-body");
+    const titleEl = $("sector-modal-title");
+    if (!body || !snapshot) return;
+
+    const stocksInSector = (snapshot.stocks || []).filter(
+      (s) => !s.error && (s.sector || "khác") === sectorKey
+    );
+
+    titleEl.textContent = `${sectorLabel(sectorKey)} (${stocksInSector.length} mã)`;
+
+    if (stocksInSector.length === 0) {
+      body.innerHTML = `<div class="hd-section"><p>Không có mã trong sector này.</p></div>`;
+      return;
+    }
+
+    // Sort
+    const sorted = [...stocksInSector].sort((a, b) => {
+      const av = a[sectorSortMode] ?? -Infinity;
+      const bv = b[sectorSortMode] ?? -Infinity;
+      return bv - av;
+    });
+
+    // Aggregate stats
+    const valid1w = stocksInSector.filter((s) => s.ret1w != null);
+    const valid1m = stocksInSector.filter((s) => s.ret1m != null);
+    const avg1w = valid1w.length > 0 ? valid1w.reduce((s, x) => s + x.ret1w, 0) / valid1w.length : 0;
+    const avg1m = valid1m.length > 0 ? valid1m.reduce((s, x) => s + x.ret1m, 0) / valid1m.length : 0;
+    const avgDay = stocksInSector.reduce((s, x) => s + (x.dayChange || 0), 0) / stocksInSector.length;
+    const upToday = stocksInSector.filter((s) => (s.dayChange || 0) > 0).length;
+
+    const aggHtml = `
+      <div class="hd-section">
+        <div class="hd-section-title">📊 Sector summary</div>
+        <div class="hd-pos-grid">
+          <div><span class="hd-lbl">Avg today</span><span class="hd-val pct ${avgDay >= 0 ? "up" : "down"}">${avgDay >= 0 ? "+" : ""}${avgDay.toFixed(2)}%</span></div>
+          <div><span class="hd-lbl">Avg 1W</span><span class="hd-val pct ${avg1w >= 0 ? "up" : "down"}">${avg1w >= 0 ? "+" : ""}${avg1w.toFixed(2)}%</span></div>
+          <div><span class="hd-lbl">Avg 1M</span><span class="hd-val pct ${avg1m >= 0 ? "up" : "down"}">${avg1m >= 0 ? "+" : ""}${avg1m.toFixed(2)}%</span></div>
+          <div><span class="hd-lbl">Tăng hôm nay</span><span class="hd-val">${upToday}/${stocksInSector.length}</span></div>
+        </div>
+      </div>
+    `;
+
+    const sortBtns = `
+      <div class="sector-sort-bar">
+        <span class="hd-lbl">Sort:</span>
+        ${["ret1w", "ret1m", "dayChange", "volRatio"].map((k) => {
+          const labels = { ret1w: "1W", ret1m: "1M", dayChange: "Today", volRatio: "Vol" };
+          return `<button class="sector-sort-btn ${sectorSortMode === k ? "active" : ""}" data-sort="${k}">${labels[k]}</button>`;
+        }).join("")}
+      </div>
+    `;
+
+    const stockRows = sorted.map((s) => {
+      const dayCls = (s.dayChange ?? 0) >= 0 ? "up" : "down";
+      const daySign = (s.dayChange ?? 0) >= 0 ? "+" : "";
+      const w1Cls = (s.ret1w ?? 0) >= 0 ? "up" : "down";
+      const w1Sign = (s.ret1w ?? 0) >= 0 ? "+" : "";
+      const m1Cls = (s.ret1m ?? 0) >= 0 ? "up" : "down";
+      const m1Sign = (s.ret1m ?? 0) >= 0 ? "+" : "";
+      const flagLabel = s.atHigh52w ? '<span class="sd-flag sd-flag-high">52W H</span>'
+        : s.atLow52w ? '<span class="sd-flag sd-flag-low">52W L</span>'
+        : "";
+      return `
+        <div class="sd-stock-row" data-symbol="${s.symbol}">
+          <span class="sd-sym">${s.symbol}</span>
+          <span class="sd-flag-cell">${flagLabel}</span>
+          <span class="sd-price">${fp(s.close ?? 0)}</span>
+          <span class="sd-day pct ${dayCls}">${daySign}${(s.dayChange ?? 0).toFixed(2)}%</span>
+          <span class="sd-1w pct ${w1Cls}">${w1Sign}${(s.ret1w ?? 0).toFixed(1)}%</span>
+          <span class="sd-1m pct ${m1Cls}">${m1Sign}${(s.ret1m ?? 0).toFixed(1)}%</span>
+          <span class="sd-vol">${(s.volRatio || 0).toFixed(1)}×</span>
+        </div>
+      `;
+    }).join("");
+
+    const headerRow = `
+      <div class="sd-stock-row sd-stock-header">
+        <span class="sd-sym">Mã</span>
+        <span class="sd-flag-cell"></span>
+        <span class="sd-price">Giá</span>
+        <span class="sd-day">Today</span>
+        <span class="sd-1w">1W</span>
+        <span class="sd-1m">1M</span>
+        <span class="sd-vol">Vol</span>
+      </div>
+    `;
+
+    body.innerHTML = `
+      ${aggHtml}
+      ${sortBtns}
+      <div class="sd-stocks-list">
+        ${headerRow}
+        ${stockRows}
+      </div>
+    `;
+
+    // Bind sort buttons
+    body.querySelectorAll(".sector-sort-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        sectorSortMode = b.dataset.sort;
+        renderSectorDetailBody(sectorKey, snapshot);
+      });
+    });
+
+    // Bind stock rows
+    body.querySelectorAll(".sd-stock-row[data-symbol]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sym = row.dataset.symbol;
+        if (!sym) return;
+        closeSectorModal();
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        clearAnalyzeContext();
+        analyzeSymbol(sym);
+      });
+    });
+  }
+
+  // ── Sector comparison table (multi-timeframe) ──
+  function renderSectorComparisonTable(snapshot) {
+    if (!snapshot?.sectorStats || snapshot.sectorStats.length === 0) return "";
+
+    // Sort by avg 1W desc
+    const sorted = [...snapshot.sectorStats].sort((a, b) => b.avg1w - a.avg1w);
+
+    const rows = sorted.map((s) => {
+      const dayCls = s.avgDay >= 0 ? "up" : "down";
+      const daySign = s.avgDay >= 0 ? "+" : "";
+      const w1Cls = s.avg1w >= 0 ? "up" : "down";
+      const w1Sign = s.avg1w >= 0 ? "+" : "";
+      const m1Cls = s.avg1m >= 0 ? "up" : "down";
+      const m1Sign = s.avg1m >= 0 ? "+" : "";
+      return `
+        <div class="sct-row" data-sector="${s.sector}">
+          <span class="sct-name">${sectorLabel(s.sector)}</span>
+          <span class="sct-count">${s.count}</span>
+          <span class="sct-pct pct ${dayCls}">${daySign}${s.avgDay.toFixed(2)}%</span>
+          <span class="sct-pct pct ${w1Cls}">${w1Sign}${s.avg1w.toFixed(2)}%</span>
+          <span class="sct-pct pct ${m1Cls}">${m1Sign}${s.avg1m.toFixed(2)}%</span>
+        </div>
+      `;
+    }).join("");
+
+    const headerRow = `
+      <div class="sct-row sct-header">
+        <span class="sct-name">Sector</span>
+        <span class="sct-count">N</span>
+        <span class="sct-pct">Today</span>
+        <span class="sct-pct">1W</span>
+        <span class="sct-pct">1M</span>
+      </div>
+    `;
+
+    return `
+      <div class="snap-section">
+        <div class="snap-title">📋 Sector comparison (click để drill-down)</div>
+        <div class="sct-table">
+          ${headerRow}
+          ${rows}
+        </div>
+      </div>
+    `;
+  }
+
   // ── Market snapshot section: sector heat + leaders + distribution + 52W ──
   function renderMarketSnapshotSection(snapshot) {
     const universeToggle = `
@@ -2022,7 +2217,7 @@
           ${sectorTop.map((s) => {
             const cls = s.avg1w >= 0 ? "up" : "down";
             const sign = s.avg1w >= 0 ? "+" : "";
-            return `<div class="snap-sector-row snap-up">
+            return `<div class="snap-sector-row snap-up" data-sector="${s.sector}">
               <span class="snap-sector-name">${sectorLabel(s.sector)}</span>
               <span class="snap-sector-pct pct ${cls}">${sign}${s.avg1w.toFixed(2)}%</span>
               <span class="snap-sector-count">${s.count} mã</span>
@@ -2032,7 +2227,7 @@
           ${sectorBottom.map((s) => {
             const cls = s.avg1w >= 0 ? "up" : "down";
             const sign = s.avg1w >= 0 ? "+" : "";
-            return `<div class="snap-sector-row snap-down">
+            return `<div class="snap-sector-row snap-down" data-sector="${s.sector}">
               <span class="snap-sector-name">${sectorLabel(s.sector)}</span>
               <span class="snap-sector-pct pct ${cls}">${sign}${s.avg1w.toFixed(2)}%</span>
               <span class="snap-sector-count">${s.count} mã</span>
@@ -2200,6 +2395,8 @@
 
     const universeLabel = snapshot.universe === "full" ? `Full HOSE+HNX (~${b.total} mã)` : `DCA universe (${b.total} mã)`;
 
+    const comparisonHtml = renderSectorComparisonTable(snapshot);
+
     return `
       <div class="home-card snap-card">
         <div class="home-card-title">
@@ -2210,6 +2407,7 @@
         ${breadthHtml}
         ${distHtml}
         ${sectorHtml}
+        ${comparisonHtml}
         ${leadersHtml}
         ${laggardsHtml}
         ${surgesHtml}
@@ -2490,6 +2688,15 @@
         if (input) input.value = sym;
         clearAnalyzeContext();
         analyzeSymbol(sym);
+      });
+    });
+
+    // Sector rows (heat + comparison table) → open sector detail modal
+    container.querySelectorAll("[data-sector]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const sec = row.dataset.sector;
+        if (!sec || !snapshot) return;
+        openSectorDetail(sec, snapshot);
       });
     });
   }

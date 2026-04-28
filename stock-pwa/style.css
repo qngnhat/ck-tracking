@@ -2642,6 +2642,174 @@ button {
   font-weight: 700;
 }
 
+/* Sector comparison table (multi-timeframe) */
+.sct-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sct-row {
+  display: grid;
+  grid-template-columns: 1fr 30px 65px 65px 65px;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sct-row:hover:not(.sct-header) {
+  background: rgba(0, 210, 255, 0.06);
+}
+
+.sct-row.sct-header {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 700;
+  cursor: default;
+  border-bottom: 1px solid #20203a;
+  margin-bottom: 2px;
+}
+
+.sct-name {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.sct-count {
+  color: #888;
+  text-align: right;
+  font-size: 11px;
+}
+
+.sct-pct {
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Sector detail modal (deep dive) */
+.sector-modal {
+  /* Wider on desktop */
+}
+
+@media (min-width: 600px) {
+  .sector-modal {
+    width: 640px;
+  }
+}
+
+.sector-sort-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #20203a;
+}
+
+.sector-sort-btn {
+  background: #0f0f1e;
+  border: 1px solid #2a2a3e;
+  color: #888;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sector-sort-btn:hover {
+  color: #ccc;
+}
+
+.sector-sort-btn.active {
+  background: #00d2ff;
+  color: #0a0a14;
+  border-color: #00d2ff;
+}
+
+.sd-stocks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sd-stock-row {
+  display: grid;
+  grid-template-columns: 50px 50px 60px 60px 60px 60px 40px;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  padding: 6px 4px;
+  border-bottom: 1px dashed #20203a;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sd-stock-row:hover:not(.sd-stock-header) {
+  background: rgba(0, 210, 255, 0.06);
+}
+
+.sd-stock-row.sd-stock-header {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 700;
+  cursor: default;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.sd-sym {
+  color: #fff;
+  font-weight: 700;
+}
+
+.sd-flag-cell {
+  text-align: center;
+}
+
+.sd-flag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.sd-flag-high {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4CAF50;
+}
+
+.sd-flag-low {
+  background: rgba(255, 68, 68, 0.2);
+  color: #ff4444;
+}
+
+.sd-price {
+  color: #ddd;
+  text-align: right;
+}
+
+.sd-day, .sd-1w, .sd-1m {
+  font-weight: 600;
+  text-align: right;
+}
+
+.sd-vol {
+  color: #00d2ff;
+  font-weight: 600;
+  text-align: right;
+  font-size: 10px;
+}
+
 /* Universe toggle (DCA / Full) */
 .snap-universe-toggle {
   display: flex;
@@ -2768,6 +2936,12 @@ button {
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.snap-sector-row:hover {
+  background: rgba(0, 210, 255, 0.1) !important;
 }
 
 .snap-sector-row.snap-up {
