@@ -52,6 +52,10 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ T+ Entry 2 option: Aggressive scale-in (current ±2%) + Confirmed (chờ trigger nến/vol) — không ép user một hướng
 - ✅ Đổi "Risk cao" → "Biến động cao — chia size 1/3" (ATR% là proxy biến động, không phải risk)
 - ✅ Action card rút gọn: bỏ situation + newAction (đã được verdict cover), giữ "Nếu đang giữ" + 1-line warning
+- ✅ `computeTpTargets(r)` helper share giữa T+ context + action card — nhất quán, có check `tp1 > current` + `tp2 > tp1` để tránh bug TP vô nghĩa
+- ✅ TP wording: "Mục tiêu gần (~10%)" / "Mục tiêu tối đa (~18%)" — bỏ jargon "trần T+ realistic/stretch"
+- ✅ Verdict desc tách câu: "Có thể vào (spec nhỏ). Thận trọng: ưu tiên chờ xác nhận." — giảm conflict với entry option
+- ✅ Hold action có SL number + TP1 cụ thể — actionable ngay, user không phải tự cuộn xuống tìm
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

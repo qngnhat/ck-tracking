@@ -739,6 +739,19 @@
     `;
   }
 
+  // ── TP targets (shared giữa T+ context + action card) ──
+  // Cap +10% (TP1) / +18% (TP2). Ưu tiên structure (MA20/resistance) khi nó nằm
+  // trong cap VÀ trên current/tp1. Tránh bug TP <= current.
+  function computeTpTargets(r) {
+    const c = r.current;
+    if (!c) return { tp1: null, tp2: null };
+    const tp1Cap = c * 1.10;
+    const tp2Cap = c * 1.18;
+    const tp1 = (r.ma20 && r.ma20 > c && r.ma20 <= tp1Cap) ? r.ma20 : tp1Cap;
+    const tp2 = (r.resistance && r.resistance > tp1 && r.resistance <= tp2Cap) ? r.resistance : tp2Cap;
+    return { tp1, tp2 };
+  }
+
   // ── Verdict + Risk chips (decision layer) ──
   // Verdict: 3 loại Spec Buy / Watchlist / Avoid dựa thuần trên score
   // Risk chips: dựa trên flags object (bearTrap/lowVol/deepDowntrend) — render
@@ -748,7 +761,7 @@
     if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
       desc: "Tránh — chờ tín hiệu đảo chiều rõ" };
     if (score >= 4) return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
-      desc: "Có thể spec buy size nhỏ (mean-rev confluence)" };
+      desc: "Có thể vào (spec nhỏ). Thận trọng: ưu tiên chờ xác nhận." };
     return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
       desc: "Chờ confluence rõ hơn HOẶC trigger đảo chiều" };
   }
@@ -798,17 +811,12 @@
     const slFinal = slFromAtr ? Math.max(slFromAtr, slFromPct) : slFromPct;
     const slPct = ((slFinal - cur) / cur) * 100;
 
-    // T+ TP cap — dựa trên backtest stat: 61% win, avg winner ~8.7%
-    // TP1 = MA20 if reachable trong cap, else cap +10% (realistic, dễ chạm)
-    // TP2 = resistance if reachable trong cap, else cap +18% (stretch goal)
-    const tp1Cap = cur * 1.10;
-    const tp2Cap = cur * 1.18;
-    const tp1UseMa = r.ma20 && r.ma20 > cur && r.ma20 <= tp1Cap;
-    const tp1 = tp1UseMa ? r.ma20 : tp1Cap;
-    const tp1Note = tp1UseMa ? "hồi về MA20" : "trần T+ realistic (~10%)";
-    const tp2UseRes = r.resistance && r.resistance > tp1 && r.resistance <= tp2Cap;
-    const tp2 = tp2UseRes ? r.resistance : tp2Cap;
-    const tp2Note = tp2UseRes ? "kháng cự gần" : "trần T+ stretch (~18%)";
+    // TP shared helper — đảm bảo nhất quán giữa T+ card và action card
+    const { tp1, tp2 } = computeTpTargets({ ...r, current: cur });
+    const tp1UseMa = r.ma20 && r.ma20 > cur && r.ma20 <= cur * 1.10;
+    const tp2UseRes = r.resistance && r.resistance > tp1 && r.resistance <= cur * 1.18;
+    const tp1Note = tp1UseMa ? "hồi về MA20" : "Mục tiêu gần (~10%)";
+    const tp2Note = tp2UseRes ? "kháng cự gần" : "Mục tiêu tối đa (~18%)";
     const targets = [
       `Mục tiêu 1: <b>${fp(tp1)}</b> (${tp1Note}, +${(((tp1 - cur) / cur) * 100).toFixed(1)}%)`,
       `Mục tiêu 2: <b>${fp(tp2)}</b> (${tp2Note}, +${(((tp2 - cur) / cur) * 100).toFixed(1)}%)`,
@@ -869,23 +877,27 @@
   // ── Action card (rút gọn) ──
   // Verdict badge đã cover quyết định cho user CHƯA giữ → không duplicate ở đây.
   // Chỉ giữ "Nếu đang giữ" (managing position là context khác) + 1 warning.
+  // Inject SL number + TP1 (khi applicable) để actionable ngay, user không phải tự tính.
   function renderActionCard(r) {
+    const sl = r.stopLoss ? `SL <b>${fp(r.stopLoss)}</b>. ` : "";
+    const { tp1 } = computeTpTargets(r);
     let holdAction, warning;
 
     if (r.score >= 4) {
-      holdAction = "Có thể cân nhắc <b>tăng size một phần</b> (tilt buy ~30-50%) nếu mã đã trong portfolio. KHÔNG all-in.";
-      warning = "ĐỪNG bỏ kế hoạch DCA định kỳ vì 1 setup. Edge ~3-5%/cơ hội — không phải chắc thắng.";
+      const tpHint = tp1 ? `Canh chốt 1/3 quanh <b>${fp(tp1)}</b>. ` : "";
+      holdAction = `Có thể tilt buy 30-50% (KHÔNG all-in). ${sl}${tpHint}`;
+      warning = "ĐỪNG bỏ DCA định kỳ vì 1 setup. Edge ~3-5%/cơ hội — không chắc thắng.";
     } else if (r.score >= 2) {
-      holdAction = "Giữ nguyên, KHÔNG bán panic. Theo dõi xem có lên ≥4 không.";
-      warning = "Setup khá phổ biến — đừng over-trade dựa trên tín hiệu yếu.";
+      holdAction = `Giữ, KHÔNG bán panic. ${sl}Theo dõi xem có lên ≥4 không.`;
+      warning = "Setup khá phổ biến — đừng over-trade tín hiệu yếu.";
     } else if (r.score >= -1) {
-      holdAction = "Giữ nguyên position. ĐỪNG panic do score trung tính.";
+      holdAction = `Giữ position. ${sl}ĐỪNG panic do score trung tính.`;
       warning = "Phần lớn thời gian app sẽ trung tính — đó là bình thường.";
     } else if (r.score >= -3) {
-      holdAction = "Review thesis ban đầu. Fundamentals OK → giữ. Xấu đi → giảm size khi phá hỗ trợ.";
-      warning = "Nếu giá break dưới hỗ trợ với vol xác nhận → cắt lỗ kỷ luật.";
+      holdAction = `Review thesis. ${sl}Phá hỗ trợ + vol xác nhận → giảm size kỷ luật.`;
+      warning = "Đừng để loss cascade — cắt lỗ trước khi cảm xúc thắng.";
     } else {
-      holdAction = "Cân nhắc <b>cắt lỗ / giảm tỷ trọng</b> nếu giá tiếp tục dưới hỗ trợ. Đặc biệt nếu fundamentals cũng xấu đi.";
+      holdAction = `Cân nhắc <b>cắt lỗ / giảm tỷ trọng</b>. ${sl}Đặc biệt nếu fundamentals xấu đi.`;
       warning = "Check news/scandal/báo cáo xấu — có thể là 'falling knife'.";
     }
 
