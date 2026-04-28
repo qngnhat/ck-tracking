@@ -863,7 +863,7 @@
             <li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
             ${targets.map((t) => `<li>${t}</li>`).join("")}
-            <li>Hold: <b>15-30 phiên</b></li>
+            <li>Hold: <b>5-15 phiên</b> (mean-rev bounce điển hình; sau 10 phiên không hồi → cắt)</li>
             <li>Exit khi: RSI hồi &gt;50 HOẶC đạt mục tiêu HOẶC dính SL</li>
           </ul>
         </div>
@@ -2024,7 +2024,7 @@
       disc.textContent = "⚠️ DCA cập nhật 24h, rebalance đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.";
     } else {
       title.textContent = "Top mã T+";
-      disc.textContent = "⚠️ T+ cập nhật mỗi giờ trong giờ giao dịch. Setup hiếm, có thể không có mã nào hôm nay. Hold 15-30 phiên, stop loss -8%.";
+      disc.textContent = "⚠️ T+ cập nhật mỗi giờ trong giờ giao dịch. Setup hiếm, có thể không có mã nào hôm nay. Hold 5-15 phiên, stop loss -8%.";
     }
 
     // Update topN button state
@@ -2062,7 +2062,7 @@
         <div class="empty-state ranking-intro">
           <div class="empty-icon">⚡</div>
           <h2>Cơ hội T+ (lướt sóng ngắn hạn)</h2>
-          <p>Quét universe tìm setup confluence: RSI&lt;25 + BB lower + MFI&lt;20 + volume catalyst đồng thời. Hold 15-30 phiên.</p>
+          <p>Quét universe tìm setup confluence: RSI&lt;25 + BB lower + MFI&lt;20 + volume catalyst đồng thời. Hold 5-15 phiên.</p>
           <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Backtest validated:</b> setup chất lượng (score≥4) có win rate 61%, avg +3.3%/lệnh trên test set 2023-2026.</p>
           <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> setup T+ chất lượng rất hiếm — có thể 0 mã nhiều ngày liên tiếp. Đó là tính năng, không phải bug — kỷ luật không trade khi không có cơ hội rõ.</p>
           <button class="btn-primary" id="ranking-load-btn">Quét cơ hội T+</button>
@@ -2344,7 +2344,7 @@
     } else {
       html += `
         <div class="allocation-hint">
-          ⚡ Hold ~15-30 phiên. Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
+          ⚡ Hold ~5-15 phiên (sau 10 phiên không hồi → cắt). Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
         </div>
       `;
     }
