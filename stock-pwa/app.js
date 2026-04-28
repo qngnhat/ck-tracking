@@ -1750,6 +1750,243 @@
     return actions;
   }
 
+  // ── Market outlook composer ──
+  // Reuse cached data (regime, T+ picks, DCA picks). Không trigger heavy scan.
+  function computeMarketOutlook(regime, tplusCache, dcaCache) {
+    const out = {
+      // Layer 1: Index state
+      l1: {
+        regime: regime?.regime || null,
+        regimeLabel: regime?.label || "--",
+        regimeColor: regime?.color || "#888",
+        currentValue: regime?.currentValue,
+        ret1m: regime?.ret1m,
+        ret3m: regime?.ret3m,
+        distMa200: regime?.distMa200,
+        distMa50: regime?.distMa50,
+        atrPct: regime?.atrPct,
+        ma50Above200: (regime?.ma50 != null && regime?.ma200 != null) ? regime.ma50 > regime.ma200 : null,
+      },
+      // Layer 2: Breadth proxy (từ scans gần đây)
+      l2: {
+        tplusEligible: tplusCache?.eligibleCount,
+        tplusTotal: tplusCache?.allCount,
+        dcaCount: dcaCache?.picks?.length || 0,
+        tplusAge: tplusCache?.timestamp ? Math.round((Date.now() - tplusCache.timestamp) / 60000) : null, // phút
+      },
+      // Layer 3: Money flow + sector
+      l3: {
+        sectorBreakdown: null,
+        flagActivation: null,
+      },
+      hint: "",
+    };
+
+    // L3: aggregate sector counts từ T+ picks (proxy money flow + leadership)
+    if (tplusCache?.picks?.length) {
+      const sectorCount = {};
+      const flagCount = { bearTrap: 0, sellPressure: 0, lowSessionLiq: 0 };
+      let bullishPicks = 0, sumDayChange = 0;
+      for (const p of tplusCache.picks) {
+        const sec = p.sector || "khác";
+        sectorCount[sec] = (sectorCount[sec] || 0) + 1;
+        const f = p.flags || {};
+        if (f.bearTrap) flagCount.bearTrap++;
+        if (f.sellPressure) flagCount.sellPressure++;
+        if (f.lowSessionLiq) flagCount.lowSessionLiq++;
+        const dc = p.factors?.dayChange ?? 0;
+        sumDayChange += dc;
+        if (dc > 0) bullishPicks++;
+      }
+      out.l3.sectorBreakdown = Object.entries(sectorCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([s, c]) => ({ sector: s, count: c }));
+      out.l3.flagActivation = flagCount;
+      out.l3.bullishPicksRatio = tplusCache.picks.length > 0 ? bullishPicks / tplusCache.picks.length : 0;
+      out.l3.avgDayChange = tplusCache.picks.length > 0 ? sumDayChange / tplusCache.picks.length * 100 : 0;
+    }
+
+    // L4: tactical hint composite
+    out.hint = composeTacticalHint(out);
+
+    return out;
+  }
+
+  function composeTacticalHint(out) {
+    const parts = [];
+    const regime = out.l1.regime;
+    const flagAct = out.l3.flagActivation;
+
+    // Holiday near
+    const holiday = nextVnHoliday(7);
+    const holidayWarn = holiday && holiday.daysAway > 0 && holiday.daysAway <= 3;
+
+    if (regime === "BEAR" || regime === "BEAR_WEAK") {
+      parts.push("📉 Market <b>BEAR</b> — hạn chế bắt đáy. T+ cần threshold cao + Confirmed entry.");
+    } else if (regime === "BULL" || regime === "BULL_WEAK") {
+      parts.push("📈 Market <b>BULL</b> — môi trường thuận lợi cho cả T+ pullback lẫn DCA.");
+    } else if (regime === "RANGE") {
+      parts.push("⚡ Market <b>Đi ngang</b> — môi trường lý tưởng cho T+ mean-reversion.");
+    }
+
+    // Flag activation pattern
+    if (flagAct) {
+      const totalRisky = flagAct.bearTrap + flagAct.sellPressure + flagAct.lowSessionLiq;
+      const totalPicks = (out.l2.tplusEligible || 0);
+      if (totalPicks > 0 && totalRisky / totalPicks > 0.6) {
+        parts.push("⚠️ <b>Đa số picks T+ có risk flag</b> — thị trường đang dump nhiều, ưu tiên Confirmed entry.");
+      }
+    }
+
+    if (holidayWarn) {
+      parts.push(`📅 Còn <b>${holiday.daysAway} phiên</b> tới nghỉ lễ — review portfolio cash ratio, T+ hold qua nghỉ rủi ro gap.`);
+    }
+
+    // Cash ratio reminder (cho user có portfolio)
+    try {
+      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+      let totalMarket = 0;
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache[h.symbol];
+        if (a?.current) totalMarket += h.qty * a.current * 1000;
+      }
+      const nav = totalMarket + cash;
+      if (nav > 0 && holidayWarn) {
+        const cashPct = (cash / nav) * 100;
+        if (cashPct < 10) {
+          parts.push(`💸 Portfolio cash <b>${cashPct.toFixed(0)}%</b> — không đủ dự phòng nếu thị trường gap sau lễ.`);
+        }
+      }
+    } catch {}
+
+    return parts.length > 0 ? parts.join("<br>") : "Đang tổng hợp tín hiệu...";
+  }
+
+  function renderMarketOutlookSection(outlook) {
+    const l1 = outlook.l1;
+    const l2 = outlook.l2;
+    const l3 = outlook.l3;
+
+    // Layer 1 — Index state
+    const ret1mTxt = l1.ret1m != null ? `${l1.ret1m >= 0 ? "+" : ""}${l1.ret1m.toFixed(1)}%` : "--";
+    const ret3mTxt = l1.ret3m != null ? `${l1.ret3m >= 0 ? "+" : ""}${l1.ret3m.toFixed(1)}%` : "--";
+    const distMa200Txt = l1.distMa200 != null ? `${l1.distMa200 >= 0 ? "+" : ""}${l1.distMa200.toFixed(1)}%` : "--";
+    const distMa50Txt = l1.distMa50 != null ? `${l1.distMa50 >= 0 ? "+" : ""}${l1.distMa50.toFixed(1)}%` : "--";
+    const atrTxt = l1.atrPct != null ? `${l1.atrPct.toFixed(2)}%` : "--";
+    const volLabel = l1.atrPct == null ? "--"
+      : l1.atrPct >= 2.5 ? "cao"
+      : l1.atrPct >= 1.5 ? "vừa" : "thấp";
+
+    const l1Html = `
+      <div class="mo-layer">
+        <div class="mo-layer-title">🎯 VN-Index trạng thái</div>
+        <div class="mo-row">
+          <span class="mo-label">Trend:</span>
+          <span class="mo-val" style="color:${l1.regimeColor}"><b>${l1.regimeLabel}</b></span>
+          ${l1.ma50Above200 != null ? `<span class="mo-sub">· ${l1.ma50Above200 ? "MA50 > MA200 (uptrend cấu trúc)" : "MA50 ≤ MA200 (chưa xác nhận)"}</span>` : ""}
+        </div>
+        <div class="mo-row">
+          <span class="mo-label">Distance MA:</span>
+          <span class="mo-val">MA200 ${distMa200Txt} · MA50 ${distMa50Txt}</span>
+        </div>
+        <div class="mo-row">
+          <span class="mo-label">Return:</span>
+          <span class="mo-val">1M ${ret1mTxt} · 3M ${ret3mTxt}</span>
+        </div>
+        <div class="mo-row">
+          <span class="mo-label">Volatility:</span>
+          <span class="mo-val">ATR ${atrTxt} (${volLabel})</span>
+        </div>
+      </div>
+    `;
+
+    // Layer 2 — Breadth proxy
+    let l2Html = "";
+    if (l2.tplusEligible != null && l2.tplusTotal != null) {
+      const ratio = l2.tplusTotal > 0 ? (l2.tplusEligible / l2.tplusTotal) * 100 : 0;
+      const ageTxt = l2.tplusAge != null ? `${l2.tplusAge} phút trước` : "lâu rồi";
+      l2Html = `
+        <div class="mo-layer">
+          <div class="mo-layer-title">📈 Breadth (sức khỏe rộng)</div>
+          <div class="mo-row">
+            <span class="mo-label">Setup T+ confluence:</span>
+            <span class="mo-val"><b>${l2.tplusEligible}/${l2.tplusTotal}</b> mã (${ratio.toFixed(1)}%)</span>
+          </div>
+          <div class="mo-row">
+            <span class="mo-label">DCA top picks:</span>
+            <span class="mo-val">${l2.dcaCount} mã pass ranking</span>
+          </div>
+          <div class="mo-row mo-sub-row">
+            <span class="mo-sub">Cập nhật: ${ageTxt}</span>
+          </div>
+        </div>
+      `;
+    } else {
+      l2Html = `
+        <div class="mo-layer">
+          <div class="mo-layer-title">📈 Breadth (sức khỏe rộng)</div>
+          <div class="mo-row mo-empty">Chưa có data — vào tab Top picks → bấm ↻ để quét.</div>
+        </div>
+      `;
+    }
+
+    // Layer 3 — Money flow + Sector
+    let l3Html = "";
+    if (l3.sectorBreakdown && l3.sectorBreakdown.length > 0) {
+      const sectorTxt = l3.sectorBreakdown
+        .map((s) => `<span class="mo-sector-tag">${sectorLabel(s.sector)} (${s.count})</span>`)
+        .join("");
+      const bullishPct = (l3.bullishPicksRatio * 100).toFixed(0);
+      const avgDayChg = l3.avgDayChange != null ? `${l3.avgDayChange >= 0 ? "+" : ""}${l3.avgDayChange.toFixed(2)}%` : "--";
+      const flagAct = l3.flagActivation || {};
+      const flagsLine = (flagAct.bearTrap || flagAct.sellPressure || flagAct.lowSessionLiq)
+        ? `<div class="mo-row mo-sub-row"><span class="mo-sub">Risk flags: bearTrap ${flagAct.bearTrap || 0} · sellPressure ${flagAct.sellPressure || 0} · kẹt hàng ${flagAct.lowSessionLiq || 0}</span></div>`
+        : "";
+      l3Html = `
+        <div class="mo-layer">
+          <div class="mo-layer-title">💰 Money flow & Sector</div>
+          <div class="mo-row">
+            <span class="mo-label">Top sector (T+):</span>
+            <span class="mo-sector-tags">${sectorTxt}</span>
+          </div>
+          <div class="mo-row">
+            <span class="mo-label">Picks tăng:</span>
+            <span class="mo-val">${bullishPct}% picks tăng giá hôm nay · avg ${avgDayChg}</span>
+          </div>
+          ${flagsLine}
+        </div>
+      `;
+    } else {
+      l3Html = `
+        <div class="mo-layer">
+          <div class="mo-layer-title">💰 Money flow & Sector</div>
+          <div class="mo-row mo-empty">Chưa có data — load Top picks T+ để có insight.</div>
+        </div>
+      `;
+    }
+
+    // Layer 4 — Tactical hint
+    const l4Html = `
+      <div class="mo-layer mo-hint-layer">
+        <div class="mo-layer-title">🎯 Hint hôm nay</div>
+        <div class="mo-hint">${outlook.hint}</div>
+      </div>
+    `;
+
+    return `
+      <div class="home-card mo-card">
+        <div class="home-card-title">📊 Nhận định thị trường</div>
+        ${l1Html}
+        ${l2Html}
+        ${l3Html}
+        ${l4Html}
+        <div class="mo-disclaimer">⚠️ Đây là tổng hợp tín hiệu kỹ thuật — không phải lời khuyên đầu tư.</div>
+      </div>
+    `;
+  }
+
   async function renderHome() {
     const container = $("home-container");
     if (!container) return;
@@ -1785,6 +2022,10 @@
     const watchlist = RANKING.loadWatchlist();
     const watchlistCount = watchlist.length;
 
+    // Compute market outlook (Layer 1+2+3+4)
+    const outlook = computeMarketOutlook(regime, tplusCached, dcaCached);
+    const outlookHtml = renderMarketOutlookSection(outlook);
+
     let html = `
       <div class="home-greeting">
         <div class="home-greeting-text">${greeting}</div>
@@ -1798,6 +2039,8 @@
           ${actions.map((a) => `<li><span class="home-action-icon">${a.icon}</span><span>${a.text}</span></li>`).join("")}
         </ul>
       </div>
+
+      ${outlookHtml}
     `;
 
     // Watchlist section

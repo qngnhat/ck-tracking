@@ -114,6 +114,13 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Count Spec Buy / Watchlist split (verdict logic)
   - Top 4 risk flags activate counts: bearTrap, lowSessionLiq, sellPressure, etc.
   - Verify v46 patches behavior — distribution sane hay quá khắt khe
+- ✅ **Market Outlook section trong tab Home** (4 layer):
+  - **L1 — Index state**: regime + MA50/MA200 distance + 1M/3M return + ATR volatility
+  - **L2 — Breadth proxy**: T+ eligible / DCA picks count, age cập nhật
+  - **L3 — Money flow & Sector**: top 3 sector từ T+ picks, % bullish picks today, risk flags activation
+  - **L4 — Tactical hint composite**: phân tích regime + flags + holiday + portfolio cash → action gợi ý
+  - Reuse cached data (vnindex_regime + tplus + dca picks) — không trigger heavy scan
+  - Disclaimer: "tổng hợp tín hiệu kỹ thuật, không phải lời khuyên đầu tư"
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
