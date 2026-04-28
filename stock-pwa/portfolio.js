@@ -353,8 +353,8 @@ window.__SSI_PORTFOLIO__ = (function () {
       const dayChg = analysis?.dayChange ?? 0;
       // Soft hơn nếu giá đang nhú lên trong phiên — cho space chờ hồi nhẹ
       const txt = dayChg > 0
-        ? `🚨 Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật. Có thể chờ nhịp hồi nhẹ để thoát giá tốt hơn.`
-        : `🚨 Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật, review thesis nếu giữ.`;
+        ? `Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật. Có thể chờ nhịp hồi nhẹ để thoát giá tốt hơn.`
+        : `Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật, review thesis nếu giữ.`;
       return { priority: 1, icon: "🚨", color: "#ff4444", text: txt, slActive };
     }
 
@@ -362,7 +362,7 @@ window.__SSI_PORTFOLIO__ = (function () {
     if (distPct != null && distPct < nearPct) {
       return {
         priority: 1, icon: "⚠️", color: "#ff5722",
-        text: `⚠️ Sát SL ${slActive.toFixed(2)} (còn ${distPct.toFixed(1)}%) — chuẩn bị action nếu thủng.`,
+        text: `Sát SL ${slActive.toFixed(2)} (còn ${distPct.toFixed(1)}%) — chuẩn bị action nếu thủng.`,
         slActive,
       };
     }

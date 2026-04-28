@@ -2623,6 +2623,7 @@
     const qty = Number($("tx-quantity").value) || 0;
     const price = Number($("tx-price").value) || 0;
     const feeVnd = Number($("tx-fee").value) || 0;
+    const symbol = ($("tx-symbol")?.value || "").trim().toUpperCase();
     const side = document.querySelector("#tx-side-toggle .seg-btn.active")?.dataset.side || "buy";
     const gross = qty * price * 1000;
     const summary = $("tx-summary");
@@ -2631,10 +2632,25 @@
       summary.textContent = "";
       return;
     }
+
+    // DCA preview: nếu mua mã đã có holding → tính avg cost mới
+    let dcaHtml = "";
+    if (side === "buy" && symbol && qty > 0 && price > 0) {
+      const existing = PORTFOLIO.currentHoldings().find((h) => h.symbol === symbol);
+      if (existing && existing.qty > 0) {
+        const newQty = existing.qty + qty;
+        const newAvgCost = (existing.qty * existing.avg_cost + qty * price) / newQty;
+        const oldAvg = existing.avg_cost;
+        const direction = newAvgCost < oldAvg ? "↓" : "↑";
+        const dirColor = newAvgCost < oldAvg ? "#4CAF50" : "#FF9800";
+        dcaHtml = `<br><span style="color:${dirColor}">DCA: avg cost ${oldAvg.toFixed(2)} ${direction} <b>${newAvgCost.toFixed(2)}</b> (KL mới ${newQty.toLocaleString("vi-VN")})</span>`;
+      }
+    }
+
     if (side === "buy") {
       const total = gross + feeVnd;
       const newCash = PORTFOLIO.loadCash() - total;
-      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>`;
+      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>${dcaHtml}`;
     } else {
       const proceeds = gross - feeVnd;
       const newCash = PORTFOLIO.loadCash() + proceeds;
@@ -2664,7 +2680,7 @@
     });
 
     // Live summary
-    ["tx-quantity", "tx-price", "tx-fee"].forEach((id) => {
+    ["tx-quantity", "tx-price", "tx-fee", "tx-symbol"].forEach((id) => {
       $(id)?.addEventListener("input", updateTxSummary);
     });
 
@@ -3180,6 +3196,55 @@
     hdChartInstance.timeScale().fitContent();
   }
 
+  // ── Portfolio risk hints (panel-level analytics) ──
+  // 3 hint khi triggered: Cash/Equity ratio, "Xanh vỏ đỏ lòng", Holiday + low cash.
+  function renderPortfolioRiskHints(enriched, totalMarket, cash, nav) {
+    const hints = [];
+
+    // Cash/Equity ratio
+    if (nav > 0) {
+      const equityPct = (totalMarket / nav) * 100;
+      const cashPct = (cash / nav) * 100;
+      hints.push({
+        kind: "ratio",
+        text: `Cổ <b>${equityPct.toFixed(1)}%</b> · Cash <b>${cashPct.toFixed(1)}%</b>`,
+      });
+
+      // Holiday + low cash combo
+      const holiday = nextVnHoliday(5);
+      if (holiday && holiday.daysAway > 0 && cashPct < 10) {
+        hints.push({
+          kind: "warn",
+          text: `⚠️ Cash thấp (${cashPct.toFixed(1)}%) + còn ${holiday.daysAway} phiên tới nghỉ lễ — không có dự phòng nếu thị trường gap down sau lễ.`,
+        });
+      }
+    }
+
+    // "Xanh vỏ đỏ lòng": losers ngốn lợi nhuận winners
+    let winnersTotal = 0, losersTotal = 0;
+    for (const h of enriched) {
+      if (!h.analysis) continue;
+      const pnl = h.qty * h.analysis.current * 1000 - h.cost_basis * 1000;
+      if (pnl > 0) winnersTotal += pnl;
+      else losersTotal += Math.abs(pnl);
+    }
+    if (winnersTotal > 0 && losersTotal >= winnersTotal * 0.8) {
+      const ratio = (losersTotal / winnersTotal) * 100;
+      const verb = ratio >= 100 ? "đã ngốn sạch" : "đang ngốn";
+      hints.push({
+        kind: "warn",
+        text: `⚠️ Mã lỗ ${verb} <b>${ratio.toFixed(0)}%</b> lợi nhuận từ winners — cân nhắc cắt lỗ để bảo vệ phần lãi.`,
+      });
+    }
+
+    if (hints.length === 0) return "";
+    return `
+      <div class="port-risk-hints">
+        ${hints.map((h) => `<div class="port-risk-hint port-risk-${h.kind}">${h.text}</div>`).join("")}
+      </div>
+    `;
+  }
+
   // ── Portfolio render ──
   async function renderPortfolio() {
     const container = $("portfolio-content");
@@ -3332,6 +3397,7 @@
           ${totalRealized !== 0 ? ` · Lãi/lỗ thực hiện: <b>${totalRealized >= 0 ? "+" : ""}${fmtMoney(totalRealized)}</b>` : ""}
           · ${enriched.length} mã
         </div>
+        ${renderPortfolioRiskHints(enriched, totalMarket, cash, nav)}
       `;
       // Direct bind sau render (safety: delegation không phải lúc nào cũng fire)
       const addBtn = $("add-tx-top");
@@ -3393,7 +3459,9 @@
             ` : ""}
             <div class="holding-actions-row">
               <button class="link-btn holding-analyze">Phân tích</button>
-              <button class="link-btn holding-add-tx">+ Giao dịch</button>
+              ${action?.priority === 1 && pnl < 0
+                ? `<button class="link-btn holding-add-tx holding-sell-cta" data-prefill-side="sell">+ Bán ${h.symbol}</button>`
+                : `<button class="link-btn holding-add-tx">+ Giao dịch</button>`}
             </div>
           </div>
         `;
@@ -3405,10 +3473,17 @@
         card.querySelector(".holding-analyze")?.addEventListener("click", () => {
           openHoldingDetail(sym);
         });
-        card.querySelector(".holding-add-tx")?.addEventListener("click", () => {
-          // Open modal pre-filled with symbol
+        card.querySelector(".holding-add-tx")?.addEventListener("click", (e) => {
+          // Open modal pre-filled with symbol; nếu nút bán cam → pre-select side=sell
           openTxModal();
           $("tx-symbol").value = sym;
+          const prefillSide = e.currentTarget?.dataset?.prefillSide;
+          if (prefillSide === "sell") {
+            document.querySelectorAll("#tx-side-toggle .seg-btn").forEach((b) =>
+              b.classList.toggle("active", b.dataset.side === "sell")
+            );
+          }
+          updateTxSummary();
         });
       });
     }

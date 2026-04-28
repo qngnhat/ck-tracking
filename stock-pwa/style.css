@@ -2642,6 +2642,49 @@ button {
   font-weight: 700;
 }
 
+/* Portfolio risk hints (Cash/Equity ratio, Xanh-vỏ-đỏ-lòng) */
+.port-risk-hints {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #2a2a3e;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.port-risk-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #ccc;
+}
+
+.port-risk-hint.port-risk-warn {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  color: #ffb74d;
+}
+
+.port-risk-hint b {
+  color: #fff;
+}
+
+.port-risk-hint.port-risk-warn b {
+  color: #ffd180;
+}
+
+/* Sell CTA orange khi action priority = 1 (SL violation / sát SL) */
+.holding-sell-cta {
+  color: #ff9800 !important;
+  font-weight: 700;
+}
+
+.holding-sell-cta:hover {
+  color: #ffb74d !important;
+}
+
 /* Duplicate transactions warning banner */
 .dupe-banner {
   background: rgba(255, 152, 0, 0.1);

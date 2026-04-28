@@ -78,6 +78,12 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Action text mọi tier giờ inject SL number cụ thể
 - ✅ Volume severity 2-tier: `flags.volCritical` (< 0.4×) chip "🚨 Vol cực thấp — khó có lực hồi" priority over "Vol thấp — thiếu xác nhận"
 - ✅ Chip wording thêm hệ quả: "kẹt hàng — vào dễ ra khó", "vol thấp — thiếu xác nhận"
+- ✅ **Commit C2 — Portfolio dashboard "tàn nhẫn"**:
+  - Cash/Equity ratio dưới NAV: "Cổ X% · Cash Y%". Cảnh báo nếu cash < 10% trong 5 ngày trước holiday
+  - "Xanh vỏ đỏ lòng" warning: nếu mã lỗ ngốn ≥ 80% lợi nhuận winners → banner cam
+  - DCA preview trong tx modal: khi mua mã đã có holding → hiện avg cost mới (↓/↑) + KL mới
+  - Nút "+ Bán {symbol}" cam (thay "+ Giao dịch") khi action priority = 1 + đang lỗ. Pre-fill side=sell khi click
+  - Bỏ emoji prefix khỏi action.text (đã có trong action.icon → render double)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
