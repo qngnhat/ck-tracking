@@ -494,7 +494,7 @@
           </div>
         </div>
         <div class="an-recommend-big" style="color:${r.recColor}">${r.recommendation}</div>
-        ${analyzeContext === "tplus" ? "" : renderVerdictBadge(r.score, r.flags)}
+        ${analyzeContext === "tplus" ? "" : renderVerdictBadge(r.score, r.flags, r.atrPct)}
         <div class="an-reasons">${r.reasons.map((x) => `• ${x}`).join("<br>") || "Không có tín hiệu rõ"}</div>
         ${buyZoneHtml}
         ${row("Stop loss", fp(r.stopLoss),
@@ -775,17 +775,37 @@
   }
 
   // ── Verdict + Risk chips (decision layer) ──
-  // Verdict: 3 loại Spec Buy / Watchlist / Avoid dựa thuần trên score
-  // Risk chips: dựa trên flags object (bearTrap/lowVol/deepDowntrend) — render
-  // riêng để user biết WHY cần chú ý dù verdict nói "Buy".
-  function getVerdict(score) {
+  // Penalty (flags) ảnh hưởng VERDICT, không chỉ chip hiển thị.
+  // Hard flags (1 cái đủ giết kèo): bearTrap (ADX>45 -DI mạnh), lowSessionLiq.
+  // Soft flags (≥2 mới downgrade): lowVol, deepDowntrend.
+  // Size hint embed luôn vào verdict desc theo flag count + ATR.
+  function getVerdict(score, flags, atrPct) {
     if (score === null || score === undefined || isNaN(score)) return null;
     if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
-      desc: "Tránh — chờ tín hiệu đảo chiều rõ" };
-    if (score >= 4) return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
-      desc: "Có thể vào (spec nhỏ). Thận trọng: ưu tiên chờ xác nhận." };
+      desc: "Không vào. Chờ tín hiệu đảo chiều rõ." };
+
+    const hardFlags = [flags?.bearTrap, flags?.lowSessionLiq].filter(Boolean).length;
+    const softFlags = [flags?.lowVol, flags?.deepDowntrend].filter(Boolean).length;
+
+    // Score ≥4 nhưng có hard flag HOẶC ≥2 soft flag → downgrade về Watchlist
+    const downgradeBuy = score >= 4 && (hardFlags >= 1 || softFlags >= 2);
+    if (downgradeBuy) {
+      return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
+        desc: "Setup chất lượng nhưng risk cao. Nếu thử bắt đáy: <b>10-20% vốn</b>, chờ xác nhận." };
+    }
+
+    if (score >= 4) {
+      // Size hint dựa flagCount (chỉ soft) + ATR
+      let sizeHint;
+      if (softFlags >= 1) sizeHint = "1/4 vốn (có 1 risk soft)";
+      else if (atrPct != null && atrPct >= 3) sizeHint = "1/3 vốn (biến động cao)";
+      else sizeHint = "1/3 - 1/2 vốn";
+      return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
+        desc: `Có thể vào — <b>${sizeHint}</b>. Cân nhắc chờ xác nhận nếu thận trọng.` };
+    }
+
     return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
-      desc: "Chờ confluence rõ hơn HOẶC trigger đảo chiều" };
+      desc: "Chờ confluence rõ hơn (score ≥ 4) HOẶC trigger đảo chiều." };
   }
 
   // Volatility label từ ATR% — chỉ là proxy biến động, KHÔNG phải "risk cao = setup xấu"
@@ -809,8 +829,8 @@
     ).join("")}</div>`;
   }
 
-  function renderVerdictBadge(score, flags) {
-    const v = getVerdict(score);
+  function renderVerdictBadge(score, flags, atrPct) {
+    const v = getVerdict(score, flags, atrPct);
     if (!v) return "";
     const chipsHtml = renderRiskChips(flags);
     return `
@@ -861,10 +881,21 @@
 
     // Verdict + risk chips (dùng pick.flags từ ranking, fallback r.flags từ analyze)
     const flags = pick.flags || r.flags || {};
-    const verdictHtml = renderVerdictBadge(pick.score ?? r.score, flags);
+    const verdictHtml = renderVerdictBadge(pick.score ?? r.score, flags, r.atrPct);
 
     // Hold profile dynamic theo signal (RSI / vol / ATR / bearTrap)
     const hold = estimateHoldProfile({ ...r, flags });
+
+    // Entry order theo flagCount: có risk → Confirmed first, else Aggressive first
+    const flagCount = [
+      flags.bearTrap, flags.lowVol, flags.deepDowntrend, flags.lowSessionLiq
+    ].filter(Boolean).length;
+    const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in từng phần, không all-in</i></li>`;
+    const confirmedLi = `<li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>`;
+    const entryHtml = flagCount >= 1
+      ? `<li><b>Ưu tiên: Confirmed entry</b> — chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b>. Có risk flag → đừng vào sớm.</li>
+         <li><i>Tùy chọn:</i> Aggressive vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> — chỉ khi đã chấp nhận size cực nhỏ.</li>`
+      : aggressiveLi + confirmedLi;
 
     const rankTxt = rank ? `Pick #${rank}` : "";
 
@@ -885,8 +916,7 @@
         <div class="context-section">
           <div class="context-section-title">Plan giao dịch</div>
           <ul class="context-bullets">
-            <li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in từng phần, không all-in</i></li>
-            <li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>
+            ${entryHtml}
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
             ${targets.map((t) => `<li>${t}</li>`).join("")}
             <li>Hold: <b>${hold.min}-${hold.max} phiên</b> ${hold.icon} <i>${hold.label}</i> — ${hold.hint}</li>
