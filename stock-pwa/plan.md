@@ -90,6 +90,30 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Add `flags.sellPressure = volRatio > 1.5 && dayChange < -2` → hard flag → verdict downgrade
   - Risk chip "📉 Lực bán mạnh — vol cao + giá giảm"
   - KDC fix: score 5.5 → 4.5 + sellPressure flag → Watchlist (verdict đã đúng)
+- ✅ **Phase 5 backtest kết quả: REJECT mode "Mã khỏe" trend-following swing**
+  - Train sharpe 0.34 → OOS -0.04 (overfit catastrophic 111%)
+  - Strategy underperform random pick + VN-Index B&H
+  - Lessons: VN market range-dominant, trend-following simple rules no edge trên 58 DCA universe
+  - "Backtest first" principle SAVED tao khỏi ship strategy lỗ
+  - Files giữ làm reference: `backtest/src/strong_score.py`, `backtest/run_phase5_strong.py`
+  - Plan + analysis: `/Users/qngnhat/OF1/plans/strong-mode-backtest-results.md`
+- ✅ **Closed positions view** trong tab Danh mục
+  - `renderClosedPositions()`: list mã đã đóng vị thế (qty=0 + realized != 0)
+  - Header: tổng realized YTD + win rate, collapsible body
+  - Per item: symbol, mua-bán date range + days held, qty + avg cost, realized P&L
+- ✅ **Cash deployment hint contextual**:
+  - Cash > 30% NAV + còn ≤ 7 phiên tới holiday → banner info "Cân nhắc hold cash qua lễ"
+  - Brake re-deploy panic sau cắt lỗ
+- ✅ **Position sizing auto** trong tx modal:
+  - Compute NAV từ cash + market value holdings (cached analyses)
+  - Max risk per trade = 2% NAV
+  - SL distance từ analysis cache (clamp 3-15%) hoặc default 8%
+  - Suggest "Size khuyến nghị: X cp (~Y, max 2% at risk, SL ~Z%)"
+  - Cảnh báo nếu user nhập qty > size khuyến nghị
+- ✅ **T+ distribution stats panel** trên đầu picks list:
+  - Count Spec Buy / Watchlist split (verdict logic)
+  - Top 4 risk flags activate counts: bearTrap, lowSessionLiq, sellPressure, etc.
+  - Verify v46 patches behavior — distribution sane hay quá khắt khe
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

@@ -2384,7 +2384,44 @@
       return;
     }
 
-    let html = '<div class="picks-list">';
+    // T+ distribution stats: Spec Buy / Watchlist breakdown + flag activation
+    let statsHtml = "";
+    if (mode === "tplus") {
+      const allPicks = s.picks; // before topN slice
+      let specBuy = 0, watchlist = 0;
+      const flagCounts = { bearTrap: 0, lowSessionLiq: 0, sellPressure: 0, lowVol: 0, deepDowntrend: 0, volCritical: 0 };
+      for (const p of allPicks) {
+        const f = p.flags || {};
+        const v = getVerdict(p.score, f, null);
+        if (v?.tag === "Spec Buy") specBuy++;
+        else if (v?.tag === "Watchlist") watchlist++;
+        for (const k of Object.keys(flagCounts)) {
+          if (f[k]) flagCounts[k]++;
+        }
+      }
+      const flagsActive = Object.entries(flagCounts)
+        .filter(([_, c]) => c > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([k, c]) => {
+          const labels = {
+            bearTrap: "Bắt dao rơi", lowSessionLiq: "Kẹt hàng", sellPressure: "Lực bán",
+            lowVol: "Vol thấp", deepDowntrend: "Downtrend", volCritical: "Vol cực thấp",
+          };
+          return `${labels[k]} ${c}`;
+        })
+        .join(" · ");
+      statsHtml = `
+        <div class="tplus-stats">
+          <span class="tplus-stats-line">
+            📊 <b>${allPicks.length}</b> picks: 🟢 ${specBuy} Spec Buy · 🟡 ${watchlist} Watchlist
+            ${flagsActive ? `<br><span class="tplus-stats-flags">⚠️ Risk flags: ${flagsActive}</span>` : ""}
+          </span>
+        </div>
+      `;
+    }
+
+    let html = statsHtml + '<div class="picks-list">';
     picks.forEach((p, i) => {
       const f = p.factors;
       const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
@@ -2648,10 +2685,39 @@
       }
     }
 
+    // Position sizing suggestion: max 2% NAV at risk, SL distance từ analysis cache
+    let sizingHtml = "";
+    if (side === "buy" && symbol && price > 0) {
+      const ana = portfolioAnalysisCache[symbol];
+      const cash = PORTFOLIO.loadCash();
+      // Compute NAV from current holdings + cash (approximate using cached analyses)
+      let totalMarket = 0;
+      for (const h of PORTFOLIO.currentHoldings()) {
+        const a = portfolioAnalysisCache[h.symbol];
+        if (a && a.current) totalMarket += h.qty * a.current * 1000;
+      }
+      const nav = totalMarket + cash;
+      // SL distance: từ analysis nếu có, else default 8%
+      let slDistPct = 8;
+      if (ana && ana.stopLoss && ana.current && ana.stopLoss < ana.current) {
+        slDistPct = ((ana.current - ana.stopLoss) / ana.current) * 100;
+        slDistPct = Math.max(3, Math.min(15, slDistPct)); // clamp [3, 15]%
+      }
+      const RISK_PCT = 2; // 2% NAV at risk per trade
+      const maxRiskVnd = nav * (RISK_PCT / 100);
+      const maxLossPerShareVnd = price * 1000 * (slDistPct / 100); // VND per share
+      const maxQtyByRisk = maxLossPerShareVnd > 0 ? Math.floor(maxRiskVnd / maxLossPerShareVnd) : 0;
+      const maxValueVnd = maxQtyByRisk * price * 1000;
+      if (maxQtyByRisk > 0 && nav > 0) {
+        const overSize = qty > maxQtyByRisk ? `<span style="color:#ff5722"> · ⚠️ Quá size khuyến nghị (${qty}/${maxQtyByRisk})</span>` : "";
+        sizingHtml = `<br><span style="color:#888">💡 Size khuyến nghị: <b style="color:#00d2ff">${maxQtyByRisk.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(maxValueVnd)}, max 2% NAV at risk, SL ~${slDistPct.toFixed(1)}%)${overSize}</span>`;
+      }
+    }
+
     if (side === "buy") {
       const total = gross + feeVnd;
       const newCash = PORTFOLIO.loadCash() - total;
-      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>${dcaHtml}`;
+      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>${dcaHtml}${sizingHtml}`;
     } else {
       const proceeds = gross - feeVnd;
       const newCash = PORTFOLIO.loadCash() + proceeds;
@@ -3212,11 +3278,18 @@
       });
 
       // Holiday + low cash combo
-      const holiday = nextVnHoliday(5);
+      const holiday = nextVnHoliday(7);
       if (holiday && holiday.daysAway > 0 && cashPct < 10) {
         hints.push({
           kind: "warn",
           text: `⚠️ Cash thấp (${cashPct.toFixed(1)}%) + còn ${holiday.daysAway} phiên tới nghỉ lễ — không có dự phòng nếu thị trường gap down sau lễ.`,
+        });
+      }
+      // Cash dư + sắp lễ → tránh re-deploy panic
+      if (holiday && holiday.daysAway > 0 && cashPct > 30) {
+        hints.push({
+          kind: "info",
+          text: `💡 Cash <b>${cashPct.toFixed(1)}%</b> NAV + còn ${holiday.daysAway} phiên tới nghỉ lễ. Cân nhắc <b>hold cash qua lễ</b> — gap risk hậu lễ ~5%, re-deploy sau khi market settle.`,
         });
       }
     }
@@ -3242,6 +3315,67 @@
     return `
       <div class="port-risk-hints">
         ${hints.map((h) => `<div class="port-risk-hint port-risk-${h.kind}">${h.text}</div>`).join("")}
+      </div>
+    `;
+  }
+
+  // ── Closed positions render (mã đã bán hết, có realized P&L) ──
+  function renderClosedPositions() {
+    const all = PORTFOLIO.allHoldings();
+    const closed = all
+      .filter((h) => h.qty === 0 && Math.abs(h.realized_pnl ?? 0) > 0.001)
+      .sort((a, b) => new Date(b.last_tx_date) - new Date(a.last_tx_date)); // mới nhất trước
+
+    if (closed.length === 0) return "";
+
+    let totalRealized = 0;
+    let wins = 0, losses = 0;
+    for (const c of closed) {
+      const r = (c.realized_pnl || 0) * 1000; // k-VND → VND
+      totalRealized += r;
+      if (r > 0) wins++;
+      else if (r < 0) losses++;
+    }
+    const winRate = closed.length > 0 ? (wins / closed.length) * 100 : 0;
+
+    const items = closed.map((c) => {
+      const realized = (c.realized_pnl || 0) * 1000; // VND
+      const realizedPct = c.total_bought > 0 && c.avg_cost > 0
+        ? (realized / (c.total_bought * c.avg_cost * 1000)) * 100
+        : 0;
+      const cls = realized >= 0 ? "up" : "down";
+      const sign = realized >= 0 ? "+" : "";
+      const firstDate = c.first_buy_date ? new Date(c.first_buy_date).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }) : "--";
+      const lastDate = c.last_tx_date ? new Date(c.last_tx_date).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }) : "--";
+      const days = c.first_buy_date && c.last_tx_date
+        ? Math.round((new Date(c.last_tx_date) - new Date(c.first_buy_date)) / 86400000)
+        : null;
+      return `
+        <div class="closed-item">
+          <div class="closed-row1">
+            <span class="closed-symbol">${c.symbol}</span>
+            <span class="closed-pnl pct ${cls}">${sign}${fmtMoney(realized)} (${sign}${realizedPct.toFixed(1)}%)</span>
+          </div>
+          <div class="closed-row2">
+            <span class="closed-date">${firstDate} → ${lastDate}${days != null ? ` · ${days} ngày` : ""}</span>
+            <span class="closed-qty">${(c.total_bought || 0).toLocaleString("vi-VN")} cp · avg ${fmtPriceK(c.avg_cost)}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const totalCls = totalRealized >= 0 ? "up" : "down";
+    const totalSign = totalRealized >= 0 ? "+" : "";
+
+    return `
+      <div class="port-closed-section" id="closed-section">
+        <div class="port-closed-header" id="closed-header">
+          <span>📋 Đã đóng vị thế (${closed.length}) · Realized: <b class="pct ${totalCls}">${totalSign}${fmtMoney(totalRealized)}</b> · Win ${winRate.toFixed(0)}%</span>
+          <span class="port-closed-toggle" id="closed-toggle">▼</span>
+        </div>
+        <div class="port-closed-body" id="closed-body" style="display:none">
+          ${items}
+        </div>
       </div>
     `;
   }
@@ -3302,7 +3436,20 @@
       <div id="holdings-list">
         <div class="loading"><div class="spinner"></div><div>Đang phân tích từng mã...</div></div>
       </div>
+      ${renderClosedPositions()}
     `;
+
+    // Bind closed positions toggle
+    const closedHeader = $("closed-header");
+    const closedBody = $("closed-body");
+    const closedToggle = $("closed-toggle");
+    if (closedHeader && closedBody && closedToggle) {
+      closedHeader.onclick = () => {
+        const isOpen = closedBody.style.display === "block";
+        closedBody.style.display = isOpen ? "none" : "block";
+        closedToggle.textContent = isOpen ? "▼" : "▲";
+      };
+    }
 
     // Bind dedupe button
     const dedupeBtn = $("dedupe-btn");
