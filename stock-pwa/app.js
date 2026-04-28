@@ -1953,7 +1953,10 @@
         </div>
       `;
     }
-    document.getElementById("ranking-load-btn").addEventListener("click", () => loadRanking());
+    document.getElementById("ranking-load-btn").addEventListener("click", () => {
+      RANKING.clearCache();
+      loadRanking(true);
+    });
   }
 
   async function loadRanking(forceFresh = false) {
@@ -2307,7 +2310,10 @@
 
   // Initial intro load button (delegated since it may be re-rendered)
   document.addEventListener("click", (e) => {
-    if (e.target && e.target.id === "ranking-load-btn") loadRanking();
+    if (e.target && e.target.id === "ranking-load-btn") {
+      RANKING.clearCache();
+      loadRanking(true);
+    }
   });
 
   // ════════════════════════════════════════════════════
