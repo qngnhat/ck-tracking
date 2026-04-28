@@ -784,7 +784,7 @@
     if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
       desc: "Không vào. Chờ tín hiệu đảo chiều rõ." };
 
-    const hardFlags = [flags?.bearTrap, flags?.lowSessionLiq].filter(Boolean).length;
+    const hardFlags = [flags?.bearTrap, flags?.lowSessionLiq, flags?.sellPressure].filter(Boolean).length;
     const softFlags = [flags?.lowVol, flags?.deepDowntrend].filter(Boolean).length;
 
     // Score ≥4 nhưng có hard flag HOẶC ≥2 soft flag → downgrade về Watchlist
@@ -820,6 +820,7 @@
     if (!flags) return "";
     const chips = [];
     if (flags.bearTrap) chips.push({ label: "⚠️ Bắt dao rơi", color: "#ff5722" });
+    if (flags.sellPressure) chips.push({ label: "📉 Lực bán mạnh — vol cao + giá giảm", color: "#ff5722" });
     // Volume severity: critical (< 0.4×) ưu tiên hơn low (< 0.8×). Render 1 chip duy nhất.
     if (flags.volCritical) chips.push({ label: "🚨 Vol cực thấp — khó có lực hồi", color: "#ff5722" });
     else if (flags.lowVol) chips.push({ label: "Vol thấp — thiếu xác nhận", color: "#ff9800" });
@@ -895,7 +896,7 @@
 
     // Entry order theo flagCount: có risk → Confirmed first, else Aggressive first
     const flagCount = [
-      flags.bearTrap, flags.lowVol, flags.deepDowntrend, flags.lowSessionLiq
+      flags.bearTrap, flags.lowVol, flags.deepDowntrend, flags.lowSessionLiq, flags.sellPressure
     ].filter(Boolean).length;
     const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in từng phần, không all-in</i></li>`;
     const confirmedLi = `<li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>`;

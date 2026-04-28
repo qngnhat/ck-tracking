@@ -84,6 +84,12 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - DCA preview trong tx modal: khi mua mã đã có holding → hiện avg cost mới (↓/↑) + KL mới
   - Nút "+ Bán {symbol}" cam (thay "+ Giao dịch") khi action priority = 1 + đang lỗ. Pre-fill side=sell khi click
   - Bỏ emoji prefix khỏi action.text (đã có trong action.icon → render double)
+- ✅ **Bug fix vol catalyst direction**: vol cao + giá giảm = lực bán (phân phối), KHÔNG phải catalyst cho mean-rev
+  - Trước: `volRatio > 1.5 → +1 score` bất kể chiều giá
+  - Sau: phân biệt theo dayChange — chỉ +1 nếu dayChange ≥ -1% (buy/absorbtion); else không cộng + reason "lực bán"
+  - Add `flags.sellPressure = volRatio > 1.5 && dayChange < -2` → hard flag → verdict downgrade
+  - Risk chip "📉 Lực bán mạnh — vol cao + giá giảm"
+  - KDC fix: score 5.5 → 4.5 + sellPressure flag → Watchlist (verdict đã đúng)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

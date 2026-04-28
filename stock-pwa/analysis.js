@@ -638,6 +638,8 @@ window.__SSI_ANALYSIS__ = (function () {
       volCritical: volRatio > 0 && volRatio < 0.4, // critical tier — render chip cảnh báo mạnh hơn
       deepDowntrend: !!(ma50 && current < ma50 * 0.88),
       lowSessionLiq: sessionTurnover < 2e9,
+      // Sell pressure: vol cao + giá giảm mạnh = phân phối/xả hàng (hard flag)
+      sellPressure: volRatio > 1.5 && dayChange < -2,
     };
 
     const result = {

@@ -354,16 +354,26 @@ window.__SSI_RANKING__ = (function () {
       reasons.push("Stoch cross lên");
     }
 
-    // 5. Volume spike (catalyst)
+    // 5. Volume catalyst — phân biệt buy vs sell pressure
+    // Vol cao + giá tăng/ổn = lực cầu/hấp thụ → catalyst tốt cho mean-rev
+    // Vol cao + giá giảm = lực bán/phân phối → KHÔNG phải catalyst (bug fix)
     let avgVol = 0;
     if (n >= 21) {
       for (let i = n - 21; i < n - 1; i++) avgVol += volumes[i];
       avgVol /= 20;
     }
     const volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
+    const dayChangePct = n >= 2 ? ((currentClose - closes[n - 2]) / closes[n - 2]) * 100 : 0;
     if (volRatio > 1.5) {
-      score += 1;
-      reasons.push(`Vol ${volRatio.toFixed(1)}x TB`);
+      if (dayChangePct >= -1) {
+        // Buy pressure / hấp thụ
+        score += 1;
+        reasons.push(`Vol ${volRatio.toFixed(1)}x TB — lực cầu/hấp thụ`);
+      } else {
+        // Sell pressure (vol cao + giá giảm = phân phối)
+        // KHÔNG cộng score — đây không phải catalyst cho mean-rev
+        reasons.push(`Vol ${volRatio.toFixed(1)}x TB + giá ${dayChangePct.toFixed(1)}% — lực bán`);
+      }
     }
 
     // 6. MACD histogram turning positive
@@ -453,6 +463,8 @@ window.__SSI_RANKING__ = (function () {
       volCritical: volRatio > 0 && volRatio < 0.4,
       deepDowntrend: !!(ma50 && currentClose < ma50 * 0.88),
       lowSessionLiq,
+      // Sell pressure: vol cao + giá giảm mạnh = phân phối/xả hàng (hard flag)
+      sellPressure: volRatio > 1.5 && dayChangePct < -2,
     };
 
     return {
