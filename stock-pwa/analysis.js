@@ -635,6 +635,7 @@ window.__SSI_ANALYSIS__ = (function () {
     const flags = {
       bearTrap: !!(adx && adx.adx > 45 && adx.minusDI > adx.plusDI),
       lowVol: volRatio > 0 && volRatio < 0.8,
+      volCritical: volRatio > 0 && volRatio < 0.4, // critical tier — render chip cảnh báo mạnh hơn
       deepDowntrend: !!(ma50 && current < ma50 * 0.88),
       lowSessionLiq: sessionTurnover < 2e9,
     };

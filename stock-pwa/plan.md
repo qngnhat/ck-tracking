@@ -69,6 +69,15 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
 - ✅ Anti-FOMO line "❌ KHÔNG vào khi: gap down kèm vol tăng" trong Plan giao dịch (thêm "-DI mạnh hơn +DI" nếu bearTrap)
 - ✅ TP wording probability hint: TP1 "khả năng cao", TP2 "cần thị trường thuận lợi"
 - ✅ Market regime hint trong T+ tab dùng `getMarketRegime()`: BULL/BEAR/RANGE → action hint phù hợp
+- ✅ **Portfolio holding decision engine (Commit C1)**: SL-aware action wording — không còn "Giữ" generic
+  - Active SL = max(cost-based -8%, trailing SL ATR/support)
+  - Distance to SL co giãn theo ATR (clamp 1-1.5%)
+  - Tier 1: Đã thủng SL → "🚨 Đã thủng SL X.XX — nên cắt kỷ luật" (mềm hơn nếu dayChange > 0)
+  - Tier 2: Sát SL (< nearPct) → "⚠️ Sát SL X.XX (còn Y%) — chuẩn bị action"
+  - Tier 3: Score < 2 + đang lỗ → "Yếu — chưa có tín hiệu đảo chiều"
+  - Action text mọi tier giờ inject SL number cụ thể
+- ✅ Volume severity 2-tier: `flags.volCritical` (< 0.4×) chip "🚨 Vol cực thấp — khó có lực hồi" priority over "Vol thấp — thiếu xác nhận"
+- ✅ Chip wording thêm hệ quả: "kẹt hàng — vào dễ ra khó", "vol thấp — thiếu xác nhận"
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

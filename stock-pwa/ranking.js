@@ -450,6 +450,7 @@ window.__SSI_RANKING__ = (function () {
     const flags = {
       bearTrap: !!(adxData && adxData.adx > 45 && adxData.minusDI > adxData.plusDI),
       lowVol: volRatio > 0 && volRatio < 0.8,
+      volCritical: volRatio > 0 && volRatio < 0.4,
       deepDowntrend: !!(ma50 && currentClose < ma50 * 0.88),
       lowSessionLiq,
     };
