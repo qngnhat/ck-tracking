@@ -112,6 +112,26 @@
     </div>
   </div>
 
+  <!-- Deposit modal (cộng vào cash) -->
+  <div class="modal-backdrop" id="deposit-modal-backdrop"></div>
+  <div class="modal" id="deposit-modal">
+    <div class="modal-head">
+      <span class="modal-title">Nạp tiền vào cash</span>
+      <button class="modal-close" id="deposit-modal-close">✕</button>
+    </div>
+    <form class="modal-body" id="deposit-form">
+      <div class="form-row">
+        <label>Số tiền nạp (VND)</label>
+        <input type="number" id="deposit-amount" min="0" step="any" placeholder="VD: 5000000" required>
+      </div>
+      <div class="form-summary" id="deposit-summary"></div>
+      <div class="form-actions">
+        <button type="button" class="link-btn" id="deposit-cancel">Huỷ</button>
+        <button type="submit" class="btn-primary">Nạp</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Cash modal -->
   <div class="modal-backdrop" id="cash-modal-backdrop"></div>
   <div class="modal" id="cash-modal">

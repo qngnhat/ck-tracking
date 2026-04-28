@@ -2076,6 +2076,12 @@ button {
   letter-spacing: 0.5px;
 }
 
+.port-summary-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
 .port-summary-loading {
   text-align: center;
   padding: 20px 0;

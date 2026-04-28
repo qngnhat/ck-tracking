@@ -41,8 +41,23 @@ window.__SSI_PORTFOLIO__ = (function () {
     try { localStorage.setItem(CASH_KEY, JSON.stringify(amount)); } catch {}
   }
 
+  // Compute cash delta cho 1 transaction. Trả về VND.
+  // Buy: cash giảm = qty*price*1000 + fee*1000 (price/fee đều k-VND trong storage)
+  // Sell: cash tăng = qty*price*1000 - fee*1000
+  function txCashDelta(tx) {
+    const qty = Number(tx.quantity) || 0;
+    const price = Number(tx.price) || 0; // k-VND
+    const feeK = Number(tx.fee) || 0; // k-VND
+    const gross = qty * price * 1000;
+    const feeVnd = feeK * 1000;
+    if (tx.side === "buy") return -(gross + feeVnd);
+    return gross - feeVnd; // sell
+  }
+
   // ── Add transaction (write-through DB) ──
-  async function addTransaction(tx) {
+  // opts: { autoCash: bool } — true (default) auto-điều chỉnh cash theo tx
+  async function addTransaction(tx, opts = {}) {
+    const autoCash = opts.autoCash !== false;
     // tx: {symbol, side, quantity, price, fee?, trade_date?, notes?}
     const sym = tx.symbol.toUpperCase().trim();
     const local = loadTransactions();
@@ -80,16 +95,41 @@ window.__SSI_PORTFOLIO__ = (function () {
         }
       }
     }
+
+    // Auto-adjust cash (mua trừ, bán cộng)
+    if (autoCash) {
+      const delta = txCashDelta(entry);
+      if (delta !== 0) {
+        await updateCash(loadCash() + delta);
+      }
+    }
     return entry;
   }
 
-  async function deleteTransaction(id) {
-    const local = loadTransactions().filter((t) => t.id !== id);
+  async function deleteTransaction(id, opts = {}) {
+    const autoCash = opts.autoCash !== false;
+    const all = loadTransactions();
+    const tx = all.find((t) => t.id === id);
+    const local = all.filter((t) => t.id !== id);
     saveTransactions(local);
     if (_isOnline()) {
       await _AUTH().dbDelete("transactions", { eq: { id } }).catch(() => {});
     }
+    // Reverse cash delta (mua đã trừ → cộng lại; bán đã cộng → trừ lại)
+    if (autoCash && tx) {
+      const reverseDelta = -txCashDelta(tx);
+      if (reverseDelta !== 0) {
+        await updateCash(loadCash() + reverseDelta);
+      }
+    }
     return true;
+  }
+
+  // Cộng thêm vào cash (deposit). Trả về số dư mới.
+  async function depositCash(amountVnd) {
+    const v = Number(amountVnd) || 0;
+    if (v <= 0) return loadCash();
+    return await updateCash(loadCash() + v);
   }
 
   async function updateCash(amount) {
@@ -366,6 +406,7 @@ window.__SSI_PORTFOLIO__ = (function () {
     addTransaction,
     deleteTransaction,
     updateCash,
+    depositCash,
     computeHoldings,
     currentHoldings,
     allHoldings,

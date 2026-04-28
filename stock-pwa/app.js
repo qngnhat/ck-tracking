@@ -2396,12 +2396,22 @@
     const qty = Number($("tx-quantity").value) || 0;
     const price = Number($("tx-price").value) || 0;
     const feeVnd = Number($("tx-fee").value) || 0;
-    const total = qty * price * 1000 + feeVnd; // price in k → VND, fee already VND
+    const side = document.querySelector("#tx-side-toggle .seg-btn.active")?.dataset.side || "buy";
+    const gross = qty * price * 1000;
     const summary = $("tx-summary");
-    if (summary) {
-      summary.textContent = qty && price
-        ? `Tổng: ${fmtMoney(total)}`
-        : "";
+    if (!summary) return;
+    if (!qty || !price) {
+      summary.textContent = "";
+      return;
+    }
+    if (side === "buy") {
+      const total = gross + feeVnd;
+      const newCash = PORTFOLIO.loadCash() - total;
+      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>`;
+    } else {
+      const proceeds = gross - feeVnd;
+      const newCash = PORTFOLIO.loadCash() + proceeds;
+      summary.innerHTML = `Thu về: <b>${fmtMoney(proceeds)}</b> · Cash sau khi bán: <b>${fmtMoney(newCash)}</b>`;
     }
   }
 
@@ -2422,6 +2432,7 @@
           b.classList.remove("active")
         );
         btn.classList.add("active");
+        updateTxSummary();
       });
     });
 
@@ -2496,6 +2507,57 @@
       const vnd = Number($("cash-amount").value) || 0;
       await PORTFOLIO.updateCash(vnd); // already VND
       closeCashModal();
+      renderPortfolio();
+    });
+  }
+
+  // ── Deposit modal (cộng vào cash) ──
+  function openDepositModal() {
+    bindDepositModal();
+    const modal = $("deposit-modal");
+    const backdrop = $("deposit-modal-backdrop");
+    if (!modal || !backdrop) return;
+    modal.classList.add("open");
+    backdrop.classList.add("open");
+    $("deposit-amount").value = "";
+    updateDepositSummary();
+    setTimeout(() => $("deposit-amount")?.focus(), 50);
+  }
+
+  function closeDepositModal() {
+    $("deposit-modal")?.classList.remove("open");
+    $("deposit-modal-backdrop")?.classList.remove("open");
+  }
+
+  function updateDepositSummary() {
+    const amt = Number($("deposit-amount")?.value) || 0;
+    const summary = $("deposit-summary");
+    if (!summary) return;
+    if (amt > 0) {
+      const newCash = PORTFOLIO.loadCash() + amt;
+      summary.textContent = `Cash sau khi nạp: ${fmtMoney(newCash)}`;
+    } else {
+      summary.textContent = "";
+    }
+  }
+
+  function bindDepositModal() {
+    const form = $("deposit-form");
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+    $("deposit-cancel")?.addEventListener("click", closeDepositModal);
+    $("deposit-modal-close")?.addEventListener("click", closeDepositModal);
+    $("deposit-modal-backdrop")?.addEventListener("click", closeDepositModal);
+    $("deposit-amount")?.addEventListener("input", updateDepositSummary);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const vnd = Number($("deposit-amount").value) || 0;
+      if (vnd <= 0) {
+        alert("Nhập số tiền nạp > 0.");
+        return;
+      }
+      await PORTFOLIO.depositCash(vnd);
+      closeDepositModal();
       renderPortfolio();
     });
   }
@@ -2937,7 +2999,10 @@
       <div class="port-summary-card" id="port-summary-card">
         <div class="port-summary-header">
           <span class="port-summary-title">📊 Tổng quan</span>
-          <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+          <div class="port-summary-actions">
+            <button class="link-btn" id="deposit-top">+ Nạp tiền</button>
+            <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+          </div>
         </div>
         <div class="port-summary-loading">Đang tải giá hiện tại...</div>
       </div>
@@ -3011,7 +3076,10 @@
       summaryCard.innerHTML = `
         <div class="port-summary-header">
           <span class="port-summary-title">📊 Tổng quan</span>
-          <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+          <div class="port-summary-actions">
+            <button class="link-btn" id="deposit-top">+ Nạp tiền</button>
+            <button class="link-btn" id="add-tx-top">+ Giao dịch</button>
+          </div>
         </div>
         <div class="port-summary-grid">
           <div class="port-stat">
@@ -3041,6 +3109,8 @@
       // Direct bind sau render (safety: delegation không phải lúc nào cũng fire)
       const addBtn = $("add-tx-top");
       if (addBtn) addBtn.onclick = () => openTxModal();
+      const depBtn = $("deposit-top");
+      if (depBtn) depBtn.onclick = () => openDepositModal();
       const cashCard = $("cash-stat-card");
       if (cashCard) cashCard.onclick = () => openCashModal();
     }
@@ -3126,6 +3196,10 @@
     if (e.target.closest?.("#add-tx-top")) {
       console.log("[portfolio] add-tx-top clicked");
       openTxModal();
+    }
+    if (e.target.closest?.("#deposit-top")) {
+      console.log("[portfolio] deposit-top clicked");
+      openDepositModal();
     }
     if (e.target.closest?.("#cash-stat-card")) {
       console.log("[portfolio] cash card clicked");
