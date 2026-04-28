@@ -739,6 +739,28 @@
     `;
   }
 
+  // ── Hold profile (dynamic theo signal mã) ──
+  // 4 preset thay vì continuous formula — magnitude xác định, dễ test/backtest sau.
+  function estimateHoldProfile(r) {
+    if (r?.flags?.bearTrap) return {
+      icon: "⚠️", label: "Bear trap risk", min: 3, max: 7,
+      hint: "Cắt sớm nếu sau 5 phiên setup không trigger (RSI vẫn dưới 30 + vol thấp).",
+    };
+    if (r?.rsi !== null && r?.rsi !== undefined && r.rsi < 20
+        && r?.volRatio !== undefined && r.volRatio >= 1.5) return {
+      icon: "🔥", label: "Bounce nhanh", min: 3, max: 7,
+      hint: "Catalyst rõ — bounce thường về MA20 trong 5-7 phiên.",
+    };
+    if (r?.atrPct !== null && r?.atrPct !== undefined && r.atrPct < 2) return {
+      icon: "🐢", label: "Hồi chậm", min: 8, max: 15,
+      hint: "Biến động thấp → cần kiên nhẫn. Reset thesis sau 10 phiên không động.",
+    };
+    return {
+      icon: "⚡", label: "Standard mean-rev", min: 5, max: 12,
+      hint: "Sau 10 phiên không hồi → review thesis.",
+    };
+  }
+
   // ── TP targets (shared giữa T+ context + action card) ──
   // Cap +10% (TP1) / +18% (TP2). Ưu tiên structure (MA20/resistance) khi nó nằm
   // trong cap VÀ trên current/tp1. Tránh bug TP <= current.
@@ -840,6 +862,9 @@
     const flags = pick.flags || r.flags || {};
     const verdictHtml = renderVerdictBadge(pick.score ?? r.score, flags);
 
+    // Hold profile dynamic theo signal (RSI / vol / ATR / bearTrap)
+    const hold = estimateHoldProfile({ ...r, flags });
+
     const rankTxt = rank ? `Pick #${rank}` : "";
 
     return `
@@ -863,7 +888,7 @@
             <li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
             ${targets.map((t) => `<li>${t}</li>`).join("")}
-            <li>Hold: <b>5-15 phiên</b> (mean-rev bounce điển hình; sau 10 phiên không hồi → cắt)</li>
+            <li>Hold: <b>${hold.min}-${hold.max} phiên</b> ${hold.icon} <i>${hold.label}</i> — ${hold.hint}</li>
             <li>Exit khi: RSI hồi &gt;50 HOẶC đạt mục tiêu HOẶC dính SL</li>
           </ul>
         </div>
