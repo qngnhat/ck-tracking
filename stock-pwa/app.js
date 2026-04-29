@@ -887,9 +887,8 @@
     const volHtml = vol
       ? ` <span class="context-risk" style="color:${vol.color}">· ${vol.txt}</span>` : "";
 
-    // Verdict + risk chips (dùng pick.flags từ ranking, fallback r.flags từ analyze)
+    // Risk chips + flags (dùng pick.flags từ ranking, fallback r.flags từ analyze)
     const flags = pick.flags || r.flags || {};
-    const verdictHtml = renderVerdictBadge(pick.score ?? r.score, flags, r.atrPct);
 
     // Hold profile dynamic theo signal (RSI / vol / ATR / bearTrap)
     const hold = estimateHoldProfile({ ...r, flags });
@@ -905,24 +904,110 @@
          <li><i>Tùy chọn:</i> Aggressive vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> — chỉ khi đã chấp nhận size cực nhỏ.</li>`
       : aggressiveLi + confirmedLi;
 
-    const rankTxt = rank ? `Pick #${rank}` : "";
+    const rankTxt = rank ? `#${rank}` : "";
+
+    // ── BIG ACTION BANNER (verdict + 1-line clear advice) ──
+    const verdict = getVerdict(pick.score ?? r.score, flags, r.atrPct);
+    const isDowngraded = verdict?.tag === "Watchlist" && (pick.score ?? r.score) >= 4;
+    const isAvoid = verdict?.tag === "Avoid";
+    const isClean = verdict?.tag === "Spec Buy";
+
+    let actionLabel, actionAdvice, bannerColor;
+    if (isAvoid) {
+      actionLabel = "🚫 KHÔNG VÀO";
+      actionAdvice = "Score thấp + risk cao. Chờ tín hiệu đảo chiều rõ trước khi xét lại.";
+      bannerColor = "#ff4444";
+    } else if (isDowngraded) {
+      actionLabel = "⚠️ CHỜ XÁC NHẬN";
+      actionAdvice = "Setup oversold mạnh nhưng có risk flag. <b>Đừng vào aggressive hôm nay</b> — chờ trigger đảo chiều hoặc bỏ qua kèo này.";
+      bannerColor = "#FF9800";
+    } else if (verdict?.tag === "Watchlist") {
+      actionLabel = "🟡 WATCHLIST";
+      actionAdvice = "Score chưa đủ confluence. Theo dõi, không vào lệnh mới.";
+      bannerColor = "#FF9800";
+    } else if (isClean) {
+      actionLabel = "✅ CÓ THỂ VÀO";
+      actionAdvice = "Confluence rõ, không có hard flag. Vào theo plan dưới với size khuyến nghị.";
+      bannerColor = "#4CAF50";
+    } else {
+      actionLabel = "ℹ️ THEO DÕI";
+      actionAdvice = "Tín hiệu chưa đủ rõ.";
+      bannerColor = "#888";
+    }
+
+    const chipsHtml = renderRiskChips(flags);
+
+    // ── Lý do đợi (cho Watchlist downgraded) ──
+    let waitReasonsHtml = "";
+    if (isDowngraded) {
+      const items = [];
+      if (flags.bearTrap) items.push(`<li><b>ADX cao + -DI dominant</b>: trend giảm còn rất mạnh — "bắt dao rơi" rủi ro cao. Mean-rev đánh ngược trend mạnh thường fail.</li>`);
+      if (flags.deepDowntrend) items.push(`<li><b>Cách MA50 -12%+</b>: downtrend chưa hết, thị trường VN thường tiếp tục rớt 5-10% trước khi đảo.</li>`);
+      if (flags.lowSessionLiq) items.push(`<li><b>TKL phiên thấp (<2 tỷ)</b>: vào dễ ra khó, gây kẹt khi muốn cắt.</li>`);
+      if (flags.sellPressure) items.push(`<li><b>Vol cao + giá giảm</b>: lực bán đè giá, không phải lực cầu hấp thụ.</li>`);
+      if (flags.lowVol && !flags.volCritical) items.push(`<li><b>Vol thấp</b>: thiếu xác nhận thanh khoản cho nhịp hồi.</li>`);
+      if (flags.volCritical) items.push(`<li><b>Vol cực thấp (<0.4×)</b>: gần như không có dòng tiền — khó có lực hồi.</li>`);
+      if (items.length > 0) {
+        waitReasonsHtml = `
+          <div class="ctx-wait-section">
+            <div class="ctx-wait-title">🚨 Tại sao chưa nên vào aggressive:</div>
+            <ul class="ctx-wait-list">${items.join("")}</ul>
+          </div>
+        `;
+      }
+    }
+
+    // ── Trigger để cân nhắc vào (cho Watchlist downgraded) ──
+    let triggerHtml = "";
+    if (isDowngraded) {
+      const triggers = [
+        `<li><b>Nến rút chân</b> close gần đỉnh phiên (hammer/inverted hammer)</li>`,
+        `<li><b>Vol ≥ 1.5×</b> phiên SAU + giá giữ trên BB lower 2 phiên liên tiếp</li>`,
+      ];
+      if (flags.bearTrap) {
+        triggers.push(`<li><b>+DI cross lên</b> 10+ và <b>ADX giảm dưới 45</b> (bên mua bắt đầu vào)</li>`);
+      }
+      triggers.push(`<li><b>Bounce từ BB lower xác nhận</b> (close > BB lower 2 phiên)</li>`);
+      triggerHtml = `
+        <div class="ctx-trigger-section">
+          <div class="ctx-trigger-title">✅ Cân nhắc vào (size nhỏ 10-20%) khi thấy ≥ 1 trong:</div>
+          <ul class="ctx-trigger-list">${triggers.join("")}</ul>
+        </div>
+      `;
+    }
 
     return `
       <div class="an-card context-card context-tplus">
-        ${verdictHtml}
-        <div class="context-header">
-          <span class="context-icon">⚡</span>
-          <div>
-            <div class="context-title">T+ ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}${volHtml}</div>
-            <div class="context-subtitle">${subtitle}</div>
-          </div>
+        <!-- BIG action banner -->
+        <div class="ctx-action-banner" style="border-color:${bannerColor};background:${bannerColor}14">
+          <div class="ctx-action-label" style="color:${bannerColor}">${actionLabel}</div>
+          <div class="ctx-action-advice">${actionAdvice}</div>
+          ${chipsHtml ? `<div class="ctx-action-chips">${chipsHtml}</div>` : ""}
         </div>
+
+        <!-- Rank + score (smaller, secondary) -->
+        <div class="ctx-rank-line">
+          <span>⚡ T+ ${rankTxt} · Score <b>${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</b>${volHtml}</span>
+          <span class="ctx-rank-disclaimer">(rank theo confluence, không phải khuyến nghị mua)</span>
+        </div>
+
+        <!-- Lý do đợi (chỉ Watchlist downgraded) -->
+        ${waitReasonsHtml}
+
+        <!-- Trigger để cân nhắc vào -->
+        ${triggerHtml}
+
+        <!-- Tín hiệu đang fire -->
         <div class="context-section">
-          <div class="context-section-title">Tín hiệu đang fire</div>
+          <div class="context-section-title">📊 Tín hiệu đang fire</div>
           <ul class="context-bullets">${reasons.map((rr) => `<li><b>${rr}</b></li>`).join("")}</ul>
         </div>
-        <div class="context-section">
-          <div class="context-section-title">Plan giao dịch</div>
+
+        <!-- Plan giao dịch (collapsible nếu downgraded) -->
+        <details class="context-section ctx-plan-details" ${isDowngraded ? "" : "open"}>
+          <summary class="context-section-title">
+            📋 Plan giao dịch ${isDowngraded ? `<span class="ctx-plan-note">(bấm để mở — chỉ áp dụng nếu bạn vẫn quyết định vào)</span>` : ""}
+          </summary>
           <ul class="context-bullets">
             ${entryHtml}
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
@@ -931,7 +1016,8 @@
             <li>Exit khi: RSI hồi &gt;50 HOẶC đạt mục tiêu HOẶC dính SL</li>
             <li class="anti-fomo">❌ <b>KHÔNG vào khi</b>: gap down kèm vol tăng (lực bán đè giá)${flags.bearTrap ? ` HOẶC -DI tiếp tục mạnh hơn +DI` : ""}</li>
           </ul>
-        </div>
+        </details>
+
         <div class="context-disclaimer">
           ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest 2023-2026: score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — 4/10 lệnh thua, tuân thủ SL.
         </div>

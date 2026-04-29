@@ -165,6 +165,15 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
     - Each quadrant: list sectors trong group + rel1W%
     - Click sector → drill-down modal
   - All compute from existing snapshot scan (no extra fetches except VNINDEX)
+- ✅ **T+ Context Card UX rewrite — clarity over score**: user confused vì score cao + verdict downgraded mâu thuẫn visual
+  - **BIG action banner** trên top: "✅ CÓ THỂ VÀO" / "⚠️ CHỜ XÁC NHẬN" / "🚫 KHÔNG VÀO" với border + bg color
+  - **Action advice 1 dòng**: dynamic per verdict ("Đừng vào aggressive hôm nay — chờ trigger" cho Watchlist downgraded)
+  - **Risk chips trong banner** (replace verdict-block riêng)
+  - **De-emphasize rank line**: "T+ #1 · Score +5.50" giờ small + disclaimer "(rank theo confluence, không phải khuyến nghị mua)"
+  - **🚨 "Tại sao chưa nên vào aggressive"** section (cam đỏ) cho Watchlist downgraded, list cụ thể từng risk flag
+  - **✅ "Cân nhắc vào khi thấy ≥ 1 trong"** section (xanh) — list trigger để wait for: nến rút chân, vol confirm, +DI cross, BB bounce
+  - **Plan giao dịch collapsible** (`<details>`) — Watchlist downgraded thì collapse default, Spec Buy thì expand
+  - User giờ hiểu ngay layout: hôm nay nên làm gì, lý do, trigger để chờ
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
