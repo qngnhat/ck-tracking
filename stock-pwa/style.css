@@ -1853,6 +1853,53 @@ button {
   grid-column: 2 / -1;
 }
 
+.fs-pool-action {
+  margin: 8px 0;
+  text-align: center;
+}
+
+.fs-pool-action button {
+  background: rgba(0, 210, 255, 0.1);
+  border: 1px solid rgba(0, 210, 255, 0.3);
+  color: #4dd0e1;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fs-pool-action button:hover:not(:disabled) {
+  background: rgba(0, 210, 255, 0.2);
+}
+
+.fs-pool-action button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fs-pool-section {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 210, 255, 0.04);
+  border: 1px solid rgba(0, 210, 255, 0.2);
+  border-radius: 6px;
+}
+
+.fs-pool-title {
+  font-size: 12px;
+  color: #4dd0e1;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.fs-pool-note {
+  font-size: 11px;
+  color: #888;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
 .fs-disclaimer {
   font-size: 10px;
   color: #888;

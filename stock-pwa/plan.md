@@ -182,6 +182,18 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Sample size warning: <10 → "độ tin cậy thấp", <30 → "chỉ là gợi ý", ≥30 → "Sample n=X"
   - Disclaimer mạnh: "Quá khứ KHÔNG đảm bảo tương lai. Đây là thống kê mô tả, không phải prediction"
   - Render giữa "Vùng giá & Hiệu suất" và "Phân tích chi tiết" trong analyze tab
+- ✅ **Forward stats Phase 1.5: sector peer pooling**
+  - Button "🔍 Mở rộng sample: pool stats từ peers cùng ngành" trong forward stats card
+  - Click → fetch ~7 peers cùng sector (cache 1h), compute matches cho cùng RSI bucket
+  - Display pool stats riêng để compare với mã đó: "Pool stats từ N peers (sample n=X)"
+  - Tăng sample size từ 5-15 lên 50-100+ → reliability cao hơn cho rare buckets
+  - Note: "Pool tăng sample nhưng mất mã-specific traits"
+  - Export `ANALYSIS.computeForwardStats` để app.js consume per peer
+- ⏳ **Phase 6 ML predictor planning**: draft `/Users/qngnhat/OF1/plans/ml-forward-predictor-plan.md`
+  - Major project 18-27h, defer until backtest infra + user approve
+  - Conservative approach: binary classification → walk-forward CV → 3 model candidates → OOS validate
+  - Decision criteria: OOS accuracy ≥55%, Sharpe ≥0.3, train-OOS gap <10%
+  - Reject path documented (theo Phase 5 Strong mode pattern)
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

@@ -200,6 +200,7 @@
       renderChart();
       updateStatus();
       saveHistory(symbol);
+      bindForwardStatsPoolBtn();
       window.scrollTo({ top: 0, behavior: "smooth" });
       startAutoRefresh();
     } catch (err) {
@@ -1027,6 +1028,112 @@
     `;
   }
 
+  // ── Pool sector forward stats (improve sample size) ──
+  // Cache peer history 1h per symbol
+  const PEER_HISTORY_CACHE = {};
+  async function fetchPeerHistoryCached(symbol) {
+    const cached = PEER_HISTORY_CACHE[symbol];
+    if (cached && Date.now() - cached.ts < 3600 * 1000) return cached.data;
+    try {
+      const data = await ANALYSIS.fetchHistory(symbol, "D", 250);
+      PEER_HISTORY_CACHE[symbol] = { ts: Date.now(), data };
+      return data;
+    } catch { return null; }
+  }
+
+  async function computePoolForwardStats(currentSym, sector, currentBucket) {
+    const universe = window.__SSI_RANKING__?.UNIVERSE || [];
+    const peers = universe
+      .filter((u) => u.sector === sector && u.code !== currentSym)
+      .slice(0, 7); // top 7 peer mã trong sector
+    if (peers.length === 0) return null;
+
+    // Aggregate stats per horizon
+    const all = { fwd5: [], fwd10: [], fwd20: [] };
+
+    for (const peer of peers) {
+      const data = await fetchPeerHistoryCached(peer.code);
+      if (!data?.closes) continue;
+      const stats = ANALYSIS.computeForwardStats(data.closes);
+      if (!stats || stats.currentBucket !== currentBucket) {
+        // Skip if peer's CURRENT bucket different — hmm, but we want HISTORICAL matches của bucket
+        // Need to recompute pool-based, not from stats output
+      }
+      // Need raw matches not aggregated stats. Re-walk history:
+      const closes = data.closes;
+      const n = closes.length;
+      if (n < 50) continue;
+      // Quick inline RSI compute (mirror analysis.js logic)
+      const rsiSeries = computeRsiSeriesInline(closes, 14);
+      for (let i = 14; i <= n - 21; i++) {
+        const rsi = rsiSeries[i];
+        if (rsi == null) continue;
+        if (rsiBucketInline(rsi) !== currentBucket) continue;
+        const base = closes[i];
+        if (!base || base <= 0) continue;
+        all.fwd5.push(((closes[i + 5] - base) / base) * 100);
+        all.fwd10.push(((closes[i + 10] - base) / base) * 100);
+        all.fwd20.push(((closes[i + 20] - base) / base) * 100);
+      }
+    }
+
+    return {
+      peerCount: peers.length,
+      fwd5: statsOfArray(all.fwd5),
+      fwd10: statsOfArray(all.fwd10),
+      fwd20: statsOfArray(all.fwd20),
+    };
+  }
+
+  // Inline RSI helpers (mirror analysis.js computeRsiSeries + rsiBucket)
+  function computeRsiSeriesInline(closes, period = 14) {
+    const series = new Array(closes.length).fill(null);
+    if (closes.length < period + 1) return series;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d > 0) gains += d; else losses -= d;
+    }
+    let avgG = gains / period, avgL = losses / period;
+    series[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+    for (let i = period + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      const g = d > 0 ? d : 0;
+      const l = d < 0 ? -d : 0;
+      avgG = (avgG * (period - 1) + g) / period;
+      avgL = (avgL * (period - 1) + l) / period;
+      series[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+    }
+    return series;
+  }
+
+  function rsiBucketInline(rsi) {
+    if (rsi == null) return null;
+    if (rsi < 25) return "OS_extreme";
+    if (rsi < 30) return "OS_strong";
+    if (rsi < 45) return "OS_mild";
+    if (rsi < 55) return "neutral";
+    if (rsi < 70) return "OB_mild";
+    if (rsi < 75) return "OB_strong";
+    return "OB_extreme";
+  }
+
+  function statsOfArray(arr) {
+    if (arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const sum = arr.reduce((a, b) => a + b, 0);
+    const avg = sum / arr.length;
+    const wins = arr.filter((x) => x > 0).length;
+    return {
+      n: arr.length,
+      avg,
+      median: sorted[Math.floor(sorted.length / 2)],
+      winRate: wins / arr.length,
+      best: sorted[sorted.length - 1],
+      worst: sorted[0],
+    };
+  }
+
   // ── Forward stats card (dự đoán dựa lịch sử cùng setup) ──
   function renderForwardStatsCard(r) {
     const fs = r.forwardStats;
@@ -1068,6 +1175,11 @@
       ? `<span class="fs-warn">⚠️ Sample vừa (${sampleN}) — chỉ là gợi ý</span>`
       : `<span class="fs-info">Sample n=${sampleN}</span>`;
 
+    // Get sector for pool button
+    const meta = getStockMeta(r.symbol);
+    const sector = meta?.sector;
+    const canPool = sector && sector !== "khác";
+
     return `
       <div class="an-card full-width">
         <div class="an-title">📊 Dự đoán dựa lịch sử (cùng setup RSI)</div>
@@ -1078,12 +1190,77 @@
           ${renderStatRow("10 phiên", fs.fwd10)}
           ${renderStatRow("20 phiên", fs.fwd20)}
         </div>
+        ${canPool ? `
+          <div class="fs-pool-action">
+            <button class="link-btn" id="fs-pool-btn" data-symbol="${r.symbol}" data-sector="${sector}" data-bucket="${fs.currentBucket}">
+              🔍 Mở rộng sample: pool stats từ peers cùng ngành
+            </button>
+          </div>
+          <div id="fs-pool-result"></div>
+        ` : ""}
         <div class="fs-disclaimer">
-          ⚠️ Quá khứ KHÔNG đảm bảo tương lai. Đây là <b>thống kê mô tả</b> từ history của chính mã này — không phải prediction.
+          ⚠️ Quá khứ KHÔNG đảm bảo tương lai. Đây là <b>thống kê mô tả</b> từ history — không phải prediction.
           Chỉ dùng làm 1 trong nhiều input quyết định.
         </div>
       </div>
     `;
+  }
+
+  // Bind pool button after analyze rendered
+  function bindForwardStatsPoolBtn() {
+    const btn = document.getElementById("fs-pool-btn");
+    const result = document.getElementById("fs-pool-result");
+    if (!btn || !result) return;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Đang fetch peers...";
+      const sym = btn.dataset.symbol;
+      const sector = btn.dataset.sector;
+      const bucket = btn.dataset.bucket;
+      try {
+        const pool = await computePoolForwardStats(sym, sector, bucket);
+        if (!pool) {
+          result.innerHTML = `<div class="fs-empty">Không pool được — không có peer trong ngành.</div>`;
+          return;
+        }
+        const renderRow = (label, s) => {
+          if (!s || s.n === 0) return `<div class="fs-row"><span class="fs-label">${label}</span><span class="fs-empty">Không có match</span></div>`;
+          const winCls = s.winRate >= 0.5 ? "up" : "down";
+          const avgCls = s.avg >= 0 ? "up" : "down";
+          const avgSign = s.avg >= 0 ? "+" : "";
+          const bestSign = s.best >= 0 ? "+" : "";
+          const worstSign = s.worst >= 0 ? "+" : "";
+          return `<div class="fs-row">
+            <span class="fs-label">${label}</span>
+            <span class="fs-cell pct ${avgCls}">${avgSign}${s.avg.toFixed(1)}%</span>
+            <span class="fs-cell pct ${winCls}">${(s.winRate * 100).toFixed(0)}%</span>
+            <span class="fs-cell">[${worstSign}${s.worst.toFixed(0)}, ${bestSign}${s.best.toFixed(0)}]</span>
+          </div>`;
+        };
+        const totalN = pool.fwd5?.n || 0;
+        result.innerHTML = `
+          <div class="fs-pool-section">
+            <div class="fs-pool-title">📊 Pool stats từ ${pool.peerCount} peers cùng ngành (sample n=${totalN})</div>
+            <div class="fs-table">
+              <div class="fs-row fs-header">
+                <span class="fs-label">Horizon</span>
+                <span class="fs-cell">Avg ret</span>
+                <span class="fs-cell">Win rate</span>
+                <span class="fs-cell">Range</span>
+              </div>
+              ${renderRow("5 phiên", pool.fwd5)}
+              ${renderRow("10 phiên", pool.fwd10)}
+              ${renderRow("20 phiên", pool.fwd20)}
+            </div>
+            <div class="fs-pool-note">💡 Pool tăng sample size nhưng mất mã-specific traits. So sánh với stats riêng để hiểu mã này có bias gì khác sector.</div>
+          </div>
+        `;
+      } catch (e) {
+        result.innerHTML = `<div class="fs-empty">Lỗi fetch: ${e.message}</div>`;
+      } finally {
+        btn.style.display = "none";
+      }
+    });
   }
 
   // ── Action card (rút gọn) ──

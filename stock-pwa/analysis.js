@@ -982,6 +982,7 @@ window.__SSI_ANALYSIS__ = (function () {
     fetchForeignFlow,
     fetchStockList,
     analyze,
+    computeForwardStats,
     INDEX_SYMBOLS,
   };
 })();
