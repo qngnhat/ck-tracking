@@ -777,6 +777,34 @@
     return { tp1, tp2 };
   }
 
+  // ── Bayesian win probability (T+ context) ──
+  // Multipliers từ backtest 2492 trades, hold 10 phiên, score≥4 cross-section 58 mã DCA.
+  // Source: backtest/results/bayesian_flags/multipliers.json (Phase 6a).
+  // CAVEAT: cross-stock pooled. Individual mã behavior có thể khác.
+  // Sample lowSessionLiq nhỏ (n=6) → multiplier 0.638 không robust.
+  const BAYES_BASELINE_WIN = 0.523; // T+ score≥4, hold 10 phiên baseline win rate
+  const BAYES_MULTIPLIERS = {
+    bearTrap:      1.078, // FLAG ON win 56.4% vs 51.5% off (n_on=417)
+    sellPressure:  1.048, // FLAG ON win 54.8% vs 51.4% off (n_on=622)
+    deepDowntrend: 1.105, // FLAG ON win 57.8% vs 46.1% off (n_on=1322) — strongest positive
+    lowVol:        0.908, // FLAG ON win 47.5% vs 53.7% off (n_on=558)
+    volCritical:   0.905, // FLAG ON win 47.3% vs 52.4% off (n_on=74)
+    lowSessionLiq: 0.638, // FLAG ON win 33% (n=6 — small sample, low confidence)
+  };
+
+  function computeBayesianWinProb(score, flags) {
+    if (score == null || score < 4) return null; // baseline only valid for T+ pick threshold
+    let prob = BAYES_BASELINE_WIN;
+    const breakdown = [{ label: "Baseline T+ score≥4 (10 phiên)", value: BAYES_BASELINE_WIN }];
+    for (const [flag, mul] of Object.entries(BAYES_MULTIPLIERS)) {
+      if (flags?.[flag]) {
+        prob *= mul;
+        breakdown.push({ label: flag, value: mul });
+      }
+    }
+    return { prob: Math.max(0, Math.min(1, prob)), breakdown };
+  }
+
   // ── Verdict + Risk chips (decision layer) ──
   // Penalty (flags) ảnh hưởng VERDICT, không chỉ chip hiển thị.
   // Hard flags (1 cái đủ giết kèo): bearTrap (ADX>45 -DI mạnh), lowSessionLiq.
@@ -993,6 +1021,42 @@
           <span>⚡ T+ ${rankTxt} · Score <b>${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</b>${volHtml}</span>
           <span class="ctx-rank-disclaimer">(rank theo confluence, không phải khuyến nghị mua)</span>
         </div>
+
+        <!-- Bayesian win probability (data-driven) -->
+        ${(() => {
+          const bayes = computeBayesianWinProb(pick.score ?? r.score, flags);
+          if (!bayes) return "";
+          const probPct = (bayes.prob * 100).toFixed(0);
+          const baselinePct = (BAYES_BASELINE_WIN * 100).toFixed(0);
+          const breakdownHtml = bayes.breakdown.map((b) => {
+            const sign = b.value > 1 ? "+" : "";
+            const delta = ((b.value - 1) * 100).toFixed(1);
+            return b.label === "Baseline T+ score≥4 (10 phiên)"
+              ? `<li><b>${b.label}</b>: ${(b.value * 100).toFixed(0)}%</li>`
+              : `<li>${b.label}: <b style="color:${b.value > 1 ? '#4CAF50' : '#ff5722'}">${sign}${delta}%</b></li>`;
+          }).join("");
+          const interp = bayes.prob >= 0.6 ? "Cao hơn baseline — setup có edge"
+            : bayes.prob >= 0.5 ? "Gần baseline — setup trung tính"
+            : "Thấp hơn baseline — setup yếu hơn lệnh T+ trung bình";
+          const probColor = bayes.prob >= 0.6 ? "#4CAF50" : bayes.prob >= 0.5 ? "#FF9800" : "#ff5722";
+          return `
+            <div class="ctx-bayes-section">
+              <div class="ctx-bayes-title">📈 Bayesian win probability (data-driven)</div>
+              <div class="ctx-bayes-prob" style="color:${probColor}">
+                P(win 10 phiên) ≈ <b>${probPct}%</b> <span class="ctx-bayes-baseline">(baseline ${baselinePct}%)</span>
+              </div>
+              <div class="ctx-bayes-interp">${interp}</div>
+              <details class="ctx-bayes-details">
+                <summary>Breakdown calculation</summary>
+                <ul class="ctx-bayes-breakdown">${breakdownHtml}</ul>
+                <div class="ctx-bayes-note">
+                  Multipliers từ backtest 2492 trades cross-section 58 mã DCA, hold 10 phiên.
+                  Independent assumption naive — flags correlated. Cross-stock pooled, mã specific có thể khác.
+                </div>
+              </details>
+            </div>
+          `;
+        })()}
 
         <!-- Lý do đợi (chỉ Watchlist downgraded) -->
         ${waitReasonsHtml}

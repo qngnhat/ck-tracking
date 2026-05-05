@@ -1916,6 +1916,76 @@ button {
   font-style: normal;
 }
 
+/* Bayesian probability section (T+ context) */
+.ctx-bayes-section {
+  background: rgba(0, 210, 255, 0.05);
+  border: 1px solid rgba(0, 210, 255, 0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+}
+
+.ctx-bayes-title {
+  font-size: 11px;
+  color: #4dd0e1;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 6px;
+}
+
+.ctx-bayes-prob {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.ctx-bayes-baseline {
+  font-size: 11px;
+  color: #888;
+  font-weight: 400;
+}
+
+.ctx-bayes-interp {
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.ctx-bayes-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #4dd0e1;
+  font-weight: 600;
+  margin-top: 4px;
+  user-select: none;
+}
+
+.ctx-bayes-details summary::-webkit-details-marker {
+  color: #4dd0e1;
+}
+
+.ctx-bayes-breakdown {
+  margin: 8px 0 6px;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #ccc;
+  line-height: 1.6;
+}
+
+.ctx-bayes-breakdown li b {
+  font-weight: 700;
+}
+
+.ctx-bayes-note {
+  font-size: 10px;
+  color: #888;
+  font-style: italic;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
 /* T+ Context — BIG action banner (rõ ràng quyết định) */
 .ctx-action-banner {
   border: 2px solid;

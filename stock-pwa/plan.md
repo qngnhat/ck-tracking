@@ -194,6 +194,22 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Conservative approach: binary classification → walk-forward CV → 3 model candidates → OOS validate
   - Decision criteria: OOS accuracy ≥55%, Sharpe ≥0.3, train-OOS gap <10%
   - Reject path documented (theo Phase 5 Strong mode pattern)
+- ✅ **Phase 6a — Bayesian win probability** (data-driven decision support):
+  - Backtest analysis: `backtest/run_bayesian_flags.py`
+  - 2492 trades T+ score≥4, hold 10 phiên, cross-section 58 mã DCA
+  - Compute multipliers per flag: P(win | flag ON) / baseline
+  - **SHOCK FINDING**: bearTrap (1.078), sellPressure (1.048), deepDowntrend (1.105) **POSITIVE multipliers** trong VN T+ — mean-rev work TỐT HƠN khi dip mạnh
+  - Negatives: lowVol (0.908), volCritical (0.905), lowSessionLiq (0.638 — sample n=6 only)
+  - By flag count: 0 flags 47% / 1 flag 51% / 2 flags 57% / 3 flags 60% — moderate flags ENHANCE win rate
+  - Gemini/ChatGPT intuition "bearTrap = hard flag" SAI cho VN data → backtest first principle vindicated again
+  - JS: `computeBayesianWinProb(score, flags)` → P(win) + breakdown
+  - UI section trong T+ context: "📈 Bayesian win probability (data-driven)"
+  - Display: "P(win 10 phiên) ≈ X% (baseline 52%)" + interpretation + collapsible breakdown
+  - CAVEAT: cross-stock pooled, lowSessionLiq sample nhỏ, multipliers naive independent (flags correlated)
+- ⏳ **Phase 6b (defer)**: Reconsider verdict logic vì backtest contradicts current "hard flag → downgrade"
+  - Current verdict: bearTrap + sellPressure → Watchlist (downgrade)
+  - Backtest: bearTrap + sellPressure → P(win) HIGHER, không phải lower
+  - Cần user review Bayesian display 1-2 tuần → quyết định trust số liệu hay giữ verdict conservative
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
