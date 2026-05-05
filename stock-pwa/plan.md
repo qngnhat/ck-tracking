@@ -174,6 +174,14 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - **✅ "Cân nhắc vào khi thấy ≥ 1 trong"** section (xanh) — list trigger để wait for: nến rút chân, vol confirm, +DI cross, BB bounce
   - **Plan giao dịch collapsible** (`<details>`) — Watchlist downgraded thì collapse default, Spec Buy thì expand
   - User giờ hiểu ngay layout: hôm nay nên làm gì, lý do, trigger để chờ
+- ✅ **Forward stats card trong analyze tab — dự đoán dựa lịch sử**
+  - User hỏi "tỷ lệ tăng/giảm tương lai bao nhiêu" — implement statistical historical (KHÔNG phải ML)
+  - `computeForwardStats(closes)`: walk history, find days với RSI cùng bucket, compute 5/10/20 phiên forward returns
+  - 7 bucket RSI: OS_extreme (<25) / OS_strong (25-30) / OS_mild (30-45) / neutral / OB_mild / OB_strong / OB_extreme
+  - Per horizon: avg return, win rate, range [worst, best], median
+  - Sample size warning: <10 → "độ tin cậy thấp", <30 → "chỉ là gợi ý", ≥30 → "Sample n=X"
+  - Disclaimer mạnh: "Quá khứ KHÔNG đảm bảo tương lai. Đây là thống kê mô tả, không phải prediction"
+  - Render giữa "Vùng giá & Hiệu suất" và "Phân tích chi tiết" trong analyze tab
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

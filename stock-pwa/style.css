@@ -1789,6 +1789,86 @@ button {
   min-width: 0;
 }
 
+/* Forward stats card (dự đoán lịch sử) */
+.fs-bucket {
+  font-size: 12px;
+  color: #ccc;
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+
+.fs-bucket b {
+  color: #00d2ff;
+}
+
+.fs-warn {
+  color: #FF9800;
+  font-size: 11px;
+}
+
+.fs-info {
+  color: #888;
+  font-size: 11px;
+}
+
+.fs-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-row {
+  display: grid;
+  grid-template-columns: 80px 70px 70px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 6px 4px;
+  border-bottom: 1px dashed #20203a;
+}
+
+.fs-row.fs-header {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 700;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.fs-label {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.fs-cell {
+  color: #ccc;
+  font-weight: 600;
+  text-align: right;
+}
+
+.fs-empty {
+  color: #666;
+  font-style: italic;
+  grid-column: 2 / -1;
+}
+
+.fs-disclaimer {
+  font-size: 10px;
+  color: #888;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 152, 0, 0.05);
+  border-left: 2px solid rgba(255, 152, 0, 0.3);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.fs-disclaimer b {
+  color: #ffb74d;
+  font-style: normal;
+}
+
 /* T+ Context — BIG action banner (rõ ràng quyết định) */
 .ctx-action-banner {
   border: 2px solid;

@@ -626,6 +626,8 @@
         ${perfPills(r.performance)}
       </div>
 
+      ${renderForwardStatsCard(r)}
+
       <!-- Text analysis -->
       <div class="an-card full-width">
         <div class="an-title">Phân tích chi tiết</div>
@@ -1020,6 +1022,65 @@
 
         <div class="context-disclaimer">
           ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest 2023-2026: score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — 4/10 lệnh thua, tuân thủ SL.
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Forward stats card (dự đoán dựa lịch sử cùng setup) ──
+  function renderForwardStatsCard(r) {
+    const fs = r.forwardStats;
+    if (!fs || (!fs.fwd5 && !fs.fwd10 && !fs.fwd20)) return "";
+
+    const renderStatRow = (label, s) => {
+      if (!s || s.n === 0) {
+        return `<div class="fs-row"><span class="fs-label">${label}</span><span class="fs-empty">Không đủ data</span></div>`;
+      }
+      const winCls = s.winRate >= 0.5 ? "up" : "down";
+      const avgCls = s.avg >= 0 ? "up" : "down";
+      const avgSign = s.avg >= 0 ? "+" : "";
+      const bestSign = s.best >= 0 ? "+" : "";
+      const worstSign = s.worst >= 0 ? "+" : "";
+      return `
+        <div class="fs-row">
+          <span class="fs-label">${label}</span>
+          <span class="fs-cell pct ${avgCls}">${avgSign}${s.avg.toFixed(1)}%</span>
+          <span class="fs-cell pct ${winCls}">${(s.winRate * 100).toFixed(0)}%</span>
+          <span class="fs-cell">[${worstSign}${s.worst.toFixed(0)}, ${bestSign}${s.best.toFixed(0)}]</span>
+        </div>
+      `;
+    };
+
+    const headerRow = `
+      <div class="fs-row fs-header">
+        <span class="fs-label">Horizon</span>
+        <span class="fs-cell">Avg ret</span>
+        <span class="fs-cell">Win rate</span>
+        <span class="fs-cell">Range</span>
+      </div>
+    `;
+
+    // Sample size note
+    const sampleN = fs.fwd5?.n || fs.fwd10?.n || fs.fwd20?.n || 0;
+    const sampleNote = sampleN < 10
+      ? `<span class="fs-warn">⚠️ Sample nhỏ (${sampleN}) — độ tin cậy thấp</span>`
+      : sampleN < 30
+      ? `<span class="fs-warn">⚠️ Sample vừa (${sampleN}) — chỉ là gợi ý</span>`
+      : `<span class="fs-info">Sample n=${sampleN}</span>`;
+
+    return `
+      <div class="an-card full-width">
+        <div class="an-title">📊 Dự đoán dựa lịch sử (cùng setup RSI)</div>
+        <div class="fs-bucket">Setup hiện tại: <b>${fs.bucketLabel}</b> · ${sampleNote}</div>
+        <div class="fs-table">
+          ${headerRow}
+          ${renderStatRow("5 phiên",  fs.fwd5)}
+          ${renderStatRow("10 phiên", fs.fwd10)}
+          ${renderStatRow("20 phiên", fs.fwd20)}
+        </div>
+        <div class="fs-disclaimer">
+          ⚠️ Quá khứ KHÔNG đảm bảo tương lai. Đây là <b>thống kê mô tả</b> từ history của chính mã này — không phải prediction.
+          Chỉ dùng làm 1 trong nhiều input quyết định.
         </div>
       </div>
     `;

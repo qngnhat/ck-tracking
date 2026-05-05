@@ -182,6 +182,104 @@ window.__SSI_ANALYSIS__ = (function () {
     return perf;
   }
 
+  // ── Historical forward stats: dự đoán dựa trên lịch sử cùng setup ──
+  // Không phải prediction — chỉ là descriptive stats từ data quá khứ của chính mã đó.
+  // Logic: tìm các phiên trong quá khứ có RSI cùng bucket → tính return forward 5/10/20 phiên
+  function computeRsiSeries(closes, period = 14) {
+    const series = new Array(closes.length).fill(null);
+    if (closes.length < period + 1) return series;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d > 0) gains += d; else losses -= d;
+    }
+    let avgG = gains / period, avgL = losses / period;
+    series[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+    for (let i = period + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      const g = d > 0 ? d : 0;
+      const l = d < 0 ? -d : 0;
+      avgG = (avgG * (period - 1) + g) / period;
+      avgL = (avgL * (period - 1) + l) / period;
+      series[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+    }
+    return series;
+  }
+
+  function rsiBucket(rsi) {
+    if (rsi == null) return null;
+    if (rsi < 25) return "OS_extreme";
+    if (rsi < 30) return "OS_strong";
+    if (rsi < 45) return "OS_mild";
+    if (rsi < 55) return "neutral";
+    if (rsi < 70) return "OB_mild";
+    if (rsi < 75) return "OB_strong";
+    return "OB_extreme";
+  }
+
+  const RSI_BUCKET_LABELS = {
+    OS_extreme: "RSI < 25 (quá bán cực mạnh)",
+    OS_strong: "RSI 25-30 (quá bán mạnh)",
+    OS_mild: "RSI 30-45 (quá bán nhẹ)",
+    neutral: "RSI 45-55 (trung tính)",
+    OB_mild: "RSI 55-70 (quá mua nhẹ)",
+    OB_strong: "RSI 70-75 (quá mua mạnh)",
+    OB_extreme: "RSI > 75 (quá mua cực mạnh)",
+  };
+
+  function statsOf(arr) {
+    if (arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const sum = arr.reduce((a, b) => a + b, 0);
+    const avg = sum / arr.length;
+    const wins = arr.filter((x) => x > 0).length;
+    return {
+      n: arr.length,
+      avg, // %
+      median: sorted[Math.floor(sorted.length / 2)],
+      winRate: wins / arr.length,
+      best: sorted[sorted.length - 1],
+      worst: sorted[0],
+      p25: sorted[Math.floor(sorted.length * 0.25)],
+      p75: sorted[Math.floor(sorted.length * 0.75)],
+    };
+  }
+
+  function computeForwardStats(closes) {
+    const n = closes.length;
+    if (n < 50) return null;
+    const rsiSeries = computeRsiSeries(closes, 14);
+    const currentRsi = rsiSeries[n - 1];
+    if (currentRsi == null) return null;
+    const currentBucket = rsiBucket(currentRsi);
+
+    const matches5 = [], matches10 = [], matches20 = [];
+    // Walk through history, exclude last 20 phiên (cần forward window)
+    for (let i = 14; i <= n - 21; i++) {
+      const rsi = rsiSeries[i];
+      if (rsi == null) continue;
+      if (rsiBucket(rsi) !== currentBucket) continue;
+      const base = closes[i];
+      if (!base || base <= 0) continue;
+      // Forward returns
+      const fwd5 = ((closes[i + 5] - base) / base) * 100;
+      const fwd10 = ((closes[i + 10] - base) / base) * 100;
+      const fwd20 = ((closes[i + 20] - base) / base) * 100;
+      matches5.push(fwd5);
+      matches10.push(fwd10);
+      matches20.push(fwd20);
+    }
+
+    return {
+      currentRsi,
+      currentBucket,
+      bucketLabel: RSI_BUCKET_LABELS[currentBucket] || currentBucket,
+      fwd5: statsOf(matches5),
+      fwd10: statsOf(matches10),
+      fwd20: statsOf(matches20),
+    };
+  }
+
   // ── Distance from MA (percentage) ──
   function distanceFromMA(current, ma) {
     if (!ma) return null;
@@ -385,6 +483,7 @@ window.__SSI_ANALYSIS__ = (function () {
     const macd = calculateMACD(closes);
     const bb = calculateBB(closes);
     const performance = calculatePerformance(closes);
+    const forwardStats = computeForwardStats(closes);
     const { support, resistance, effectiveSupport } = findSupportResistance(highs, lows, closes);
     const w52 = find52Week(highs, lows);
     const avgVol = avgVolume(volumes);
@@ -668,6 +767,7 @@ window.__SSI_ANALYSIS__ = (function () {
       foreignTrend,
       valuation,
       performance,
+      forwardStats,
       trend,
       trendDir,
       support,
