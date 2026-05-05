@@ -484,6 +484,18 @@ window.__SSI_ANALYSIS__ = (function () {
     const bb = calculateBB(closes);
     const performance = calculatePerformance(closes);
     const forwardStats = computeForwardStats(closes);
+
+    // T+ eligibility info: avg turnover 20 phiên + 6m return + 7-day max drop
+    // Để analyze tab có thể diagnose mã không xuất hiện trong T+ pick
+    let avgTurnover20d = null;
+    if (closes.length >= 21 && volumes.length >= 21) {
+      let sum = 0;
+      for (let i = closes.length - 21; i < closes.length - 1; i++) {
+        sum += closes[i] * volumes[i] * 1000; // VND
+      }
+      avgTurnover20d = sum / 20;
+    }
+    const ret6m = closes.length > 127 ? (closes[closes.length - 1] / closes[closes.length - 127] - 1) : null;
     const { support, resistance, effectiveSupport } = findSupportResistance(highs, lows, closes);
     const w52 = find52Week(highs, lows);
     const avgVol = avgVolume(volumes);
@@ -768,6 +780,8 @@ window.__SSI_ANALYSIS__ = (function () {
       valuation,
       performance,
       forwardStats,
+      avgTurnover20d,
+      ret6m,
       trend,
       trendDir,
       support,

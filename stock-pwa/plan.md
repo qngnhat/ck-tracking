@@ -210,6 +210,19 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Current verdict: bearTrap + sellPressure → Watchlist (downgrade)
   - Backtest: bearTrap + sellPressure → P(win) HIGHER, không phải lower
   - Cần user review Bayesian display 1-2 tuần → quyết định trust số liệu hay giữ verdict conservative
+- ✅ **Forward stats sample-size fixes (PC1 case feedback)**:
+  - User thấy PC1 hiện "100% win rate +20%" với sample n=1 → misread thành "kèo chắc thắng"
+  - n < 3: card opacity 0.6, table grayscale 0.5, warn cực mạnh "⛔ chỉ N lần lịch sử, KHÔNG phải pattern thống kê"
+  - Visual cue rõ user không trust mù
+- ✅ **T+ eligibility diagnostic trong analyze tab**:
+  - Khi user phân tích mã KHÔNG xuất hiện T+ pick → render panel giải thích lý do
+  - Compute trong analyze.js: `avgTurnover20d`, `ret6m`
+  - 3 checks:
+    * avgTurnover20d < 5 tỷ → "Illiquid filter"
+    * ret6m < -50% → "Falling knife filter"
+    * score < 4 → "Chưa đủ confluence"
+  - Panel cam cảnh báo: "Mã này có signal nhưng bị loại do hard rules — cẩn thận khi trade"
+  - PC1 sẽ trigger filterIlliquid + có thể filterCrash
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

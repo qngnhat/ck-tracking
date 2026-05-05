@@ -627,6 +627,8 @@
         ${perfPills(r.performance)}
       </div>
 
+      ${renderTplusEligibilityCheck(r)}
+
       ${renderForwardStatsCard(r)}
 
       <!-- Text analysis -->
@@ -1198,6 +1200,47 @@
     };
   }
 
+  // ── T+ eligibility diagnostic (giải thích why mã không trong T+ pick) ──
+  function renderTplusEligibilityCheck(r) {
+    const issues = [];
+    if (r.avgTurnover20d != null && r.avgTurnover20d < 5e9) {
+      issues.push({
+        icon: "⛔",
+        text: `Thanh khoản TB 20 phiên = <b>${(r.avgTurnover20d / 1e9).toFixed(2)} tỷ</b> (filter < 5 tỷ — illiquid)`,
+      });
+    }
+    if (r.ret6m != null && r.ret6m < -0.5) {
+      issues.push({
+        icon: "⛔",
+        text: `6 tháng return = <b>${(r.ret6m * 100).toFixed(1)}%</b> (filter < -50% — falling knife)`,
+      });
+    }
+
+    // Score check (analyze score, not T+ score, nhưng correlated)
+    if (r.score != null && r.score < 4) {
+      issues.push({
+        icon: "⚠️",
+        text: `Setup score analyze = <b>${r.score.toFixed(1)}</b> (T+ pick threshold ≥ 4 — chưa đủ confluence)`,
+      });
+    }
+
+    // Skip render nếu không có issue
+    if (issues.length === 0) return "";
+
+    return `
+      <div class="an-card full-width tplus-elig-card">
+        <div class="an-title">⚠️ Mã này có thể KHÔNG xuất hiện trong T+ Top picks</div>
+        <ul class="tplus-elig-list">
+          ${issues.map((i) => `<li>${i.icon} ${i.text}</li>`).join("")}
+        </ul>
+        <div class="tplus-elig-note">
+          T+ Top picks chỉ list mã pass tất cả hard filters + score threshold. Mã này có thể có signal kỹ thuật mạnh nhưng bị loại do hard rules
+          (illiquid → khó exit, falling knife → trend giảm chưa hết). Cẩn thận khi trade — đó là lý do app filter ra.
+        </div>
+      </div>
+    `;
+  }
+
   // ── Forward stats card (dự đoán dựa lịch sử cùng setup) ──
   function renderForwardStatsCard(r) {
     const fs = r.forwardStats;
@@ -1233,7 +1276,10 @@
 
     // Sample size note
     const sampleN = fs.fwd5?.n || fs.fwd10?.n || fs.fwd20?.n || 0;
-    const sampleNote = sampleN < 10
+    const sampleTooSmall = sampleN < 3;
+    const sampleNote = sampleTooSmall
+      ? `<span class="fs-warn fs-warn-strong">⛔ Sample n=${sampleN} — chỉ ${sampleN} lần lịch sử, KHÔNG phải pattern thống kê. Win rate hiển thị KHÔNG có ý nghĩa.</span>`
+      : sampleN < 10
       ? `<span class="fs-warn">⚠️ Sample nhỏ (${sampleN}) — độ tin cậy thấp</span>`
       : sampleN < 30
       ? `<span class="fs-warn">⚠️ Sample vừa (${sampleN}) — chỉ là gợi ý</span>`
@@ -1245,10 +1291,10 @@
     const canPool = sector && sector !== "khác";
 
     return `
-      <div class="an-card full-width">
+      <div class="an-card full-width ${sampleTooSmall ? 'fs-card-muted' : ''}">
         <div class="an-title">📊 Dự đoán dựa lịch sử (cùng setup RSI)</div>
         <div class="fs-bucket">Setup hiện tại: <b>${fs.bucketLabel}</b> · ${sampleNote}</div>
-        <div class="fs-table">
+        <div class="fs-table ${sampleTooSmall ? 'fs-table-muted' : ''}">
           ${headerRow}
           ${renderStatRow("5 phiên",  fs.fwd5)}
           ${renderStatRow("10 phiên", fs.fwd10)}
