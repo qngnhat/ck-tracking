@@ -448,8 +448,197 @@
   }
 
   // ── Render analysis ──
+  // ── Analysis tab state (overview / dca / tplus) ──
+  const ANALYSIS_TAB_KEY = "analysis_tab";
+  let lastAnalysisResult = null;
+
+  function getAnalysisTabDefault() {
+    if (analyzeContext === "dca") return "dca";
+    if (analyzeContext === "tplus") return "tplus";
+    const persisted = localStorage.getItem(ANALYSIS_TAB_KEY);
+    if (["overview", "dca", "tplus"].includes(persisted)) return persisted;
+    return "overview";
+  }
+
+  function setAnalysisTab(mode) {
+    if (!["overview", "dca", "tplus"].includes(mode)) mode = "overview";
+    document.querySelectorAll(".analysis-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    });
+    document.querySelectorAll(".analysis-tab-content").forEach((c) => {
+      c.style.display = c.dataset.mode === mode ? "block" : "none";
+    });
+    localStorage.setItem(ANALYSIS_TAB_KEY, mode);
+
+    if (mode === "dca") {
+      const c = $("analysis-tab-dca");
+      if (c && !c.dataset.loaded) lazyLoadDcaTab();
+    } else if (mode === "tplus") {
+      const c = $("analysis-tab-tplus");
+      if (c && !c.dataset.loaded) lazyLoadTplusTab();
+    }
+  }
+
+  async function lazyLoadDcaTab() {
+    const container = $("analysis-tab-dca");
+    if (!container || !lastAnalysisResult) return;
+    container.dataset.loaded = "1";
+    container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Tìm ${lastAnalysisResult.symbol} trong Top DCA...</div></div>`;
+    try {
+      const result = await RANKING.loadTopPicks();
+      const picks = result?.picks || [];
+      const idx = picks.findIndex((p) => p.symbol === lastAnalysisResult.symbol);
+      if (idx >= 0) {
+        container.innerHTML = renderDcaContextCard(picks[idx], idx + 1, lastAnalysisResult);
+      } else {
+        container.innerHTML = renderDcaNotInTopFallback(lastAnalysisResult, picks.slice(0, 5));
+      }
+    } catch (e) {
+      container.dataset.loaded = "";
+      container.innerHTML = `<div class="error">Lỗi tải Top DCA: ${e.message} <button class="link-btn" onclick="document.querySelector('.analysis-tab[data-mode=dca]').click()">Thử lại</button></div>`;
+    }
+  }
+
+  async function lazyLoadTplusTab() {
+    const container = $("analysis-tab-tplus");
+    if (!container || !lastAnalysisResult) return;
+    container.dataset.loaded = "1";
+    container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Tìm ${lastAnalysisResult.symbol} trong Top T+...</div></div>`;
+    try {
+      const result = await RANKING.loadTopPicksTPlus();
+      const picks = result?.picks || [];
+      const idx = picks.findIndex((p) => p.symbol === lastAnalysisResult.symbol);
+      if (idx >= 0) {
+        container.innerHTML = renderTplusContextCard(picks[idx], idx + 1, lastAnalysisResult);
+      } else {
+        container.innerHTML = renderTplusNotInTopFallback(lastAnalysisResult);
+      }
+      // Bind watch + pool buttons after lazy render (T+ context card has watch btn)
+      bindTplusWatchBtn();
+      bindForwardStatsPoolBtn();
+    } catch (e) {
+      container.dataset.loaded = "";
+      container.innerHTML = `<div class="error">Lỗi tải Top T+: ${e.message} <button class="link-btn" onclick="document.querySelector('.analysis-tab[data-mode=tplus]').click()">Thử lại</button></div>`;
+    }
+  }
+
+  function renderDcaNotInTopFallback(r, topPicks) {
+    const topList = topPicks?.length
+      ? `<ul class="context-bullets">${topPicks.map((p, i) => `<li>#${i + 1} <b>${p.symbol}</b> · score ${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</li>`).join("")}</ul>`
+      : "";
+    return `
+      <div class="an-card context-card context-dca">
+        <div class="context-header">
+          <span class="context-icon">📈</span>
+          <div>
+            <div class="context-title">DCA · Không trong Top hôm nay</div>
+            <div class="context-subtitle">Mã ${r.symbol} không lọt vào Top DCA picks rebalance gần nhất</div>
+          </div>
+        </div>
+        <div class="context-section">
+          <div class="context-section-title">Vì sao có thể không vào top</div>
+          <ul class="context-bullets">
+            <li>Tổ hợp factors (MA200 quality, drawdown, momentum 6m, foreign flow…) chưa đủ z-score so với top universe</li>
+            <li>Có thể mã đang đi ngang/giảm hoặc thanh khoản TB thấp</li>
+            <li>Sector cap đã bị các mã cùng ngành chiếm chỗ (max 2 mã/ngành)</li>
+          </ul>
+        </div>
+        ${topList ? `
+        <div class="context-section">
+          <div class="context-section-title">Top 5 DCA picks hiện tại</div>
+          ${topList}
+        </div>` : ""}
+        <div class="context-disclaimer">
+          💡 Để xem phân tích DCA chi tiết, mở <b>Top picks → DCA</b> rồi click vào mã đang trong top.
+        </div>
+      </div>
+    `;
+  }
+
+  function renderTplusNotInTopFallback(r) {
+    const eligibility = renderTplusEligibilityCheck(r);
+    return `
+      <div class="an-card context-card context-tplus">
+        <div class="context-header">
+          <span class="context-icon">⚡</span>
+          <div>
+            <div class="context-title">T+ · Không trong Top hôm nay</div>
+            <div class="context-subtitle">Mã ${r.symbol} không lọt Top T+ picks — kiểm tra eligibility dưới</div>
+          </div>
+        </div>
+        <div class="context-disclaimer">
+          T+ scoring áp dụng confluence rules (RSI quá bán + ADX yếu + vol > TB + …). Mã không đạt confluence sẽ không hiện trong top.
+        </div>
+      </div>
+      ${eligibility}
+    `;
+  }
+
   function renderAnalysis(r) {
+    lastAnalysisResult = r;
     const root = $("analysis-root");
+
+    root.innerHTML = `
+      <div class="analysis-tabs" role="tablist">
+        <button class="analysis-tab" data-mode="overview" type="button" role="tab">📊 Tổng quan</button>
+        <button class="analysis-tab" data-mode="dca" type="button" role="tab">📈 DCA</button>
+        <button class="analysis-tab" data-mode="tplus" type="button" role="tab">⚡ T+</button>
+      </div>
+      <div class="analysis-tab-content" data-mode="overview" id="analysis-tab-overview"></div>
+      <div class="analysis-tab-content" data-mode="dca" id="analysis-tab-dca" style="display:none"></div>
+      <div class="analysis-tab-content" data-mode="tplus" id="analysis-tab-tplus" style="display:none"></div>
+    `;
+
+    // Overview = current default content (always rendered)
+    $("analysis-tab-overview").innerHTML = renderOverviewTabContent(r);
+
+    // Pre-render DCA/T+ tab if context exists (came from Ranking click)
+    if (analyzeContext === "dca" && analyzeContextPick) {
+      $("analysis-tab-dca").innerHTML = renderDcaContextCard(analyzeContextPick, analyzeContextRank, r);
+      $("analysis-tab-dca").dataset.loaded = "1";
+    }
+    if (analyzeContext === "tplus" && analyzeContextPick) {
+      $("analysis-tab-tplus").innerHTML = renderTplusContextCard(analyzeContextPick, analyzeContextRank, r);
+      $("analysis-tab-tplus").dataset.loaded = "1";
+    }
+
+    // Set default active tab
+    setAnalysisTab(getAnalysisTabDefault());
+
+    // Bind tab buttons
+    root.querySelectorAll(".analysis-tab").forEach((btn) => {
+      btn.addEventListener("click", () => setAnalysisTab(btn.dataset.mode));
+    });
+
+    // Bind tooltip taps
+    root.querySelectorAll(".label.has-tip").forEach((el) => {
+      el.addEventListener("click", () => {
+        showTooltip(el.dataset.tipTitle, el.dataset.tipBody);
+      });
+    });
+
+    // Bind chart resolution buttons (in overview tab)
+    root.querySelectorAll(".range-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        changeResolution(btn.dataset.res);
+      });
+    });
+
+    // Bind watchlist toggle
+    const wlBtn = root.querySelector("#watchlist-toggle");
+    if (wlBtn) {
+      wlBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sym = wlBtn.dataset.symbol;
+        const added = RANKING.toggleWatchlist(sym);
+        wlBtn.classList.toggle("active", added);
+        wlBtn.textContent = added ? "★" : "☆";
+        wlBtn.title = added ? "Bỏ khỏi watchlist" : "Thêm vào watchlist";
+      });
+    }
+  }
+
+  function renderOverviewTabContent(r) {
     const changeClass = r.dayChange >= 0 ? "up" : "down";
     const changeSign = r.dayChange >= 0 ? "+" : "";
     const rsiColor = r.rsi === null ? "#888" : r.rsi < 30 ? "#4CAF50" : r.rsi > 70 ? "#ff4444" : "#ccc";
@@ -464,14 +653,6 @@
       ? row("Vùng mua tốt", `${fp(r.buyZoneLow)} – ${fp(r.buyZoneHigh)}`, null, "color:#4CAF50;font-weight:600")
       : "";
 
-    // Context card (DCA/T+ pick explanation)
-    let contextHtml = "";
-    if (analyzeContext === "dca" && analyzeContextPick) {
-      contextHtml = renderDcaContextCard(analyzeContextPick, analyzeContextRank, r);
-    } else if (analyzeContext === "tplus" && analyzeContextPick) {
-      contextHtml = renderTplusContextCard(analyzeContextPick, analyzeContextRank, r);
-    }
-
     const inWatchlist = RANKING.isInWatchlist(r.symbol);
     const meta = getStockMeta(r.symbol) || { name: "", floor: "", sector: null };
     const companyParts = [];
@@ -481,7 +662,7 @@
     const companyLine = companyParts.length
       ? `<div class="an-company-line">${companyParts.join(" · ")}</div>`
       : "";
-    root.innerHTML = contextHtml + `
+    return `
       <!-- Header card -->
       <div class="an-card full-width">
         <button class="watchlist-toggle ${inWatchlist ? 'active' : ''}" id="watchlist-toggle" data-symbol="${r.symbol}" title="${inWatchlist ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
@@ -496,7 +677,7 @@
           </div>
         </div>
         <div class="an-recommend-big" style="color:${r.recColor}">${r.recommendation}</div>
-        ${analyzeContext === "tplus" ? "" : renderVerdictBadge(r.score, r.flags, r.atrPct)}
+        ${renderVerdictBadge(r.score, r.flags, r.atrPct)}
         <div class="an-reasons">${r.reasons.map((x) => `• ${x}`).join("<br>") || "Không có tín hiệu rõ"}</div>
         ${buyZoneHtml}
         ${row("Stop loss", fp(r.stopLoss),
@@ -642,33 +823,6 @@
         ⚠️ "Setup tốt/khá/yếu" là <b>chỉ báo chất lượng kỹ thuật</b>, KHÔNG phải tín hiệu mua/bán. Backtest 8 năm cho thấy hệ scoring tổng hợp này chỉ tốt để đánh giá rủi ro (drawdown thấp), không sinh alpha so với buy-and-hold cả universe. Để chọn mã đầu tư, dùng tab <b>Top picks → DCA</b> (đã validate beat baseline). Quyết định cuối cùng là của bạn.
       </div>
     `;
-
-    // Bind tooltip taps
-    root.querySelectorAll(".label.has-tip").forEach((el) => {
-      el.addEventListener("click", () => {
-        showTooltip(el.dataset.tipTitle, el.dataset.tipBody);
-      });
-    });
-
-    // Bind chart resolution buttons
-    root.querySelectorAll(".range-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        changeResolution(btn.dataset.res);
-      });
-    });
-
-    // Bind watchlist toggle
-    const wlBtn = root.querySelector("#watchlist-toggle");
-    if (wlBtn) {
-      wlBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const sym = wlBtn.dataset.symbol;
-        const added = RANKING.toggleWatchlist(sym);
-        wlBtn.classList.toggle("active", added);
-        wlBtn.textContent = added ? "★" : "☆";
-        wlBtn.title = added ? "Bỏ khỏi watchlist" : "Thêm vào watchlist";
-      });
-    }
   }
 
   function clearAnalyzeContext() {

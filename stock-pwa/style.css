@@ -664,6 +664,54 @@ button {
   border-color: #00d2ff;
 }
 
+/* ── Analysis sub-tabs (Tổng quan / DCA / T+) ── */
+.analysis-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: linear-gradient(to bottom, #0f0f1e 70%, rgba(15, 15, 30, 0));
+  padding: 6px 0 10px;
+}
+
+.analysis-tab {
+  flex: 1;
+  background: #16162a;
+  border: 1px solid #2a2a3e;
+  color: #aab;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.analysis-tab:hover {
+  background: rgba(0, 210, 255, 0.06);
+  color: #d0e0e8;
+}
+
+.analysis-tab:active {
+  transform: scale(0.97);
+}
+
+.analysis-tab.active {
+  background: rgba(0, 210, 255, 0.14);
+  border-color: rgba(0, 210, 255, 0.55);
+  color: #00d2ff;
+}
+
+@media (max-width: 480px) {
+  .analysis-tab {
+    font-size: 12px;
+    padding: 8px 6px;
+  }
+}
+
 /* ── Analysis Card ── */
 .an-card {
   background: #1a1a2e;
