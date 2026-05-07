@@ -3881,16 +3881,38 @@
   // ════════════════════════════════════════════════════
   // ── PAPER TRACKER ──
   // ════════════════════════════════════════════════════
+  const TRACKER_TAB_KEY = "tracker_tab";
+  let trackerTab = localStorage.getItem(TRACKER_TAB_KEY) || null;
+
+  function getTrackerTab() {
+    if (trackerTab === "dca" || trackerTab === "tplus") return trackerTab;
+    return rankingState.mode === "dca" ? "dca" : "tplus";
+  }
+
+  function setTrackerTab(mode) {
+    trackerTab = mode;
+    localStorage.setItem(TRACKER_TAB_KEY, mode);
+    document.querySelectorAll(".tracker-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+  }
+
   function renderTrackerSection() {
     const section = $("tracker-section");
     if (!section) return;
     const tracker = RANKING.loadTracker();
-    const totalSnaps = (tracker.dca?.length || 0) + (tracker.tplus?.length || 0);
-    if (totalSnaps === 0) {
+    const dcaCount = tracker.dca?.length || 0;
+    const tplusCount = tracker.tplus?.length || 0;
+    if (dcaCount + tplusCount === 0) {
       section.style.display = "none";
       return;
     }
     section.style.display = "block";
+    const dcaBadge = $("tracker-count-dca");
+    const tplusBadge = $("tracker-count-tplus");
+    if (dcaBadge) dcaBadge.textContent = dcaCount;
+    if (tplusBadge) tplusBadge.textContent = tplusCount;
+    setTrackerTab(getTrackerTab());
   }
 
   function fmtDateShort(iso) {
@@ -3919,6 +3941,7 @@
         }
       }
       const prices = await RANKING.fetchCurrentPrices([...allSyms]);
+      lastTrackerData = { tracker, prices };
       renderTrackerContent(tracker, prices);
     } catch (e) {
       content.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
@@ -4093,12 +4116,16 @@
   function renderTrackerContent(tracker, prices) {
     const content = $("tracker-content");
     let html = "";
+    const activeTab = getTrackerTab();
 
-    // T+ accuracy summary card (đầu tracker, nếu có picks T+)
-    const accStats = computeTplusAccuracyStats(tracker, prices);
-    if (accStats) html += renderTplusAccuracyCard(accStats);
+    // T+ accuracy summary card chỉ hiện khi đang ở tab T+
+    if (activeTab === "tplus") {
+      const accStats = computeTplusAccuracyStats(tracker, prices);
+      if (accStats) html += renderTplusAccuracyCard(accStats);
+    }
 
-    for (const mode of ["dca", "tplus"]) {
+    const modesToRender = [activeTab];
+    for (const mode of modesToRender) {
       const arr = (tracker[mode] || []).slice().reverse();  // newest first
       if (arr.length === 0) continue;
       const modeLabel = mode === "dca" ? "📈 DCA Snapshots" : "⚡ T+ Snapshots";
@@ -4150,11 +4177,20 @@
     }
 
     if (!html) {
-      content.innerHTML = `<div class="empty-state ranking-intro"><p>Chưa có snapshot nào.</p></div>`;
+      const otherTab = activeTab === "tplus" ? "dca" : "tplus";
+      const otherCount = tracker[otherTab]?.length || 0;
+      const otherLabel = otherTab === "dca" ? "📈 DCA" : "⚡ T+";
+      const hint = otherCount > 0
+        ? ` Switch sang tab <b>${otherLabel}</b> (${otherCount} snapshots).`
+        : "";
+      content.innerHTML = `<div class="empty-state ranking-intro"><p>Chưa có snapshot ${activeTab === "tplus" ? "T+" : "DCA"} nào.${hint}</p></div>`;
     } else {
       content.innerHTML = html;
     }
   }
+
+  // Track latest tracker fetch result để re-render khi đổi tab (khỏi fetch lại)
+  let lastTrackerData = null;
 
   // Toggle tracker body
   document.addEventListener("click", (e) => {
@@ -4165,6 +4201,21 @@
       body.style.display = open ? "none" : "block";
       icon.textContent = open ? "▼" : "▲";
       if (!open) refreshTracker(); // auto-fetch on open
+    }
+  });
+
+  // Tracker tab click
+  document.addEventListener("click", (e) => {
+    const tab = e.target.closest(".tracker-tab");
+    if (!tab) return;
+    const mode = tab.dataset.mode;
+    if (mode !== "dca" && mode !== "tplus") return;
+    if (mode === getTrackerTab()) return;
+    setTrackerTab(mode);
+    if (lastTrackerData) {
+      renderTrackerContent(lastTrackerData.tracker, lastTrackerData.prices);
+    } else {
+      refreshTracker();
     }
   });
 

@@ -2443,6 +2443,57 @@ button {
   border-top: 1px solid #2a2a3e;
 }
 
+.tracker-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #2a2a3e;
+  padding-bottom: 6px;
+}
+
+.tracker-tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid #2a2a3e;
+  color: #aab;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tracker-tab:hover {
+  background: rgba(0, 210, 255, 0.06);
+  color: #d0e0e8;
+}
+
+.tracker-tab.active {
+  background: rgba(0, 210, 255, 0.12);
+  border-color: rgba(0, 210, 255, 0.5);
+  color: #00d2ff;
+}
+
+.tracker-tab-count {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.tracker-tab.active .tracker-tab-count {
+  background: rgba(0, 210, 255, 0.25);
+}
+
 .tracker-controls {
   display: flex;
   gap: 8px;
