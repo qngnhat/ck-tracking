@@ -2195,11 +2195,21 @@
     // Generate UUID token, expire 10 min
     const token = crypto.randomUUID();
     const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await auth.dbUpsert("user_telegram", {
-      link_token: token,
-      link_token_expires_at: expires,
-    }, { onConflict: "user_id" }).catch((e) => console.warn("[telegram] gen token:", e));
-    return token;
+    try {
+      const result = await auth.dbUpsert("user_telegram", {
+        link_token: token,
+        link_token_expires_at: expires,
+      }, { onConflict: "user_id" });
+      if (result === null) {
+        console.error("[telegram] gen token returned null — RLS or schema issue?");
+        return null;
+      }
+      return token;
+    } catch (e) {
+      console.error("[telegram] gen token failed:", e);
+      alert(`Không tạo được link token: ${e.message || e}\n\nKiểm tra:\n1. Đã run schema SQL chưa?\n2. Đã run schema-fix.sql (chat_id NULL)?`);
+      return null;
+    }
   }
 
   async function refreshTelegramStatus() {
