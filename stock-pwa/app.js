@@ -812,7 +812,7 @@
   // Hard flags (1 cái đủ giết kèo): bearTrap (ADX>45 -DI mạnh), lowSessionLiq.
   // Soft flags (≥2 mới downgrade): lowVol, deepDowntrend.
   // Size hint embed luôn vào verdict desc theo flag count + ATR.
-  function getVerdict(score, flags, atrPct) {
+  function getVerdict(score, flags, atrPct, bayesProb = null) {
     if (score === null || score === undefined || isNaN(score)) return null;
     if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
       desc: "Không vào. Chờ tín hiệu đảo chiều rõ." };
@@ -827,14 +827,29 @@
         desc: "Setup chất lượng nhưng risk cao. Nếu thử bắt đáy: <b>10-20% vốn</b>, chờ xác nhận." };
     }
 
+    // ── Bayesian data integration: nếu P(win) < baseline, KHÔNG cho Spec Buy ──
+    // Backtest baseline P(win) = 52%. Below 50% = không có edge → demote.
+    if (score >= 4 && bayesProb != null && bayesProb < 0.50) {
+      return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
+        desc: `Score ${score.toFixed(1)} OK nhưng <b>P(win) ${(bayesProb * 100).toFixed(0)}% < baseline 52%</b> — setup yếu hơn lệnh T+ trung bình. Chờ xác nhận hoặc bỏ qua.` };
+    }
+
+    // Borderline: Bayes 50-55% → spec buy nhưng cần confirm
+    if (score >= 4 && bayesProb != null && bayesProb < 0.55) {
+      let sizeHint = softFlags >= 1 ? "1/4 vốn" : "1/3 vốn";
+      return { tag: "Spec Buy (borderline)", color: "#FFC107", icon: "🟡",
+        desc: `Có edge nhẹ (P(win) ${(bayesProb * 100).toFixed(0)}%). <b>${sizeHint}</b>, ưu tiên Confirmed entry để có buffer.` };
+    }
+
     if (score >= 4) {
       // Size hint dựa flagCount (chỉ soft) + ATR
       let sizeHint;
       if (softFlags >= 1) sizeHint = "1/4 vốn (có 1 risk soft)";
       else if (atrPct != null && atrPct >= 3) sizeHint = "1/3 vốn (biến động cao)";
       else sizeHint = "1/3 - 1/2 vốn";
+      const probTxt = bayesProb != null ? ` · P(win) ${(bayesProb * 100).toFixed(0)}%` : "";
       return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
-        desc: `Có thể vào — <b>${sizeHint}</b>. Cân nhắc chờ xác nhận nếu thận trọng.` };
+        desc: `Có thể vào — <b>${sizeHint}</b>${probTxt}. Cân nhắc chờ xác nhận nếu thận trọng.` };
     }
 
     return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
@@ -930,20 +945,64 @@
     const flagCount = [
       flags.bearTrap, flags.lowVol, flags.deepDowntrend, flags.lowSessionLiq, flags.sellPressure
     ].filter(Boolean).length;
-    const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in từng phần, không all-in</i></li>`;
-    const confirmedLi = `<li><b>Confirmed entry</b>: chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b> — giá vào cao hơn 2-5% nhưng giảm false signal</li>`;
+
+    // ── Concrete entry triggers (specific numbers user check được) ──
+    const closeTrigger = cur * 1.005; // close > 0.5% above current → momentum cuối phiên
+    const volAvg20 = r.avgVol || (cur && r.currentVol ? r.currentVol / (r.volRatio || 1) : null);
+    const volTrigger = volAvg20 ? volAvg20 * 1.5 : null;
+
+    const triggerListHtml = `
+      <li><b>Confirmed entry — đợi ≥ 1 trong 3 trigger</b> (có thể check end-of-day hoặc sáng phiên sau):
+        <ul class="entry-triggers-sub">
+          <li>① Phiên hôm nay close > <b>${fp(closeTrigger)}</b> (close mạnh, momentum cuối phiên)</li>
+          <li>② Vol hôm nay ≥ <b>${volTrigger ? fmtVol(volTrigger) : "1.5× TB20"}</b> (lực cầu xác nhận)</li>
+          <li>③ Phiên sau mở cửa > <b>${fp(cur)}</b> (gap up, không reverse)</li>
+        </ul>
+        <small style="color:#888">📍 Vào lúc: cuối phiên hiện tại (~14:30) HOẶC ATO/ATC sáng phiên sau</small>
+      </li>`;
+    const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in 2-3 lệnh, không all-in</i></li>`;
     const entryHtml = flagCount >= 1
-      ? `<li><b>Ưu tiên: Confirmed entry</b> — chờ <b>nến rút chân</b> HOẶC <b>volume ≥ 1.5× avg</b>. Có risk flag → đừng vào sớm.</li>
-         <li><i>Tùy chọn:</i> Aggressive vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> — chỉ khi đã chấp nhận size cực nhỏ.</li>`
-      : aggressiveLi + confirmedLi;
+      ? `${triggerListHtml}
+         <li><i>Tùy chọn aggressive:</i> vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> — chỉ khi đã chấp nhận size cực nhỏ (rủi ro cao).</li>`
+      : aggressiveLi + triggerListHtml;
+
+    // ── Position sizing concrete (NAV-based) ──
+    let sizingHtml = "";
+    try {
+      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+      let totalMarket = 0;
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache[h.symbol];
+        if (a?.current) totalMarket += h.qty * a.current * 1000;
+      }
+      const nav = totalMarket + cash;
+      if (nav > 0 && cur > 0) {
+        const riskPct = isBorderline || isDowngraded ? 1 : 2; // 1% if risky, 2% if clean
+        const slDistPct = Math.abs((slFinal - cur) / cur) * 100;
+        const slDistClamped = Math.max(3, Math.min(15, slDistPct));
+        const maxRiskVnd = nav * (riskPct / 100);
+        const maxLossPerShare = cur * 1000 * (slDistClamped / 100);
+        const maxQty = maxLossPerShare > 0 ? Math.floor(maxRiskVnd / maxLossPerShare) : 0;
+        const maxValue = maxQty * cur * 1000;
+        if (maxQty > 0) {
+          sizingHtml = `<li class="entry-sizing">💰 <b>Size khuyến nghị</b>: <b>${maxQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(maxValue)}, max ${riskPct}% NAV at risk, SL ~${slDistClamped.toFixed(1)}%) — Cash: ${fmtMoney(cash)} / NAV: ${fmtMoney(nav)}</li>`;
+        }
+      }
+    } catch {}
 
     const rankTxt = rank ? `#${rank}` : "";
 
+    // ── Bayesian P(win) — pass to verdict for data-driven demote ──
+    const bayes = computeBayesianWinProb(pick.score ?? r.score, flags);
+    const bayesProb = bayes?.prob ?? null;
+
     // ── BIG ACTION BANNER (verdict + 1-line clear advice) ──
-    const verdict = getVerdict(pick.score ?? r.score, flags, r.atrPct);
+    const verdict = getVerdict(pick.score ?? r.score, flags, r.atrPct, bayesProb);
     const isDowngraded = verdict?.tag === "Watchlist" && (pick.score ?? r.score) >= 4;
     const isAvoid = verdict?.tag === "Avoid";
     const isClean = verdict?.tag === "Spec Buy";
+    const isBorderline = verdict?.tag === "Spec Buy (borderline)";
 
     let actionLabel, actionAdvice, bannerColor;
     if (isAvoid) {
@@ -951,16 +1010,25 @@
       actionAdvice = "Score thấp + risk cao. Chờ tín hiệu đảo chiều rõ trước khi xét lại.";
       bannerColor = "#ff4444";
     } else if (isDowngraded) {
+      const hasLowProb = bayesProb != null && bayesProb < 0.50;
       actionLabel = "⚠️ CHỜ XÁC NHẬN";
-      actionAdvice = "Setup oversold mạnh nhưng có risk flag. <b>Đừng vào aggressive hôm nay</b> — chờ trigger đảo chiều hoặc bỏ qua kèo này.";
+      actionAdvice = hasLowProb
+        ? `Score cao nhưng <b>P(win) ${(bayesProb * 100).toFixed(0)}% < baseline 52%</b> — backtest data nói setup này yếu hơn lệnh T+ trung bình. Chờ trigger đảo chiều hoặc bỏ qua.`
+        : "Setup oversold mạnh nhưng có risk flag. <b>Đừng vào aggressive hôm nay</b> — chờ trigger đảo chiều hoặc bỏ qua kèo này.";
       bannerColor = "#FF9800";
+    } else if (isBorderline) {
+      actionLabel = "🟡 CÓ THỂ VÀO (BORDERLINE)";
+      actionAdvice = `P(win) ~${(bayesProb * 100).toFixed(0)}% — sát baseline 52%, edge mỏng. <b>Ưu tiên Confirmed entry</b> để có buffer; nếu Aggressive thì size cực nhỏ.`;
+      bannerColor = "#FFC107";
     } else if (verdict?.tag === "Watchlist") {
       actionLabel = "🟡 WATCHLIST";
       actionAdvice = "Score chưa đủ confluence. Theo dõi, không vào lệnh mới.";
       bannerColor = "#FF9800";
     } else if (isClean) {
       actionLabel = "✅ CÓ THỂ VÀO";
-      actionAdvice = "Confluence rõ, không có hard flag. Vào theo plan dưới với size khuyến nghị.";
+      actionAdvice = bayesProb != null
+        ? `Confluence rõ, P(win) <b>${(bayesProb * 100).toFixed(0)}%</b> trên baseline 52%. Vào theo plan dưới với size khuyến nghị.`
+        : "Confluence rõ, không có hard flag. Vào theo plan dưới với size khuyến nghị.";
       bannerColor = "#4CAF50";
     } else {
       actionLabel = "ℹ️ THEO DÕI";
@@ -1079,6 +1147,7 @@
           </summary>
           <ul class="context-bullets">
             ${entryHtml}
+            ${sizingHtml}
             <li>Stop loss: <b>${fp(slFinal)}</b> (${slPct.toFixed(1)}%) — max của -8% và 2×ATR</li>
             ${targets.map((t) => `<li>${t}</li>`).join("")}
             <li>Hold: <b>${hold.min}-${hold.max} phiên</b> ${hold.icon} <i>${hold.label}</i> — ${hold.hint}</li>

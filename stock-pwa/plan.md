@@ -237,6 +237,23 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
   - Click → window.scrollTo smooth top
   - safe-area-inset-bottom respect (iOS notch)
   - requestAnimationFrame throttle scroll handler
+- ✅ **T+ Context Card UX overhaul: clarity + actionability + Bayes integration**:
+  User feedback "Banner CÓ THỂ VÀO xanh nhưng P(win) 47% < baseline → contradict + không biết mua lúc nào".
+  - **getVerdict signature update**: `getVerdict(score, flags, atrPct, bayesProb)`
+  - **Bayes-driven demote**: nếu P(win) < 50% (under baseline) → DEMOTE Spec Buy → Watchlist banner cam
+  - **Borderline tier mới**: P(win) 50-55% → "🟡 CÓ THỂ VÀO (BORDERLINE)" amber, ưu tiên Confirmed entry
+  - **Banner advice dynamic**: append "P(win) X%" vs baseline 52%
+  - **Concrete entry triggers** (specific numbers user check được):
+    * ① Close > X (close trigger = current × 1.005)
+    * ② Vol ≥ Y (vol trigger = avgVol20 × 1.5, formatted M/K)
+    * ③ Gap up > current price (next day open above today's close)
+    * Time hint: "cuối phiên 14:30 HOẶC ATO/ATC sáng phiên sau"
+  - **Position sizing concrete trong T+ context**:
+    * Compute NAV (cash + holdings market value cached)
+    * Risk %: 1% nếu borderline/downgraded, 2% nếu clean
+    * SL distance từ slFinal, clamp [3, 15]%
+    * Output: "💰 Size khuyến nghị: X cp (~Y, max 2% NAV at risk, SL ~Z%)"
+    * Show Cash + NAV ngay → user thấy số tiền cụ thể
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

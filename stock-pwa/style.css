@@ -2041,6 +2041,40 @@ button {
   margin-top: 6px;
 }
 
+/* Entry triggers sub-list (concrete checkable conditions) */
+.entry-triggers-sub {
+  margin: 6px 0 4px 0;
+  padding-left: 18px;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.entry-triggers-sub li {
+  color: #ddd;
+  padding: 2px 0;
+}
+
+.entry-triggers-sub li b {
+  color: #4dd0e1;
+  font-weight: 700;
+}
+
+/* Position sizing line trong plan giao dịch */
+.entry-sizing {
+  background: rgba(0, 210, 255, 0.06);
+  border-left: 3px solid #00d2ff;
+  padding: 8px 10px !important;
+  margin: 6px 0 !important;
+  border-radius: 4px;
+  list-style: none !important;
+  margin-left: -18px !important;
+}
+
+.entry-sizing b {
+  color: #4dd0e1;
+}
+
 /* T+ Context — BIG action banner (rõ ràng quyết định) */
 .ctx-action-banner {
   border: 2px solid;
