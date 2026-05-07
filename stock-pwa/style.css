@@ -1056,11 +1056,6 @@ body.is-offline {
   display: flex;
   gap: 6px;
   margin-bottom: 14px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: linear-gradient(to bottom, #0f0f1e 70%, rgba(15, 15, 30, 0));
-  padding: 6px 0 10px;
 }
 
 .analysis-tab {
@@ -3254,10 +3249,10 @@ body.is-offline {
     padding-right: 24px;
   }
 
-  /* Larger comfortable padding */
+  /* Larger comfortable padding (top minimal — search bar đã spacing) */
   #main-container,
   #ranking-container {
-    padding: 24px;
+    padding: 8px 24px 24px;
   }
 
   /* Tab nav: keep centered, full row */
@@ -3270,8 +3265,8 @@ body.is-offline {
     padding: 10px 28px;
   }
 
-  /* ── 2-column grid for analysis cards ── */
-  #analysis-root {
+  /* Inner overview tab: 2-column grid for analysis cards (full-width spans both) */
+  #analysis-tab-overview {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
@@ -3279,18 +3274,18 @@ body.is-offline {
   }
 
   /* Wide cards span both columns */
-  #analysis-root > .full-width,
-  #analysis-root > .context-card,
-  #analysis-root > .chart-card {
+  #analysis-tab-overview > .full-width,
+  #analysis-tab-overview > .context-card,
+  #analysis-tab-overview > .chart-card {
     grid-column: 1 / -1;
   }
 
   /* Header card: center the price+symbol horizontally */
-  #analysis-root > .full-width .an-head {
+  #analysis-tab-overview > .full-width .an-head {
     padding: 8px 0 16px;
   }
 
-  #analysis-root > .full-width .an-recommend-big {
+  #analysis-tab-overview > .full-width .an-recommend-big {
     font-size: 24px;
   }
 
