@@ -166,7 +166,9 @@ button {
   color: #fff;
   font-size: 20px;
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 10px 12px;
+  min-width: 44px;
+  min-height: 44px;
   line-height: 1;
 }
 
@@ -182,12 +184,12 @@ button {
   background: #0f3460;
   color: #00d2ff;
   border: 1px solid #00d2ff;
-  border-radius: 16px;
-  padding: 4px 12px;
+  border-radius: 18px;
+  padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  height: 30px;
+  min-height: 36px;
   margin-left: 6px;
   display: flex;
   align-items: center;
@@ -202,8 +204,9 @@ button {
   background: none;
   border: 2px solid #00d2ff;
   border-radius: 50%;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
   padding: 0;
   overflow: hidden;
 }
@@ -634,7 +637,10 @@ button {
 .link-btn {
   color: #888;
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 8px 12px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .link-btn:active {
@@ -936,7 +942,8 @@ body.is-offline {
   color: #888;
   font-size: 11px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 8px 14px;
+  min-height: 36px;
   border-radius: 6px;
   transition: all 0.2s;
 }
@@ -1768,14 +1775,19 @@ body.is-offline {
    ════════════════════════════════════════ */
 .watchlist-toggle {
   position: absolute;
-  top: 10px;
-  right: 12px;
+  top: 6px;
+  right: 8px;
   background: none;
   border: none;
   font-size: 24px;
   color: #555;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 8px 12px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.15s;
   line-height: 1;
 }
@@ -1795,12 +1807,17 @@ body.is-offline {
 .pick-watchlist {
   background: none;
   border: none;
-  font-size: 20px;
+  font-size: 22px;
   color: #555;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 10px 12px;
   line-height: 1;
   flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pick-watchlist.active {
