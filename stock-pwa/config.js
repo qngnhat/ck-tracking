@@ -6,5 +6,6 @@
 
 window.__SSI_CONFIG__ = {
   SUPABASE_URL: "https://vlmxjsofgixjjjqztfjd.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsbXhqc29mZ2l4ampqcXp0ZmpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNTEyODEsImV4cCI6MjA5MjgyNzI4MX0.U7kF-Q90ZQI57_MJWXmzuFNzoFzHntv3QYMCdWz7TCc"
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsbXhqc29mZ2l4ampqcXp0ZmpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNTEyODEsImV4cCI6MjA5MjgyNzI4MX0.U7kF-Q90ZQI57_MJWXmzuFNzoFzHntv3QYMCdWz7TCc",
+  TELEGRAM_BOT_USERNAME: "stock_pwa_qngnhat_bot"
 };
