@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v73"; // sync với sw.js CACHE name suffix
+    const appVersion = "v74"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">

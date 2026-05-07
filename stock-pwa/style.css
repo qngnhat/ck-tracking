@@ -443,8 +443,8 @@ button {
 /* ── Search Bar ── */
 .search-bar {
   position: sticky;
-  top: 54px;
-  z-index: 9;
+  top: 0;
+  z-index: 11;
   background: #0f0f1e;
   padding: 10px 16px;
   display: flex;
