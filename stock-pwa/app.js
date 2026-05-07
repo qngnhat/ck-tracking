@@ -698,8 +698,8 @@
             <span class="pct ${changeClass}">${changeSign}${r.dayChange.toFixed(2)}%</span>
           </div>
         </div>
-        <div class="an-recommend-big" style="color:${r.recColor}">${r.recommendation}</div>
         ${renderVerdictBadge(r.score, r.flags, r.atrPct)}
+        <div class="an-recommend-sub" style="color:${r.recColor}">${r.recommendation}</div>
         <div class="an-reasons">${r.reasons.map((x) => `• ${x}`).join("<br>") || "Không có tín hiệu rõ"}</div>
         ${buyZoneHtml}
         ${row("Stop loss", fp(r.stopLoss),

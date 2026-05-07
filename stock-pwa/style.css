@@ -875,6 +875,15 @@ body.is-offline {
   letter-spacing: 0.5px;
 }
 
+.an-recommend-sub {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 0 8px;
+  opacity: 0.85;
+  letter-spacing: 0.3px;
+}
+
 .an-reasons {
   font-size: 12px;
   color: #aaa;
