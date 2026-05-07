@@ -955,14 +955,19 @@
     const symbol = pick.symbol || r.symbol;
     const isWatched = isTplusWatched(symbol);
     const watchBtnHtml = `
-      <button class="tplus-watch-btn ${isWatched ? 'active' : ''}"
-        data-symbol="${symbol}"
-        data-close-trigger="${closeTrigger}"
-        data-vol-trigger="${volTrigger || ''}"
-        data-gap-trigger="${cur}"
-        title="${isWatched ? 'Đang theo dõi — bấm để bỏ' : 'Bật notification khi trigger met'}">
-        ${isWatched ? '✅ Đang theo dõi · Bỏ' : '🔔 Báo khi trigger met'}
-      </button>
+      <li class="tplus-watch-row">
+        <button class="tplus-watch-btn ${isWatched ? 'active' : ''}"
+          data-symbol="${symbol}"
+          data-close-trigger="${closeTrigger}"
+          data-vol-trigger="${volTrigger || ''}"
+          data-gap-trigger="${cur}"
+          title="${isWatched ? 'Đang theo dõi — bấm để bỏ' : 'Bật notification khi trigger met'}">
+          ${isWatched ? '✅ ĐANG THEO DÕI · BỎ' : '🔔 BÁO KHI TRIGGER MET'}
+        </button>
+        <small class="tplus-watch-hint">${isWatched
+          ? `App tự check + báo notification khi ${symbol} đạt 1 trong 3 trigger trên`
+          : `Nhận notification khi ${symbol} đạt trigger entry — không phải mở app suốt`}</small>
+      </li>
     `;
 
     const triggerListHtml = `
@@ -972,11 +977,9 @@
           <li>② Vol hôm nay ≥ <b>${volTrigger ? fmtVol(volTrigger) : "1.5× TB20"}</b> (lực cầu xác nhận)</li>
           <li>③ Phiên sau mở cửa > <b>${fp(cur)}</b> (gap up, không reverse)</li>
         </ul>
-        <div class="entry-trigger-action">
-          <small style="color:#888">📍 Vào lúc: cuối phiên hiện tại (~14:30) HOẶC ATO/ATC sáng phiên sau</small>
-          ${watchBtnHtml}
-        </div>
-      </li>`;
+        <small style="color:#888">📍 Vào lúc: cuối phiên hiện tại (~14:30) HOẶC ATO/ATC sáng phiên sau</small>
+      </li>
+      ${watchBtnHtml}`;
     const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in 2-3 lệnh, không all-in</i></li>`;
     const entryHtml = flagCount >= 1
       ? `${triggerListHtml}

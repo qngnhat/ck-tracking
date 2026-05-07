@@ -2060,45 +2060,58 @@ button {
   font-weight: 700;
 }
 
-/* T+ trigger watch button */
-.entry-trigger-action {
+/* T+ trigger watch — prominent CTA row */
+.tplus-watch-row {
+  list-style: none !important;
+  margin-left: -18px !important;
+  padding: 10px 12px !important;
+  margin-top: 8px !important;
+  background: rgba(0, 210, 255, 0.06);
+  border: 1px solid rgba(0, 210, 255, 0.3);
+  border-radius: 8px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed #20203a;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .tplus-watch-btn {
-  background: rgba(0, 210, 255, 0.1);
-  border: 1px solid rgba(0, 210, 255, 0.4);
-  color: #4dd0e1;
-  padding: 5px 12px;
+  background: linear-gradient(135deg, #00d2ff 0%, #4dd0e1 100%);
+  border: none;
+  color: #0a0a14;
+  padding: 10px 16px;
   border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
   cursor: pointer;
   transition: all 0.15s;
-  margin-left: auto;
-  white-space: nowrap;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 210, 255, 0.2);
 }
 
 .tplus-watch-btn:hover {
-  background: rgba(0, 210, 255, 0.2);
-  color: #fff;
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(0, 210, 255, 0.4);
+}
+
+.tplus-watch-btn:active {
+  transform: scale(0.98);
 }
 
 .tplus-watch-btn.active {
-  background: rgba(76, 175, 80, 0.15);
-  border-color: rgba(76, 175, 80, 0.5);
-  color: #66bb6a;
+  background: linear-gradient(135deg, #4CAF50 0%, #66bb6a 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
 }
 
-.tplus-watch-btn.active:hover {
-  background: rgba(76, 175, 80, 0.25);
-  color: #fff;
+.tplus-watch-hint {
+  color: #888;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.4;
+  font-style: italic;
 }
 
 /* Position sizing line trong plan giao dịch */
