@@ -186,6 +186,22 @@
     </div>
   </div>
 
+  <!-- Command palette (Cmd+K / Ctrl+K / "/") -->
+  <div class="cmdp-backdrop" id="cmdp-backdrop"></div>
+  <div class="cmdp" id="cmdp" role="dialog" aria-modal="true">
+    <div class="cmdp-input-wrap">
+      <span class="cmdp-icon">🔍</span>
+      <input type="text" id="cmdp-input" placeholder="Tìm mã, lệnh, tab... (Cmd+K)" autocomplete="off" spellcheck="false">
+      <kbd class="cmdp-kbd">Esc</kbd>
+    </div>
+    <div class="cmdp-results" id="cmdp-results"></div>
+    <div class="cmdp-footer">
+      <span><kbd>↑</kbd><kbd>↓</kbd> chọn</span>
+      <span><kbd>Enter</kbd> mở</span>
+      <span><kbd>Esc</kbd> đóng</span>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div class="settings-backdrop" id="settings-backdrop"></div>
   <div class="settings-modal" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">

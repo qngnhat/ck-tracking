@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v71"; // sync với sw.js CACHE name suffix
+    const appVersion = "v72"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1065,6 +1065,112 @@
     $("settings-body").innerHTML = renderSettingsBody();
     bindSettingsActions();
     notifyBrowser?.("✅ Đã xóa", "Cache đã được xóa. Reload nếu cần.", "#4CAF50");
+  }
+
+  // ── Command palette (Cmd+K / Ctrl+K / "/") ──
+  let cmdpSelectedIdx = 0;
+  let cmdpResultsCache = [];
+
+  function getCmdpStaticCommands() {
+    const tg = window.__SSI_CONFIG__?.TELEGRAM_BOT_USERNAME;
+    return [
+      { id: "nav-home", label: "Đi đến Trang chủ", icon: "🏠", kind: "Tab", action: () => switchTab("home") },
+      { id: "nav-analyze", label: "Mở Phân tích", icon: "📊", kind: "Tab", action: () => switchTab("analyze") },
+      { id: "nav-ranking", label: "Mở Top picks", icon: "🏆", kind: "Tab", action: () => switchTab("ranking") },
+      { id: "nav-portfolio", label: "Mở Danh mục", icon: "💼", kind: "Tab", action: () => switchTab("portfolio") },
+      { id: "act-settings", label: "Mở Cài đặt", icon: "⚙️", kind: "Lệnh", action: () => openSettings() },
+      { id: "act-bell", label: "Mở Cảnh báo", icon: "🔔", kind: "Lệnh", action: () => toggleAlertPanel(true) },
+      ...(tg ? [{ id: "act-tg", label: `Mở bot Telegram @${tg}`, icon: "📱", kind: "Lệnh",
+                 action: () => window.open(`https://t.me/${tg}`, "_blank") }] : []),
+      { id: "act-reload", label: "Force reload (clear SW cache)", icon: "🔄", kind: "Lệnh", action: async () => {
+        if (!confirm("Force reload?")) return;
+        try { if ("caches" in window) (await caches.keys()).forEach((k) => caches.delete(k)); } catch {}
+        location.reload();
+      }},
+    ];
+  }
+
+  function searchCmdp(query) {
+    const q = query.trim();
+    const qUpper = q.toUpperCase();
+    const qLower = q.toLowerCase();
+    const results = [];
+
+    // Ticker matches (top priority)
+    if (qUpper.length >= 1 && stockList.length > 0) {
+      const tickerMatches = stockList
+        .filter((s) => s.code.startsWith(qUpper) || s.name?.toLowerCase().includes(qLower))
+        .slice(0, 5);
+      for (const s of tickerMatches) {
+        results.push({
+          id: "ticker-" + s.code,
+          label: `${s.code} · ${s.name || ""}`,
+          icon: "📈",
+          kind: "Mã",
+          action: () => { switchTab("analyze"); clearAnalyzeContext(); analyzeSymbol(s.code); },
+        });
+      }
+    }
+
+    // Static commands
+    const cmds = getCmdpStaticCommands();
+    if (q === "") {
+      // Default: all commands
+      results.push(...cmds);
+    } else {
+      const matched = cmds.filter((c) => c.label.toLowerCase().includes(qLower));
+      results.push(...matched);
+    }
+
+    return results.slice(0, 12);
+  }
+
+  function renderCmdpResults() {
+    const list = $("cmdp-results");
+    if (!list) return;
+    if (cmdpResultsCache.length === 0) {
+      list.innerHTML = `<div class="cmdp-empty">Không có kết quả. Thử mã CP hoặc "settings"...</div>`;
+      return;
+    }
+    list.innerHTML = cmdpResultsCache.map((r, i) => `
+      <div class="cmdp-row ${i === cmdpSelectedIdx ? 'cmdp-row-active' : ''}" data-idx="${i}">
+        <span class="cmdp-row-icon">${r.icon}</span>
+        <span class="cmdp-row-label">${r.label}</span>
+        <span class="cmdp-row-kind">${r.kind}</span>
+      </div>
+    `).join("");
+    // Scroll active into view
+    const active = list.querySelector(".cmdp-row-active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+
+  function openCmdp() {
+    const cmdp = $("cmdp");
+    const backdrop = $("cmdp-backdrop");
+    const input = $("cmdp-input");
+    if (!cmdp || !backdrop || !input) return;
+    cmdp.classList.add("open");
+    backdrop.classList.add("open");
+    input.value = "";
+    cmdpSelectedIdx = 0;
+    cmdpResultsCache = searchCmdp("");
+    renderCmdpResults();
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function closeCmdp() {
+    const cmdp = $("cmdp");
+    const backdrop = $("cmdp-backdrop");
+    if (!cmdp || !backdrop) return;
+    cmdp.classList.remove("open");
+    backdrop.classList.remove("open");
+  }
+
+  function executeCmdpResult(idx) {
+    const r = cmdpResultsCache[idx];
+    if (!r) return;
+    closeCmdp();
+    setTimeout(() => r.action(), 50);
   }
 
   // ── Context cards (when navigating from DCA/T+ ranking) ──
@@ -5986,9 +6092,66 @@
   const settingsBackdrop = document.getElementById("settings-backdrop");
   if (settingsClose) settingsClose.addEventListener("click", closeSettings);
   if (settingsBackdrop) settingsBackdrop.addEventListener("click", closeSettings);
+
+  // Command palette handlers
+  const cmdpInput = document.getElementById("cmdp-input");
+  const cmdpResults = document.getElementById("cmdp-results");
+  const cmdpBackdrop = document.getElementById("cmdp-backdrop");
+  if (cmdpBackdrop) cmdpBackdrop.addEventListener("click", closeCmdp);
+  if (cmdpInput) {
+    cmdpInput.addEventListener("input", (e) => {
+      cmdpResultsCache = searchCmdp(e.target.value);
+      cmdpSelectedIdx = 0;
+      renderCmdpResults();
+    });
+    cmdpInput.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        cmdpSelectedIdx = Math.min(cmdpSelectedIdx + 1, cmdpResultsCache.length - 1);
+        renderCmdpResults();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        cmdpSelectedIdx = Math.max(cmdpSelectedIdx - 1, 0);
+        renderCmdpResults();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        executeCmdpResult(cmdpSelectedIdx);
+      }
+    });
+  }
+  if (cmdpResults) {
+    cmdpResults.addEventListener("click", (e) => {
+      const row = e.target.closest(".cmdp-row");
+      if (!row) return;
+      executeCmdpResult(parseInt(row.dataset.idx, 10));
+    });
+  }
+
+  // Global keyboard shortcuts
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && document.getElementById("settings-modal")?.classList.contains("open")) {
-      closeSettings();
+    // Esc closes any modal
+    if (e.key === "Escape") {
+      if (document.getElementById("cmdp")?.classList.contains("open")) {
+        closeCmdp();
+        return;
+      }
+      if (document.getElementById("settings-modal")?.classList.contains("open")) {
+        closeSettings();
+        return;
+      }
+    }
+    // Cmd+K / Ctrl+K → open palette
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      const cmdp = document.getElementById("cmdp");
+      if (cmdp?.classList.contains("open")) closeCmdp();
+      else openCmdp();
+      return;
+    }
+    // "/" → open palette (only if not typing in input)
+    if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+      e.preventDefault();
+      openCmdp();
     }
   });
 

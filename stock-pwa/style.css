@@ -670,6 +670,179 @@ button {
   border-color: #00d2ff;
 }
 
+/* ── Command palette (Cmd+K) ── */
+.cmdp-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 250;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s, visibility 0.18s;
+}
+
+.cmdp-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.cmdp {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translate(-50%, -10px);
+  width: min(560px, calc(100vw - 24px));
+  max-height: 70vh;
+  background: #16162a;
+  border: 1px solid #2a2a3e;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  z-index: 251;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s, visibility 0.18s, transform 0.18s;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cmdp.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.cmdp-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2a2a3e;
+  background: #1a1a2e;
+}
+
+.cmdp-icon {
+  font-size: 16px;
+  opacity: 0.7;
+}
+
+.cmdp-input-wrap input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.cmdp-input-wrap input::placeholder {
+  color: #666;
+}
+
+.cmdp-kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #0f0f1e;
+  border: 1px solid #2a2a3e;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace;
+}
+
+.cmdp-results {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px;
+}
+
+.cmdp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #d0e0e8;
+}
+
+.cmdp-row:hover {
+  background: rgba(0, 210, 255, 0.06);
+}
+
+.cmdp-row-active {
+  background: rgba(0, 210, 255, 0.14);
+  color: #fff;
+}
+
+.cmdp-row-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+
+.cmdp-row-label {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmdp-row-kind {
+  font-size: 10px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.cmdp-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #666;
+}
+
+.cmdp-footer {
+  display: flex;
+  gap: 14px;
+  padding: 10px 14px;
+  border-top: 1px solid #2a2a3e;
+  background: #14142a;
+  font-size: 11px;
+  color: #666;
+}
+
+.cmdp-footer kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: #0f0f1e;
+  border: 1px solid #2a2a3e;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-right: 3px;
+  font-family: inherit;
+}
+
+@media (max-width: 600px) {
+  .cmdp {
+    top: 4vh;
+    width: calc(100vw - 16px);
+    max-height: 80vh;
+  }
+}
+
 /* ── Settings modal ── */
 .settings-backdrop {
   position: fixed;
