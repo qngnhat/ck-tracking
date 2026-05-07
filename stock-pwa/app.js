@@ -1414,9 +1414,9 @@
       if (!symbol) return;
       if (isTplusWatched(symbol)) {
         // Toggle off
-        removeTplusWatch(symbol);
+        await removeTplusWatch(symbol);
         btn.classList.remove("active");
-        btn.textContent = "🔔 Báo khi trigger met";
+        btn.textContent = "🔔 BÁO KHI TRIGGER MET";
         btn.title = "Bật notification khi trigger met";
       } else {
         // Request notification permission first
@@ -1429,11 +1429,15 @@
             volAbove: parseFloat(btn.dataset.volTrigger) || null,
             gapAbove: parseFloat(btn.dataset.gapTrigger) || null,
           };
-          addTplusWatch(symbol, triggers);
+          await addTplusWatch(symbol, triggers);
           btn.classList.add("active");
-          btn.textContent = "✅ Đang theo dõi · Bỏ";
+          btn.textContent = "✅ ĐANG THEO DÕI · BỎ";
           btn.title = "Đang theo dõi — bấm để bỏ";
-          notifyBrowser(`Đã bật theo dõi ${symbol}`, `Sẽ báo khi trigger T+ entry: close, vol, hoặc gap up.`, "#4CAF50");
+          const auth = window.__SSI_AUTH__;
+          const tip = auth?.isLoggedIn?.()
+            ? "Đã sync Supabase — sẽ báo qua Telegram nếu đã kết nối."
+            : "Browser-only. Đăng nhập + kết nối Telegram để nhận push khi đóng app.";
+          notifyBrowser(`Đã bật theo dõi ${symbol}`, tip, "#4CAF50");
         } else {
           alert("Cần cấp quyền notification để theo dõi trigger. Vào cài đặt browser bật notification cho trang này.");
         }
@@ -1957,6 +1961,8 @@
       const emailEl = $("auth-email");
       if (nameEl) nameEl.textContent = name;
       if (emailEl) emailEl.textContent = email;
+      // Refresh Telegram connection status
+      refreshTelegramStatus();
     } else {
       btn.classList.remove("logged-in");
       btn.innerHTML = `<span class="auth-text">Đăng nhập</span>`;
@@ -2172,6 +2178,92 @@
     }
   }
 
+  // ── Telegram bot integration (Phase B) ──
+  // Bot username: configured trong config.js (TELEGRAM_BOT_USERNAME)
+  const TELEGRAM_BOT_USERNAME = window.__SSI_CONFIG__?.TELEGRAM_BOT_USERNAME || "stock_pwa_bot";
+
+  async function loadTelegramConnection() {
+    const auth = window.__SSI_AUTH__;
+    if (!auth || !auth.isLoggedIn()) return null;
+    const data = await auth.dbSelect("user_telegram").catch(() => null);
+    return data && data.length > 0 ? data[0] : null;
+  }
+
+  async function generateTelegramLinkToken() {
+    const auth = window.__SSI_AUTH__;
+    if (!auth || !auth.isLoggedIn()) return null;
+    // Generate UUID token, expire 10 min
+    const token = crypto.randomUUID();
+    const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await auth.dbUpsert("user_telegram", {
+      link_token: token,
+      link_token_expires_at: expires,
+    }, { onConflict: "user_id" }).catch((e) => console.warn("[telegram] gen token:", e));
+    return token;
+  }
+
+  async function refreshTelegramStatus() {
+    const labelEl = $("auth-telegram-label");
+    const btnEl = $("auth-telegram-connect");
+    const sectionEl = $("auth-telegram-section");
+    if (!labelEl || !btnEl) return;
+
+    const auth = window.__SSI_AUTH__;
+    if (!auth || !auth.isLoggedIn()) {
+      if (sectionEl) sectionEl.style.display = "none";
+      return;
+    }
+    if (sectionEl) sectionEl.style.display = "";
+
+    const conn = await loadTelegramConnection();
+    if (conn && conn.chat_id) {
+      labelEl.textContent = `Telegram: ✅ ${conn.username ? "@" + conn.username : "đã kết nối"}`;
+      btnEl.textContent = "Ngắt kết nối";
+      btnEl.dataset.action = "disconnect";
+    } else {
+      labelEl.textContent = "Telegram: chưa kết nối";
+      btnEl.textContent = "Kết nối Telegram";
+      btnEl.dataset.action = "connect";
+    }
+  }
+
+  async function connectTelegram() {
+    const auth = window.__SSI_AUTH__;
+    if (!auth || !auth.isLoggedIn()) {
+      alert("Cần đăng nhập trước.");
+      return;
+    }
+    const token = await generateTelegramLinkToken();
+    if (!token) {
+      alert("Không tạo được link token. Thử lại sau.");
+      return;
+    }
+    // Open Telegram bot với deep-link parameter
+    const botUrl = `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${token}`;
+    window.open(botUrl, "_blank");
+    alert("📱 Mở bot Telegram, bấm Start. Quay lại đây sau ~5s rồi reload trang.");
+  }
+
+  async function disconnectTelegram() {
+    const auth = window.__SSI_AUTH__;
+    if (!auth || !auth.isLoggedIn()) return;
+    if (!confirm("Ngắt kết nối Telegram? Sẽ không nhận notification trigger T+ nữa.")) return;
+    const user = auth.getUser();
+    if (user?.id) {
+      await auth.dbDelete("user_telegram", { eq: { user_id: user.id } }).catch(() => {});
+    }
+    refreshTelegramStatus();
+  }
+
+  // Bind Telegram button (delegate vì auth-dropdown được render late)
+  document.addEventListener("click", (e) => {
+    if (e.target?.id === "auth-telegram-connect") {
+      const action = e.target.dataset.action;
+      if (action === "disconnect") disconnectTelegram();
+      else connectTelegram();
+    }
+  });
+
   // ── T+ trigger watch (báo khi entry trigger met) ──
   const TPLUS_WATCH_KEY = "tplus_trigger_watches_v1";
   const TPLUS_WATCH_TTL_MS = 7 * 24 * 3600 * 1000; // 7 ngày
@@ -2187,7 +2279,7 @@
     try { localStorage.setItem(TPLUS_WATCH_KEY, JSON.stringify(arr)); } catch {}
   }
 
-  function addTplusWatch(symbol, triggers) {
+  async function addTplusWatch(symbol, triggers) {
     const watches = loadTplusWatches();
     const idx = watches.findIndex((w) => w.symbol === symbol);
     const watch = {
@@ -2200,10 +2292,33 @@
     if (idx >= 0) watches[idx] = watch;
     else watches.push(watch);
     saveTplusWatches(watches);
+
+    // Sync to Supabase nếu logged in (cho cron worker check)
+    const auth = window.__SSI_AUTH__;
+    if (auth && auth.isLoggedIn()) {
+      try {
+        await auth.dbUpsert("tplus_watches", {
+          symbol,
+          triggers,
+          notified: false,
+          notified_at: null,
+        }, { onConflict: "user_id,symbol" });
+      } catch (e) {
+        console.warn("[tplus_watch] sync DB add failed:", e);
+      }
+    }
   }
 
-  function removeTplusWatch(symbol) {
+  async function removeTplusWatch(symbol) {
     saveTplusWatches(loadTplusWatches().filter((w) => w.symbol !== symbol));
+    const auth = window.__SSI_AUTH__;
+    if (auth && auth.isLoggedIn()) {
+      try {
+        await auth.dbDelete("tplus_watches", { eq: { symbol } });
+      } catch (e) {
+        console.warn("[tplus_watch] sync DB remove failed:", e);
+      }
+    }
   }
 
   function isTplusWatched(symbol) {

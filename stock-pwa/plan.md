@@ -264,6 +264,24 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
     - Toggle off remove watch
   - Periodic check throttled 3 phút/lần, trigger trên: app load (2s delay), watchlist refresh, home tab visit
   - Notification body specific: "close X ≥ Y · vol A ≥ B"
+- ✅ **Phase B Telegram bot integration** (frontend + schema + worker code):
+  - **B1 Supabase schema**: `user_telegram` (chat_id + link_token expire 10min) + `tplus_watches` (synced từ localStorage)
+    - SQL migration: `/Users/qngnhat/OF1/plans/db_changes/telegram-bot-schema.sql`
+    - RLS policies per user, indexes for cron query
+  - **B1 Frontend**:
+    - Auth dropdown thêm "Kết nối Telegram" section
+    - `connectTelegram()`: gen link_token UUID 10min expire → mở t.me/bot?start=<token>
+    - `disconnectTelegram()`: delete user_telegram row
+    - `refreshTelegramStatus()`: poll user_telegram, update label "✅ @username" or "chưa kết nối"
+    - `addTplusWatch` / `removeTplusWatch` async — sync to Supabase nếu logged in
+  - **B2 Cloudflare Worker**: `/Users/qngnhat/bong/ck_tracking/stock-pwa-bot/`
+    - `worker.js`: webhook handler `/webhook` (process /start <token>, /status), cron `scheduled()` poll VNDirect + check triggers + send via Bot API
+    - `wrangler.toml`: cron schedule `*/15 2-7 * * 1-5` (covers VN trading hours UTC+7)
+    - Supabase REST helpers (sbQuery/sbUpdate) using service_role key
+    - VNDirect history fetch per unique symbol, batch
+  - **B3 SETUP.md**: step-by-step setup (BotFather → wrangler secrets → deploy → webhook setup)
+  - Total worker invocations: ~24/day × 22 trading days = 530/month, free tier OK
+  - Architecture: PWA syncs watches → Supabase → CF Worker cron checks → Telegram message → User phone
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

@@ -1,0 +1,31 @@
+name = "stock-pwa-bot"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Cron triggers — every 15 min during VN market hours (M-F 9:00-14:45 UTC+7)
+# UTC equivalent: 02:00-07:45 (UTC+7 - 7h)
+# Cron syntax: minute hour dom month dow
+[triggers]
+crons = [
+  # Mỗi 15 phút từ 02:00 → 07:45 UTC, weekdays (~ 9:00-14:45 VN time)
+  "0,15,30,45 2-7 * * 1-5"
+]
+
+# Notes:
+# - VN trading hours: 9:00-11:30, 13:00-14:45 weekdays (UTC+7)
+# - UTC equivalent: 02:00-04:30, 06:00-07:45
+# - Cron above runs every 15 min from 02:00 to 07:45 UTC = covers full session + lunch break
+# - Cost: ~24 invocations × 22 trading days = ~530/month, free tier OK
+
+# Secrets to set via `wrangler secret put`:
+#   - BOT_TOKEN (Telegram bot token from @BotFather)
+#   - SUPABASE_URL (https://xxx.supabase.co)
+#   - SUPABASE_SERVICE_ROLE_KEY (Supabase Settings → API → service_role)
+#   - WEBHOOK_SECRET (optional, random string for /cron-test endpoint)
+
+# Deploy:
+#   wrangler deploy
+#
+# Set webhook (1 lần sau deploy):
+#   curl -F "url=https://<worker-url>/webhook" \
+#        https://api.telegram.org/bot<TOKEN>/setWebhook

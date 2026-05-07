@@ -278,6 +278,39 @@ button {
   justify-content: flex-end;
 }
 
+/* Telegram connection section */
+.auth-telegram-section {
+  padding: 12px 0 8px;
+  margin-top: 8px;
+  border-top: 1px solid #2a2a3e;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-telegram-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.auth-telegram-icon {
+  font-size: 14px;
+}
+
+#auth-telegram-connect {
+  align-self: flex-start;
+  font-size: 11px;
+  color: #4dd0e1;
+  font-weight: 600;
+}
+
+#auth-telegram-connect:hover {
+  color: #00d2ff;
+}
+
 .bell-badge {
   position: absolute;
   top: -2px;

@@ -7,5 +7,8 @@
 
 window.__SSI_CONFIG__ = {
   SUPABASE_URL: "https://xxxxxxxx.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGc..."
+  SUPABASE_ANON_KEY: "eyJhbGc...",
+  // Telegram bot username (không có @, phải kết thúc _bot hoặc Bot)
+  // Setup bot: xem stock-pwa-bot/SETUP.md
+  TELEGRAM_BOT_USERNAME: "stock_pwa_bot",
 };
