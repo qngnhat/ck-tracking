@@ -853,6 +853,220 @@
     analyzeContextRank = null;
   }
 
+  // ── Settings modal ──
+  function openSettings() {
+    const modal = $("settings-modal");
+    const backdrop = $("settings-backdrop");
+    const body = $("settings-body");
+    if (!modal || !backdrop || !body) return;
+    body.innerHTML = renderSettingsBody();
+    bindSettingsActions();
+    backdrop.classList.add("open");
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeSettings() {
+    const modal = $("settings-modal");
+    const backdrop = $("settings-backdrop");
+    if (!modal || !backdrop) return;
+    backdrop.classList.remove("open");
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  function renderSettingsBody() {
+    const auth = window.__SSI_AUTH__;
+    const loggedIn = auth?.isLoggedIn?.() || false;
+
+    // Telegram status — read from cached connection if logged in
+    const tgConnected = window.__SSI_TG_CACHE__ === true;
+    const tgStatus = !loggedIn
+      ? "Đăng nhập để dùng Telegram"
+      : tgConnected
+      ? "✅ Đã kết nối"
+      : "❌ Chưa kết nối";
+
+    // Notification permission
+    const notifSupport = "Notification" in window;
+    const notifPerm = notifSupport ? Notification.permission : "unsupported";
+    const notifBadge = notifPerm === "granted" ? "✅ Đã cho phép"
+      : notifPerm === "denied" ? "🚫 Bị chặn — bật trong cài đặt browser"
+      : notifPerm === "default" ? "⚠️ Chưa bật"
+      : "Không hỗ trợ";
+    const showNotifBtn = notifPerm === "default";
+
+    // Universe pref
+    const uni = localStorage.getItem("snap_universe_pref") || "dca";
+
+    // Cache size estimate
+    let cacheKeys = 0;
+    let cacheBytes = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      cacheKeys++;
+      cacheBytes += (localStorage.getItem(k) || "").length;
+    }
+    const cacheKb = (cacheBytes / 1024).toFixed(1);
+
+    // App version (SW cache name)
+    const appVersion = "v71"; // sync với sw.js CACHE name suffix
+
+    return `
+      <section class="settings-section">
+        <h3>📱 Telegram</h3>
+        <div class="settings-row">
+          <span class="settings-label">Trạng thái</span>
+          <span class="settings-value">${tgStatus}</span>
+        </div>
+        <div class="settings-hint">Quản lý kết nối từ icon avatar (góc trên phải) → "Kết nối Telegram"</div>
+      </section>
+
+      <section class="settings-section">
+        <h3>🔔 Thông báo browser</h3>
+        <div class="settings-row">
+          <span class="settings-label">Quyền notification</span>
+          <span class="settings-value">${notifBadge}</span>
+        </div>
+        ${showNotifBtn
+          ? `<button class="btn-primary" id="settings-enable-notif">Cho phép thông báo</button>`
+          : ""}
+        <div class="settings-hint">Cần để nhận trigger T+ khi mở app. Telegram bot không yêu cầu (bot tự gửi).</div>
+      </section>
+
+      <section class="settings-section">
+        <h3>📊 Hiển thị</h3>
+        <div class="settings-row">
+          <span class="settings-label">Universe quét thị trường</span>
+          <div class="settings-radio-group">
+            <label class="settings-radio">
+              <input type="radio" name="settings-uni" value="dca" ${uni === "dca" ? "checked" : ""}>
+              <span>DCA-58</span>
+            </label>
+            <label class="settings-radio">
+              <input type="radio" name="settings-uni" value="full" ${uni === "full" ? "checked" : ""}>
+              <span>Full ~700</span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-hint">DCA-58: nhanh (curated). Full: chậm hơn nhưng cover toàn HOSE.</div>
+      </section>
+
+      <section class="settings-section">
+        <h3>🗑️ Dữ liệu</h3>
+        <div class="settings-row">
+          <span class="settings-label">Cache</span>
+          <span class="settings-value">${cacheKeys} keys · ${cacheKb} KB</span>
+        </div>
+        <div class="settings-button-grid">
+          <button class="link-btn settings-btn" data-clear="history">Xóa lịch sử search</button>
+          <button class="link-btn settings-btn" data-clear="picks">Xóa cache picks</button>
+          <button class="link-btn settings-btn" data-clear="watchlist">Xóa watchlist + alerts</button>
+          <button class="link-btn settings-btn" data-clear="tracker">Xóa lịch sử khuyến nghị</button>
+          <button class="link-btn settings-btn settings-btn-danger" data-clear="all">⚠️ Xóa toàn bộ cache local</button>
+        </div>
+        <div class="settings-hint">Data trên Supabase (logged in) không bị xóa — chỉ cache browser.</div>
+      </section>
+
+      <section class="settings-section">
+        <h3>ℹ️ App</h3>
+        <div class="settings-row">
+          <span class="settings-label">Phiên bản</span>
+          <span class="settings-value">${appVersion}</span>
+        </div>
+        <button class="link-btn settings-btn" id="settings-force-reload">🔄 Force reload (clear SW cache)</button>
+      </section>
+    `;
+  }
+
+  function bindSettingsActions() {
+    const body = $("settings-body");
+    if (!body) return;
+
+    const enableNotif = body.querySelector("#settings-enable-notif");
+    if (enableNotif) {
+      enableNotif.addEventListener("click", async () => {
+        if ("Notification" in window) {
+          await Notification.requestPermission();
+          $("settings-body").innerHTML = renderSettingsBody();
+          bindSettingsActions();
+        }
+      });
+    }
+
+    body.querySelectorAll("input[name='settings-uni']").forEach((radio) => {
+      radio.addEventListener("change", (e) => {
+        localStorage.setItem("snap_universe_pref", e.target.value);
+      });
+    });
+
+    body.querySelectorAll("[data-clear]").forEach((btn) => {
+      btn.addEventListener("click", () => handleSettingsClear(btn.dataset.clear));
+    });
+
+    const reloadBtn = body.querySelector("#settings-force-reload");
+    if (reloadBtn) {
+      reloadBtn.addEventListener("click", async () => {
+        if (!confirm("Force reload: xóa SW cache + reload trang. Tiếp tục?")) return;
+        try {
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+        } catch {}
+        location.reload();
+      });
+    }
+  }
+
+  function handleSettingsClear(target) {
+    let msg = "";
+    let action = null;
+    switch (target) {
+      case "history":
+        msg = "Xóa lịch sử search?";
+        action = () => localStorage.removeItem("stock_analyzer_history");
+        break;
+      case "picks":
+        msg = "Xóa cache top picks (sẽ fetch lại khi vào tab)?";
+        action = () => {
+          ["dca_top_picks_v1", "tplus_top_picks_v1", "vnindex_regime_v1",
+           "market_snapshot_dca_v1", "market_snapshot_full_v1"].forEach((k) => localStorage.removeItem(k));
+        };
+        break;
+      case "watchlist":
+        msg = "Xóa watchlist + alerts khỏi browser? (Supabase data không bị xóa nếu đã đăng nhập)";
+        action = () => {
+          localStorage.removeItem("watchlist_v1");
+          localStorage.removeItem("watchlist_data_v1");
+          localStorage.removeItem("alerts_v1");
+          localStorage.removeItem("alerts_state_v1");
+        };
+        break;
+      case "tracker":
+        msg = "Xóa toàn bộ lịch sử khuyến nghị (DCA + T+)?";
+        action = () => RANKING.clearTracker?.();
+        break;
+      case "all":
+        msg = "⚠️ XÓA TOÀN BỘ cache local? App sẽ về trạng thái mới (login session vẫn giữ).";
+        action = () => {
+          const keep = ["last_user_id", "ssi_migrated_v1"];
+          const all = [];
+          for (let i = 0; i < localStorage.length; i++) all.push(localStorage.key(i));
+          all.forEach((k) => { if (k && !keep.includes(k)) localStorage.removeItem(k); });
+        };
+        break;
+    }
+    if (!msg || !action) return;
+    if (!confirm(msg)) return;
+    action();
+    // Refresh modal to show updated cache stats
+    $("settings-body").innerHTML = renderSettingsBody();
+    bindSettingsActions();
+    notifyBrowser?.("✅ Đã xóa", "Cache đã được xóa. Reload nếu cần.", "#4CAF50");
+  }
+
   // ── Context cards (when navigating from DCA/T+ ranking) ──
   function renderDcaContextCard(pick, rank, r) {
     const f = pick.factors || {};
@@ -2186,6 +2400,15 @@
         const dd = $("auth-dropdown");
         if (dd) dd.classList.remove("open");
         renderAuthUI();
+      });
+    }
+
+    const settingsBtn = $("auth-settings");
+    if (settingsBtn) {
+      settingsBtn.addEventListener("click", () => {
+        const dd = $("auth-dropdown");
+        if (dd) dd.classList.remove("open");
+        openSettings();
       });
     }
 
@@ -5757,6 +5980,17 @@
   // ── Init ──
   renderHistory();
   ensureStockList();
+
+  // Settings modal close handlers (bound once)
+  const settingsClose = document.getElementById("settings-close");
+  const settingsBackdrop = document.getElementById("settings-backdrop");
+  if (settingsClose) settingsClose.addEventListener("click", closeSettings);
+  if (settingsBackdrop) settingsBackdrop.addEventListener("click", closeSettings);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("settings-modal")?.classList.contains("open")) {
+      closeSettings();
+    }
+  });
 
   // Offline banner: show/hide based on navigator.onLine
   const offlineBanner = document.getElementById("offline-banner");
