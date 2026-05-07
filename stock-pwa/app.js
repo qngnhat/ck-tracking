@@ -205,7 +205,7 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
       startAutoRefresh();
     } catch (err) {
-      showError(`Lỗi tải dữ liệu: ${err.message}`);
+      showError(`Lỗi tải dữ liệu: ${err.message}`, () => analyzeSymbol(symbol));
     }
   }
 
@@ -220,7 +220,12 @@
     });
 
     const container = $("chart-container");
-    if (container) container.innerHTML = `<div class="chart-loading">Đang tải ${RESOLUTIONS[resolution].label}...</div>`;
+    if (container) container.innerHTML = `
+      <div class="chart-loading">
+        <div class="spinner spinner-sm"></div>
+        <span>Đang tải ${RESOLUTIONS[resolution].label}...</span>
+      </div>
+    `;
 
     try {
       chartData = await ANALYSIS.fetchHistory(currentSymbol, resolution, RESOLUTIONS[resolution].days);
@@ -228,7 +233,16 @@
       lastUpdated = new Date();
       updateStatus();
     } catch (e) {
-      if (container) container.innerHTML = `<div class="chart-loading">Lỗi: ${e.message}</div>`;
+      if (container) {
+        container.innerHTML = `
+          <div class="chart-loading chart-error">
+            ⚠️ Lỗi: ${e.message}
+            <button class="link-btn chart-retry-btn">Thử lại</button>
+          </div>
+        `;
+        const retry = container.querySelector(".chart-retry-btn");
+        if (retry) retry.addEventListener("click", () => changeResolution(resolution));
+      }
     }
   }
 
@@ -437,14 +451,22 @@
     return result;
   }
 
-  function showError(msg) {
-    $("analysis-root").innerHTML = `
+  function showError(msg, retryFn) {
+    const root = $("analysis-root");
+    root.innerHTML = `
       <div class="error">
         <h3>⚠️ ${msg}</h3>
-        <p>Kiểm tra lại mã cổ phiếu hoặc kết nối mạng.</p>
-        <button class="btn-primary" onclick="document.getElementById('symbol-input').focus()">Thử lại</button>
+        <p>${navigator.onLine === false ? "Bạn đang offline — kết nối mạng để tiếp tục." : "Kiểm tra lại mã cổ phiếu hoặc kết nối mạng."}</p>
+        <button class="btn-primary retry-btn">Thử lại</button>
       </div>
     `;
+    const btn = root.querySelector(".retry-btn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        if (retryFn) retryFn();
+        else $("symbol-input").focus();
+      });
+    }
   }
 
   // ── Render analysis ──
@@ -1649,9 +1671,22 @@
           </div>
         `;
       } catch (e) {
-        result.innerHTML = `<div class="fs-empty">Lỗi fetch: ${e.message}</div>`;
+        result.innerHTML = `
+          <div class="fs-empty">
+            ⚠️ Lỗi fetch: ${e.message}
+            <button class="link-btn fs-retry-btn">Thử lại</button>
+          </div>
+        `;
+        const retry = result.querySelector(".fs-retry-btn");
+        if (retry) retry.addEventListener("click", () => {
+          btn.style.display = "";
+          btn.disabled = false;
+          btn.textContent = "Xem pool peer cùng ngành";
+          result.innerHTML = "";
+          btn.click();
+        });
       } finally {
-        btn.style.display = "none";
+        if (!result.querySelector(".fs-retry-btn")) btn.style.display = "none";
       }
     });
   }
@@ -3757,7 +3792,14 @@
       // Check T+ trigger watches (throttled)
       maybeCheckTplusTriggers();
     } catch (e) {
-      wrap.innerHTML = `<div class="home-card-empty">Lỗi: ${e.message}</div>`;
+      wrap.innerHTML = `
+        <div class="home-card-empty">
+          ⚠️ Lỗi: ${e.message}
+          <button class="link-btn home-retry-btn">Thử lại</button>
+        </div>
+      `;
+      const retry = wrap.querySelector(".home-retry-btn");
+      if (retry) retry.addEventListener("click", () => loadWatchlistInHome(true));
     }
   }
 
@@ -4098,7 +4140,14 @@
       lastTrackerData = { tracker, prices };
       renderTrackerContent(tracker, prices);
     } catch (e) {
-      content.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      content.innerHTML = `
+        <div class="error">
+          <p>⚠️ Lỗi: ${e.message}</p>
+          <button class="btn-primary retry-btn">Thử lại</button>
+        </div>
+      `;
+      const retryBtn = content.querySelector(".retry-btn");
+      if (retryBtn) retryBtn.addEventListener("click", () => refreshTracker());
     } finally {
       btn.disabled = false;
       btn.textContent = "Cập nhật giá hiện tại";
@@ -5708,6 +5757,17 @@
   // ── Init ──
   renderHistory();
   ensureStockList();
+
+  // Offline banner: show/hide based on navigator.onLine
+  const offlineBanner = document.getElementById("offline-banner");
+  function syncOfflineBanner() {
+    const offline = !navigator.onLine;
+    if (offlineBanner) offlineBanner.hidden = !offline;
+    document.body.classList.toggle("is-offline", offline);
+  }
+  syncOfflineBanner();
+  window.addEventListener("online", syncOfflineBanner);
+  window.addEventListener("offline", syncOfflineBanner);
 
   // Register service worker + auto-update on new deploy
   if ("serviceWorker" in navigator) {

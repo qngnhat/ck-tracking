@@ -664,6 +664,30 @@ button {
   border-color: #00d2ff;
 }
 
+/* ── Offline banner ── */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #ff9800;
+  color: #1a1a2e;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  padding: 6px 14px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.offline-banner[hidden] {
+  display: none;
+}
+
+body.is-offline {
+  padding-top: 28px;
+}
+
 /* ── Analysis sub-tabs (Tổng quan / DCA / T+) ── */
 .analysis-tabs {
   display: flex;
@@ -965,9 +989,26 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   height: 320px;
-  color: #666;
+  color: #888;
   font-size: 12px;
+  flex-direction: column;
+}
+
+.chart-loading.chart-error {
+  color: #ff8a8a;
+}
+
+.chart-retry-btn {
+  margin-top: 4px;
+}
+
+.spinner-sm {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+  margin-bottom: 0;
 }
 
 /* Chart status: Live / Closed */
