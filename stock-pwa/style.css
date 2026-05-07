@@ -2334,6 +2334,199 @@ button {
   padding: 8px 14px !important;
 }
 
+/* Back to top button (floating, mobile-first) */
+.back-to-top {
+  position: fixed;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 210, 255, 0.85);
+  color: #0a0a14;
+  border: none;
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.2s, transform 0.2s, visibility 0.2s, background 0.15s;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.back-to-top:hover {
+  background: #00d2ff;
+}
+
+.back-to-top:active {
+  transform: translateY(0) scale(0.95);
+}
+
+/* T+ accuracy summary card (Paper Tracker top section) */
+.tracker-accuracy-card {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.06), rgba(76, 175, 80, 0.04));
+  border: 1px solid rgba(0, 210, 255, 0.25);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.acc-title {
+  font-size: 13px;
+  color: #4dd0e1;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.acc-overview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.acc-stat {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.acc-stat-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.acc-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+}
+
+.acc-stat-sub {
+  font-size: 10px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.acc-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.acc-section-title {
+  font-size: 11px;
+  color: #00d2ff;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.acc-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.acc-targets b.up { color: #4CAF50; }
+.acc-targets b.down { color: #ff4444; }
+
+.acc-dist-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 90px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.acc-dist-label {
+  color: #888;
+  text-align: right;
+}
+
+.acc-dist-track {
+  height: 14px;
+  background: #0f0f1e;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.acc-dist-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.acc-dist-count {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.acc-grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .acc-grid-2col {
+    grid-template-columns: 1fr;
+  }
+  .acc-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.acc-pick-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #ccc;
+  line-height: 1.7;
+}
+
+.acc-pick-list li b {
+  color: #fff;
+}
+
+.acc-pick-meta {
+  color: #666;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.acc-disclaimer {
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #888;
+  line-height: 1.5;
+  font-style: italic;
+}
+
 .tracker-mode-block {
   margin-bottom: 16px;
 }
@@ -2724,9 +2917,6 @@ button {
 }
 
 /* ── Holding detail modal (per-symbol portfolio analysis) ── */
-.hd-modal {
-  /* Wider on desktop */
-}
 @media (min-width: 600px) {
   .hd-modal {
     width: 560px;
@@ -3157,10 +3347,6 @@ button {
 }
 
 /* Sector detail modal (deep dive) */
-.sector-modal {
-  /* Wider on desktop */
-}
-
 @media (min-width: 600px) {
   .sector-modal {
     width: 640px;

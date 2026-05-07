@@ -223,6 +223,20 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
     * score < 4 → "Chưa đủ confluence"
   - Panel cam cảnh báo: "Mã này có signal nhưng bị loại do hard rules — cẩn thận khi trade"
   - PC1 sẽ trigger filterIlliquid + có thể filterCrash
+- ✅ **T+ Accuracy summary card trong Paper Tracker** (verify app advice chuẩn không):
+  - `computeTplusAccuracyStats(tracker, prices)`: flatten all T+ picks across snapshots
+  - Aggregate: total picks, win rate, avg return, hit TP1/TP2/SL counts
+  - Distribution P&L: ≥+10% / +3 to +10% / ±3% flat / -3 to -10% / ≤-10%
+  - Top 3 winners / Top 3 losers all-time
+  - Compare vs backtest baseline: "Win rate 52% / Avg +0.32%"
+  - Disclaimer dynamic theo win rate vs baseline
+  - Render đầu tracker section (trước per-snapshot list)
+  - CSS: linear-gradient bg, grid 3-col stats, distribution bars, 2-col winners/losers
+- ✅ **Back-to-top button** (mobile UX): floating cyan circle bottom-right
+  - Hidden default, show khi scrollY > 400px (smooth fade + slide)
+  - Click → window.scrollTo smooth top
+  - safe-area-inset-bottom respect (iOS notch)
+  - requestAnimationFrame throttle scroll handler
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi

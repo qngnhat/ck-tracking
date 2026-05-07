@@ -3576,9 +3576,175 @@
     }
   }
 
+  // ── T+ accuracy aggregator: tổng hợp tất cả picks T+ all-time ──
+  function computeTplusAccuracyStats(tracker, prices) {
+    const tplusSnaps = tracker.tplus || [];
+    if (tplusSnaps.length === 0) return null;
+
+    // Flatten all picks across snapshots
+    const allPicks = [];
+    for (const snap of tplusSnaps) {
+      const days = daysSince(snap.date);
+      for (const p of snap.picks) {
+        const cur = prices[p.symbol];
+        if (cur == null || !p.entryPrice) continue;
+        const ret = (cur - p.entryPrice) / p.entryPrice;
+        allPicks.push({
+          symbol: p.symbol,
+          sector: p.sector || "khác",
+          score: p.score,
+          ret,
+          days,
+          entry: p.entryPrice,
+          cur,
+          snapDate: snap.date,
+        });
+      }
+    }
+    if (allPicks.length === 0) return null;
+
+    const n = allPicks.length;
+    const wins = allPicks.filter((p) => p.ret > 0).length;
+    const losses = allPicks.filter((p) => p.ret < 0).length;
+    const winRate = wins / n;
+    const avgRet = allPicks.reduce((s, p) => s + p.ret, 0) / n;
+    const sortedByRet = [...allPicks].sort((a, b) => b.ret - a.ret);
+
+    // Hit target/SL counters
+    const hitTp1 = allPicks.filter((p) => p.ret >= 0.10).length; // +10%
+    const hitTp2 = allPicks.filter((p) => p.ret >= 0.18).length; // +18%
+    const hitSl  = allPicks.filter((p) => p.ret <= -0.08).length; // -8%
+
+    // Distribution buckets
+    const dist = {
+      strongUp: allPicks.filter((p) => p.ret >= 0.10).length,
+      modUp:    allPicks.filter((p) => p.ret >= 0.03 && p.ret < 0.10).length,
+      flat:     allPicks.filter((p) => p.ret > -0.03 && p.ret < 0.03).length,
+      modDown:  allPicks.filter((p) => p.ret > -0.10 && p.ret <= -0.03).length,
+      strongDown: allPicks.filter((p) => p.ret <= -0.10).length,
+    };
+
+    // Top 3 winners + Top 3 losers
+    const topWinners = sortedByRet.slice(0, 3);
+    const topLosers = sortedByRet.slice(-3).reverse();
+
+    return {
+      n, wins, losses, winRate, avgRet,
+      hitTp1, hitTp2, hitSl,
+      dist,
+      topWinners, topLosers,
+    };
+  }
+
+  function renderTplusAccuracyCard(stats) {
+    if (!stats) return "";
+
+    const winRatePct = (stats.winRate * 100).toFixed(0);
+    const winCls = stats.winRate >= 0.5 ? "up" : "down";
+    const avgCls = stats.avgRet >= 0 ? "up" : "down";
+    const avgSign = stats.avgRet >= 0 ? "+" : "";
+
+    const tp1Pct = ((stats.hitTp1 / stats.n) * 100).toFixed(0);
+    const tp2Pct = ((stats.hitTp2 / stats.n) * 100).toFixed(0);
+    const slPct = ((stats.hitSl / stats.n) * 100).toFixed(0);
+
+    const distMax = Math.max(...Object.values(stats.dist), 1);
+    const distRow = (label, count, color) => {
+      const pct = (count / distMax) * 100;
+      const sharePct = ((count / stats.n) * 100).toFixed(0);
+      return `
+        <div class="acc-dist-row">
+          <span class="acc-dist-label">${label}</span>
+          <div class="acc-dist-track">
+            <div class="acc-dist-fill" style="width:${pct}%; background:${color}"></div>
+          </div>
+          <span class="acc-dist-count">${count} (${sharePct}%)</span>
+        </div>
+      `;
+    };
+
+    const winnersHtml = stats.topWinners.map((p) => {
+      const sign = p.ret >= 0 ? "+" : "";
+      const cls = p.ret >= 0 ? "up" : "down";
+      return `<li><b>${p.symbol}</b> <span class="pct ${cls}">${sign}${(p.ret * 100).toFixed(1)}%</span> <span class="acc-pick-meta">(${fmtDateShort(p.snapDate)} · ${p.days}d)</span></li>`;
+    }).join("");
+
+    const losersHtml = stats.topLosers.map((p) => {
+      const sign = p.ret >= 0 ? "+" : "";
+      const cls = p.ret >= 0 ? "up" : "down";
+      return `<li><b>${p.symbol}</b> <span class="pct ${cls}">${sign}${(p.ret * 100).toFixed(1)}%</span> <span class="acc-pick-meta">(${fmtDateShort(p.snapDate)} · ${p.days}d)</span></li>`;
+    }).join("");
+
+    // Backtest reference
+    const refLine = `Backtest 2018-2024 (T+ score≥4 hold 10 phiên): win 52.3%, avg +0.32%`;
+
+    return `
+      <div class="tracker-accuracy-card">
+        <div class="acc-title">📊 Tổng hợp accuracy T+ (live tracker)</div>
+
+        <div class="acc-overview-grid">
+          <div class="acc-stat">
+            <div class="acc-stat-label">Total picks</div>
+            <div class="acc-stat-value">${stats.n}</div>
+            <div class="acc-stat-sub">${stats.wins} wins / ${stats.losses} losses</div>
+          </div>
+          <div class="acc-stat">
+            <div class="acc-stat-label">Win rate</div>
+            <div class="acc-stat-value pct ${winCls}">${winRatePct}%</div>
+            <div class="acc-stat-sub">vs backtest 52%</div>
+          </div>
+          <div class="acc-stat">
+            <div class="acc-stat-label">Avg return</div>
+            <div class="acc-stat-value pct ${avgCls}">${avgSign}${(stats.avgRet * 100).toFixed(2)}%</div>
+            <div class="acc-stat-sub">vs backtest +0.3%</div>
+          </div>
+        </div>
+
+        <div class="acc-section">
+          <div class="acc-section-title">🎯 Hit target / SL</div>
+          <div class="acc-targets">
+            <span>TP1 (+10%): <b class="up">${stats.hitTp1}/${stats.n} (${tp1Pct}%)</b></span>
+            <span>TP2 (+18%): <b class="up">${stats.hitTp2}/${stats.n} (${tp2Pct}%)</b></span>
+            <span>SL (-8%): <b class="down">${stats.hitSl}/${stats.n} (${slPct}%)</b></span>
+          </div>
+        </div>
+
+        <div class="acc-section">
+          <div class="acc-section-title">📊 Phân bố P&L</div>
+          ${distRow("≥ +10% (TP zone)", stats.dist.strongUp, "#1b8a3a")}
+          ${distRow("+3% to +10%", stats.dist.modUp, "#4caf50")}
+          ${distRow("± 3% (flat)", stats.dist.flat, "#888")}
+          ${distRow("-3% to -10%", stats.dist.modDown, "#ff7043")}
+          ${distRow("≤ -10% (SL zone)", stats.dist.strongDown, "#ff3030")}
+        </div>
+
+        <div class="acc-grid-2col">
+          <div class="acc-section">
+            <div class="acc-section-title">🚀 Top 3 winners</div>
+            <ul class="acc-pick-list">${winnersHtml}</ul>
+          </div>
+          <div class="acc-section">
+            <div class="acc-section-title">📉 Top 3 losers</div>
+            <ul class="acc-pick-list">${losersHtml}</ul>
+          </div>
+        </div>
+
+        <div class="acc-disclaimer">
+          ${refLine}.<br>
+          ${stats.winRate >= 0.5 ? "✅ App đang track ngang/trên backtest baseline." : "⚠️ Win rate dưới baseline — có thể do small sample, market regime, hoặc app rules cần tune."}
+          Sample size hiện ${stats.n} — sample <30 chỉ là gợi ý, không phải verdict.
+        </div>
+      </div>
+    `;
+  }
+
   function renderTrackerContent(tracker, prices) {
     const content = $("tracker-content");
     let html = "";
+
+    // T+ accuracy summary card (đầu tracker, nếu có picks T+)
+    const accStats = computeTplusAccuracyStats(tracker, prices);
+    if (accStats) html += renderTplusAccuracyCard(accStats);
 
     for (const mode of ["dca", "tplus"]) {
       const arr = (tracker[mode] || []).slice().reverse();  // newest first
@@ -4959,6 +5125,26 @@
     portfolioTab.addEventListener("click", () => {
       console.log("[portfolio] tab clicked, render in 50ms");
       setTimeout(renderPortfolio, 50);
+    });
+  }
+
+  // ── Back to top button (mobile UX) ──
+  const backToTopBtn = document.getElementById("back-to-top");
+  if (backToTopBtn) {
+    let ticking = false;
+    const updateVisibility = () => {
+      const show = window.scrollY > 400;
+      backToTopBtn.classList.toggle("visible", show);
+      ticking = false;
+    };
+    window.addEventListener("scroll", () => {
+      if (!ticking) {
+        requestAnimationFrame(updateVisibility);
+        ticking = true;
+      }
+    }, { passive: true });
+    backToTopBtn.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }
 
