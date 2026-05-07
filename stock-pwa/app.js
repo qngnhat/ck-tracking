@@ -201,6 +201,7 @@
       updateStatus();
       saveHistory(symbol);
       bindForwardStatsPoolBtn();
+      bindTplusWatchBtn();
       window.scrollTo({ top: 0, behavior: "smooth" });
       startAutoRefresh();
     } catch (err) {
@@ -951,6 +952,19 @@
     const volAvg20 = r.avgVol || (cur && r.currentVol ? r.currentVol / (r.volRatio || 1) : null);
     const volTrigger = volAvg20 ? volAvg20 * 1.5 : null;
 
+    const symbol = pick.symbol || r.symbol;
+    const isWatched = isTplusWatched(symbol);
+    const watchBtnHtml = `
+      <button class="tplus-watch-btn ${isWatched ? 'active' : ''}"
+        data-symbol="${symbol}"
+        data-close-trigger="${closeTrigger}"
+        data-vol-trigger="${volTrigger || ''}"
+        data-gap-trigger="${cur}"
+        title="${isWatched ? 'Đang theo dõi — bấm để bỏ' : 'Bật notification khi trigger met'}">
+        ${isWatched ? '✅ Đang theo dõi · Bỏ' : '🔔 Báo khi trigger met'}
+      </button>
+    `;
+
     const triggerListHtml = `
       <li><b>Confirmed entry — đợi ≥ 1 trong 3 trigger</b> (có thể check end-of-day hoặc sáng phiên sau):
         <ul class="entry-triggers-sub">
@@ -958,7 +972,10 @@
           <li>② Vol hôm nay ≥ <b>${volTrigger ? fmtVol(volTrigger) : "1.5× TB20"}</b> (lực cầu xác nhận)</li>
           <li>③ Phiên sau mở cửa > <b>${fp(cur)}</b> (gap up, không reverse)</li>
         </ul>
-        <small style="color:#888">📍 Vào lúc: cuối phiên hiện tại (~14:30) HOẶC ATO/ATC sáng phiên sau</small>
+        <div class="entry-trigger-action">
+          <small style="color:#888">📍 Vào lúc: cuối phiên hiện tại (~14:30) HOẶC ATO/ATC sáng phiên sau</small>
+          ${watchBtnHtml}
+        </div>
       </li>`;
     const aggressiveLi = `<li><b>Aggressive entry</b>: vào vùng <b>${fp(aggLow)} – ${fp(aggHigh)}</b> (current ±2%) — <i>scale-in 2-3 lệnh, không all-in</i></li>`;
     const entryHtml = flagCount >= 1
@@ -1383,6 +1400,42 @@
         </div>
       </div>
     `;
+  }
+
+  // Bind T+ trigger watch button (after analyze render with T+ context)
+  function bindTplusWatchBtn() {
+    const btn = document.querySelector(".tplus-watch-btn");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const symbol = btn.dataset.symbol;
+      if (!symbol) return;
+      if (isTplusWatched(symbol)) {
+        // Toggle off
+        removeTplusWatch(symbol);
+        btn.classList.remove("active");
+        btn.textContent = "🔔 Báo khi trigger met";
+        btn.title = "Bật notification khi trigger met";
+      } else {
+        // Request notification permission first
+        if ("Notification" in window && Notification.permission === "default") {
+          await Notification.requestPermission();
+        }
+        if ("Notification" in window && Notification.permission === "granted") {
+          const triggers = {
+            closeAbove: parseFloat(btn.dataset.closeTrigger) || null,
+            volAbove: parseFloat(btn.dataset.volTrigger) || null,
+            gapAbove: parseFloat(btn.dataset.gapTrigger) || null,
+          };
+          addTplusWatch(symbol, triggers);
+          btn.classList.add("active");
+          btn.textContent = "✅ Đang theo dõi · Bỏ";
+          btn.title = "Đang theo dõi — bấm để bỏ";
+          notifyBrowser(`Đã bật theo dõi ${symbol}`, `Sẽ báo khi trigger T+ entry: close, vol, hoặc gap up.`, "#4CAF50");
+        } else {
+          alert("Cần cấp quyền notification để theo dõi trigger. Vào cài đặt browser bật notification cho trang này.");
+        }
+      }
+    });
   }
 
   // Bind pool button after analyze rendered
@@ -2114,6 +2167,94 @@
       RANKING.markAllAlertsSeen();
       updateBellBadge();
     }
+  }
+
+  // ── T+ trigger watch (báo khi entry trigger met) ──
+  const TPLUS_WATCH_KEY = "tplus_trigger_watches_v1";
+  const TPLUS_WATCH_TTL_MS = 7 * 24 * 3600 * 1000; // 7 ngày
+
+  function loadTplusWatches() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(TPLUS_WATCH_KEY) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  function saveTplusWatches(arr) {
+    try { localStorage.setItem(TPLUS_WATCH_KEY, JSON.stringify(arr)); } catch {}
+  }
+
+  function addTplusWatch(symbol, triggers) {
+    const watches = loadTplusWatches();
+    const idx = watches.findIndex((w) => w.symbol === symbol);
+    const watch = {
+      symbol,
+      addedAt: Date.now(),
+      triggers,
+      notified: false,
+      notifiedAt: null,
+    };
+    if (idx >= 0) watches[idx] = watch;
+    else watches.push(watch);
+    saveTplusWatches(watches);
+  }
+
+  function removeTplusWatch(symbol) {
+    saveTplusWatches(loadTplusWatches().filter((w) => w.symbol !== symbol));
+  }
+
+  function isTplusWatched(symbol) {
+    return loadTplusWatches().some((w) => w.symbol === symbol);
+  }
+
+  // Run on home/T+ refresh — check triggers met → notify
+  async function checkTplusTriggers() {
+    const watches = loadTplusWatches();
+    if (!watches.length) return;
+
+    // Prune notified > 7 ngày
+    const now = Date.now();
+    const fresh = watches.filter((w) => !w.notified || (now - (w.notifiedAt || 0)) < TPLUS_WATCH_TTL_MS);
+    if (fresh.length !== watches.length) {
+      saveTplusWatches(fresh);
+    }
+
+    const unnotified = fresh.filter((w) => !w.notified);
+    if (!unnotified.length) return;
+
+    let changed = false;
+    for (const w of unnotified) {
+      try {
+        const data = await ANALYSIS.fetchHistory(w.symbol, "D", 50);
+        const closes = data.closes;
+        const volumes = data.volumes;
+        const n = closes.length;
+        if (n < 2) continue;
+        const cur = closes[n - 1];
+        const curVol = volumes[n - 1];
+
+        const t = w.triggers || {};
+        const reasons = [];
+        if (t.closeAbove && cur >= t.closeAbove) reasons.push(`close ${fp(cur)} ≥ ${fp(t.closeAbove)}`);
+        if (t.volAbove && curVol >= t.volAbove) reasons.push(`vol ${fmtVol(curVol)} ≥ ${fmtVol(t.volAbove)}`);
+        // Gap up: today open > previous close (proxy for "next session opened above")
+        if (t.gapAbove && data.opens && data.opens[n - 1] > t.gapAbove) {
+          reasons.push(`open ${fp(data.opens[n - 1])} > ${fp(t.gapAbove)} (gap up)`);
+        }
+
+        if (reasons.length > 0) {
+          notifyBrowser(
+            `🔔 ${w.symbol} T+ entry trigger`,
+            `${reasons.join(" · ")}. Mở app để xem plan.`,
+            "#4CAF50"
+          );
+          w.notified = true;
+          w.notifiedAt = Date.now();
+          changed = true;
+        }
+      } catch {}
+    }
+    if (changed) saveTplusWatches(fresh);
   }
 
   function notifyBrowser(title, body, color) {
@@ -3029,6 +3170,15 @@
     `;
   }
 
+  // T+ trigger check: throttle 1 lần/3 phút
+  let _lastTplusCheck = 0;
+  async function maybeCheckTplusTriggers() {
+    const now = Date.now();
+    if (now - _lastTplusCheck < 3 * 60 * 1000) return;
+    _lastTplusCheck = now;
+    checkTplusTriggers().catch(() => {});
+  }
+
   async function renderHome() {
     const container = $("home-container");
     if (!container) return;
@@ -3322,6 +3472,8 @@
       const newAlerts = RANKING.detectAlerts(data);
       updateBellBadge();
       newAlerts.forEach((a) => notifyBrowser(a.title, a.message, a.color));
+      // Check T+ trigger watches (throttled)
+      maybeCheckTplusTriggers();
     } catch (e) {
       wrap.innerHTML = `<div class="home-card-empty">Lỗi: ${e.message}</div>`;
     }
@@ -3369,11 +3521,14 @@
 
   // Render home initially + re-render when switching to home tab
   renderHome();
+  // Initial T+ trigger check on app load
+  setTimeout(() => maybeCheckTplusTriggers(), 2000);
   const originalSwitchTab = switchTab;
   // Re-render home on returning to it (data may be cached now)
   document.addEventListener("click", (e) => {
     if (e.target.matches?.('.tab-btn[data-tab="home"]')) {
       setTimeout(renderHome, 50);
+      maybeCheckTplusTriggers();
     }
   });
 

@@ -2060,6 +2060,47 @@ button {
   font-weight: 700;
 }
 
+/* T+ trigger watch button */
+.entry-trigger-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #20203a;
+}
+
+.tplus-watch-btn {
+  background: rgba(0, 210, 255, 0.1);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  color: #4dd0e1;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.tplus-watch-btn:hover {
+  background: rgba(0, 210, 255, 0.2);
+  color: #fff;
+}
+
+.tplus-watch-btn.active {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #66bb6a;
+}
+
+.tplus-watch-btn.active:hover {
+  background: rgba(76, 175, 80, 0.25);
+  color: #fff;
+}
+
 /* Position sizing line trong plan giao dịch */
 .entry-sizing {
   background: rgba(0, 210, 255, 0.06);

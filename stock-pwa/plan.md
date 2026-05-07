@@ -254,6 +254,16 @@ Chuyển Stock Analyzer từ **decision support tool dựa cảm tính** sang **
     * SL distance từ slFinal, clamp [3, 15]%
     * Output: "💰 Size khuyến nghị: X cp (~Y, max 2% NAV at risk, SL ~Z%)"
     * Show Cash + NAV ngay → user thấy số tiền cụ thể
+- ✅ **T+ trigger watch — báo notification khi entry trigger met**:
+  - localStorage `tplus_trigger_watches_v1`: array { symbol, addedAt, triggers, notified, notifiedAt }
+  - Helpers: `loadTplusWatches`, `addTplusWatch`, `removeTplusWatch`, `isTplusWatched`
+  - `checkTplusTriggers()`: fetch latest data per watched mã, compare vs trigger thresholds (close, vol, gap up)
+    - Trigger met → notifyBrowser + mark notified + auto-prune sau 7 ngày
+  - Button "🔔 Báo khi trigger met" trong T+ context card cuối triggerListHtml
+    - Click → request notification permission + add watch + confirm "✅ Đang theo dõi · Bỏ"
+    - Toggle off remove watch
+  - Periodic check throttled 3 phút/lần, trigger trên: app load (2s delay), watchlist refresh, home tab visit
+  - Notification body specific: "close X ≥ Y · vol A ≥ B"
 
 **Kết quả backtest chính:**
 - ❌ Combined scoring (analysis tab): +51% / 8 năm vs Equal-Weight 55 +249% — underperform, dùng làm risk gauge thôi
