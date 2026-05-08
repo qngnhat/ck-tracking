@@ -3390,6 +3390,16 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-weight: 600;
 }
 
+.tracker-dup-note {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  color: #FF9800;
+  font-weight: 500;
+  margin-left: 6px;
+  font-style: italic;
+}
+
 .tracker-snap {
   background: #0f0f1e;
   border: 1px solid #20203a;

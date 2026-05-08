@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v76"; // sync với sw.js CACHE name suffix
+    const appVersion = "v77"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -4925,10 +4925,25 @@
 
     const modesToRender = [activeTab];
     for (const mode of modesToRender) {
-      const arr = (tracker[mode] || []).slice().reverse();  // newest first
-      if (arr.length === 0) continue;
+      const rawArr = tracker[mode] || [];
+      if (rawArr.length === 0) continue;
+
+      // Group snapshots theo ngày (local) — multi-snap cùng ngày → keep latest
+      // (tránh duplicate render khi cron / multi-device tạo nhiều snap/day).
+      const byDate = new Map();
+      for (const s of rawArr) {
+        const dKey = new Date(s.date).toLocaleDateString("vi-VN");
+        const existing = byDate.get(dKey);
+        if (!existing || new Date(s.date) > new Date(existing.date)) {
+          byDate.set(dKey, s);
+        }
+      }
+      const arr = [...byDate.values()].sort((a, b) => new Date(b.date) - new Date(a.date));
       const modeLabel = mode === "dca" ? "📈 DCA Snapshots" : "⚡ T+ Snapshots";
-      html += `<div class="tracker-mode-block"><div class="tracker-mode-title">${modeLabel} (${arr.length})</div>`;
+      const dupNote = arr.length < rawArr.length
+        ? ` <small class="tracker-dup-note">(${rawArr.length} snapshots → ${arr.length} ngày, gộp dup)</small>`
+        : "";
+      html += `<div class="tracker-mode-block"><div class="tracker-mode-title">${modeLabel} (${arr.length} ngày)${dupNote}</div>`;
 
       for (const snap of arr) {
         const days = daysSince(snap.date);
