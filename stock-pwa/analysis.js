@@ -468,10 +468,11 @@ window.__SSI_ANALYSIS__ = (function () {
 
   // ── Main analyze function ──
   function analyze(symbol, data, extras = {}) {
-    const { highs, lows, closes, volumes } = data;
+    const { highs, lows, closes, volumes, opens } = data;
     const current = closes[closes.length - 1];
     const prevClose = closes[closes.length - 2];
     const dayChange = ((current - prevClose) / prevClose) * 100;
+    const dayOpen = opens && opens.length ? opens[opens.length - 1] : null;
 
     const rsi = calculateRSI(closes);
     const ma20 = calculateSMA(closes, 20);
@@ -756,6 +757,7 @@ window.__SSI_ANALYSIS__ = (function () {
     const result = {
       symbol,
       current,
+      dayOpen,
       dayChange,
       rsi,
       rsiSignal,

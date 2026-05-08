@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v74"; // sync với sw.js CACHE name suffix
+    const appVersion = "v75"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1391,7 +1391,207 @@
     `;
   }
 
+  // ── Live tracker mode: hiển thị status thực-tế của watch đã subscribe ──
+  // Khi user đã bấm "🔔 BÁO KHI TRIGGER MET" trước đó, lock thresholds tại
+  // thời điểm subscribe. Mỗi lần mở app sau đó, compare current data với
+  // thresholds locked → cho biết NGAY HÔM NAY nên hành động sao.
+  function getTplusWatchData(symbol) {
+    const watches = loadTplusWatches();
+    return watches.find((w) => w.symbol === symbol) || null;
+  }
+
+  function computeLiveTrackerVerdict(triggers, r, watch) {
+    const cur = r.current;
+    const curOpen = r.dayOpen;
+    const curVol = r.currentVol;
+    const dayChange = r.dayChange ?? 0;
+    const avgVol = r.avgVol;
+
+    const checks = [];
+    if (triggers.closeAbove) {
+      const met = cur >= triggers.closeAbove;
+      const pct = ((cur - triggers.closeAbove) / triggers.closeAbove) * 100;
+      checks.push({
+        kind: "closeAbove",
+        label: "Giá hiện tại ≥ ngưỡng",
+        threshold: triggers.closeAbove,
+        thresholdLabel: `${fp(triggers.closeAbove)}`,
+        currentLabel: `${fp(cur)}`,
+        met,
+        delta: `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+        hint: met ? "Giá đã vượt ngưỡng entry" : "Giá còn dưới ngưỡng",
+      });
+    }
+    if (triggers.volAbove) {
+      const met = curVol >= triggers.volAbove;
+      const pctOfTarget = (curVol / triggers.volAbove) * 100;
+      checks.push({
+        kind: "volAbove",
+        label: "Volume hôm nay ≥ ngưỡng",
+        threshold: triggers.volAbove,
+        thresholdLabel: fmtVol(triggers.volAbove),
+        currentLabel: fmtVol(curVol),
+        met,
+        delta: `${pctOfTarget.toFixed(0)}% target`,
+        hint: met ? "Lực cầu xác nhận" : `Còn cần thêm ${fmtVol(triggers.volAbove - curVol)} vol`,
+      });
+    }
+    if (triggers.gapAbove) {
+      const met = curOpen != null && curOpen > triggers.gapAbove;
+      checks.push({
+        kind: "gapAbove",
+        label: "Phiên mở cửa > ngưỡng",
+        threshold: triggers.gapAbove,
+        thresholdLabel: `${fp(triggers.gapAbove)}`,
+        currentLabel: curOpen != null ? `${fp(curOpen)}` : "--",
+        met,
+        delta: curOpen != null
+          ? `${((curOpen - triggers.gapAbove) / triggers.gapAbove * 100).toFixed(2)}%`
+          : "—",
+        hint: met
+          ? "Đã gap up — entry valid ATO"
+          : (curOpen != null ? "Không gap up phiên này" : "Chưa có dữ liệu open"),
+      });
+    }
+
+    const metCount = checks.filter((c) => c.met).length;
+    const totalCount = checks.length;
+
+    // Setup-fail check: rơi -3% kèm vol > 2× avg → khả năng cao reversal/distribution
+    const setupFailed = dayChange <= -3 && avgVol && curVol > avgVol * 2;
+
+    let verdict;
+    if (setupFailed) {
+      verdict = {
+        tag: "ABANDON",
+        icon: "❌",
+        color: "#ff4444",
+        bg: "rgba(255, 68, 68, 0.12)",
+        title: "Setup có thể fail — đề xuất bỏ kèo",
+        advice: `Giá rơi ${dayChange.toFixed(1)}% kèm vol cao (${(curVol / avgVol).toFixed(1)}× TB). Phân phối / reversal mạnh — tránh bắt đáy.`,
+      };
+    } else if (metCount === 0) {
+      verdict = {
+        tag: "CHỜ",
+        icon: "⏳",
+        color: "#FF9800",
+        bg: "rgba(255, 152, 0, 0.10)",
+        title: `0/${totalCount} trigger met — chờ tiếp`,
+        advice: dayChange < -1
+          ? "Giá đang yếu — chờ thêm nến rút chân hoặc end-of-day re-evaluate."
+          : "Chưa có confluence rõ — giữ nguyên kế hoạch chờ trigger.",
+      };
+    } else if (metCount === 1) {
+      verdict = {
+        tag: "VÀO SIZE NHỎ",
+        icon: "🟡",
+        color: "#FFC107",
+        bg: "rgba(255, 193, 7, 0.12)",
+        title: `1/${totalCount} trigger met — vào với 50% size`,
+        advice: "Có dấu hiệu confluence nhưng chưa mạnh. Vào trước 50% size, giữ cash chờ trigger thứ 2 confirm thêm.",
+      };
+    } else if (metCount >= 2) {
+      verdict = {
+        tag: "VÀO FULL SIZE",
+        icon: "✅",
+        color: "#4CAF50",
+        bg: "rgba(76, 175, 80, 0.12)",
+        title: `${metCount}/${totalCount} trigger confirmed — strong setup`,
+        advice: metCount === totalCount
+          ? "Cả 3 trigger đều met — confluence rất mạnh. Vào full size theo plan, set SL strict."
+          : "Confluence rõ. Vào full size theo plan dưới.",
+      };
+    }
+
+    return { checks, metCount, totalCount, verdict };
+  }
+
+  function renderLiveTrackerCard(pick, rank, r, watch) {
+    const triggers = watch.triggers || {};
+    const { checks, verdict } = computeLiveTrackerVerdict(triggers, r, watch);
+    const subscribedAgo = watch.addedAt
+      ? Math.max(0, Math.floor((Date.now() - watch.addedAt) / (24 * 3600 * 1000)))
+      : null;
+    const subscribedLabel = subscribedAgo == null
+      ? ""
+      : subscribedAgo === 0
+      ? "subscribe hôm nay"
+      : `subscribe ${subscribedAgo} ngày trước`;
+
+    const cur = r.current;
+    const symbol = watch.symbol;
+
+    const checksHtml = checks.map((c) => {
+      const cls = c.met ? "lt-check-met" : "lt-check-pending";
+      const icon = c.met ? "✅" : "⏳";
+      return `
+        <div class="lt-check-row ${cls}">
+          <div class="lt-check-head">
+            <span class="lt-check-icon">${icon}</span>
+            <span class="lt-check-label">${c.label}</span>
+            <span class="lt-check-delta">${c.delta}</span>
+          </div>
+          <div class="lt-check-body">
+            <span class="lt-check-current">Hiện tại: <b>${c.currentLabel}</b></span>
+            <span class="lt-check-vs">vs</span>
+            <span class="lt-check-threshold">Ngưỡng: <b>${c.thresholdLabel}</b></span>
+          </div>
+          <div class="lt-check-hint">${c.hint}</div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="an-card context-card context-tplus lt-card">
+        <div class="context-header">
+          <span class="context-icon">🔔</span>
+          <div>
+            <div class="context-title">Đang theo dõi ${symbol} ${rank ? `· #${rank}` : ""}</div>
+            <div class="context-subtitle">${subscribedLabel} · giá lúc đó ${cur ? fp(cur) : "?"}</div>
+          </div>
+        </div>
+
+        <!-- Today action verdict (BIG) -->
+        <div class="lt-verdict" style="background:${verdict.bg}; border-left: 4px solid ${verdict.color}">
+          <div class="lt-verdict-tag" style="color:${verdict.color}">${verdict.icon} ${verdict.tag}</div>
+          <div class="lt-verdict-title">${verdict.title}</div>
+          <div class="lt-verdict-advice">${verdict.advice}</div>
+        </div>
+
+        <!-- Triggers status -->
+        <div class="context-section">
+          <div class="context-section-title">📊 Trạng thái triggers (locked từ Day 1)</div>
+          <div class="lt-checks">${checksHtml}</div>
+        </div>
+
+        <!-- Action -->
+        <div class="lt-actions">
+          <button class="tplus-watch-btn active" data-symbol="${symbol}" data-close-trigger="${triggers.closeAbove || ''}" data-vol-trigger="${triggers.volAbove || ''}" data-gap-trigger="${triggers.gapAbove || ''}">
+            ✅ ĐANG THEO DÕI · BỎ
+          </button>
+          <small class="lt-actions-hint">Bỏ theo dõi để reset triggers theo giá mới khi mày subscribe lại.</small>
+        </div>
+
+        <div class="context-disclaimer">
+          ⚠️ Verdict dựa trên data realtime VS thresholds locked. Cron 15 phút check + báo Telegram khi 1 trong 3 trigger met.
+          Nếu setup fail (giá rơi -3%+ kèm vol cao) → bỏ kèo, không bắt đáy.
+        </div>
+      </div>
+    `;
+  }
+
   function renderTplusContextCard(pick, rank, r) {
+    // Live tracker mode: nếu user đã subscribe (lock thresholds) → show live status
+    // thay vì show plan mới. Plan mới chỉ relevant khi chưa subscribe.
+    const symbol = pick?.symbol || r?.symbol;
+    const watch = symbol ? getTplusWatchData(symbol) : null;
+    if (watch && watch.triggers) {
+      return renderLiveTrackerCard(pick, rank, r, watch);
+    }
+    return renderTplusContextCardPlan(pick, rank, r);
+  }
+
+  function renderTplusContextCardPlan(pick, rank, r) {
     const allReasons = pick.reasons || [];
     // Filter ra reasons đã được hiển thị qua chip — tránh duplicate (ChatGPT đề xuất)
     const chipKeywords = ["Vol thấp", "Cách MA50", "ADX", "TKL phiên này"];
