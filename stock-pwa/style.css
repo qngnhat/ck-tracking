@@ -2046,6 +2046,89 @@ body.is-offline {
   font-style: italic;
 }
 
+.lt-history {
+  margin: 14px 0 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lt-history-fired {
+  background: rgba(0, 210, 255, 0.06);
+  border: 1px solid rgba(0, 210, 255, 0.2);
+  color: #cdd;
+}
+
+.lt-history-clean {
+  background: rgba(120, 120, 140, 0.06);
+  border: 1px solid rgba(120, 120, 140, 0.2);
+  color: #888;
+  font-style: italic;
+}
+
+.lt-history-title {
+  color: #00d2ff;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.lt-history-list {
+  margin: 4px 0;
+  padding-left: 18px;
+  list-style: disc;
+  color: #cdd;
+}
+
+.lt-history-list li {
+  margin: 2px 0;
+}
+
+.lt-history-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #FF9800;
+  font-style: italic;
+}
+
+/* Collapsed plan card khi đang ở Live Tracker mode — show as details/summary */
+details.ctx-plan-collapsed {
+  cursor: pointer;
+}
+
+details.ctx-plan-collapsed > .ctx-plan-summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aab;
+  list-style: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  margin: -14px -16px 14px;
+}
+
+details.ctx-plan-collapsed[open] > .ctx-plan-summary {
+  color: #00d2ff;
+  border-bottom: 1px solid rgba(0, 210, 255, 0.2);
+  border-radius: 8px 8px 0 0;
+  margin-bottom: 14px;
+}
+
+details.ctx-plan-collapsed > .ctx-plan-summary::-webkit-details-marker {
+  display: none;
+}
+
+details.ctx-plan-collapsed > .ctx-plan-summary::after {
+  content: " ▼";
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
+  content: " ▲";
+}
+
 .lt-actions {
   margin-top: 14px;
 }

@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v75"; // sync với sw.js CACHE name suffix
+    const appVersion = "v76"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1400,6 +1400,42 @@
     return watches.find((w) => w.symbol === symbol) || null;
   }
 
+  // Walk historical bars từ subscribe date → tìm các ngày met trigger
+  // Phòng case: hôm trước trigger met (cron đã/chưa fire), nhưng user reset
+  // watch hôm nay → mất context. Giờ vẫn hiển thị "đã có X lần met".
+  function computeTriggerHistory(triggers, history, addedAt) {
+    if (!history?.times || !history?.closes) return { events: [], totalDays: 0 };
+    const events = [];
+    let totalDays = 0;
+    const minTs = Math.floor(addedAt / 1000);
+    for (let i = 0; i < history.times.length; i++) {
+      const ts = history.times[i];
+      if (ts < minTs) continue;
+      // Skip today (current bar) — already shown trong verdict trên
+      const isToday = i === history.times.length - 1;
+      if (isToday) continue;
+
+      totalDays++;
+      const close = history.closes[i];
+      const vol = history.volumes?.[i];
+      const open = history.opens?.[i];
+      const dayMet = [];
+      if (triggers.closeAbove && close >= triggers.closeAbove) {
+        dayMet.push({ kind: "close", label: `close ${fp(close)} ≥ ${fp(triggers.closeAbove)}` });
+      }
+      if (triggers.volAbove && vol >= triggers.volAbove) {
+        dayMet.push({ kind: "vol", label: `vol ${fmtVol(vol)} ≥ ${fmtVol(triggers.volAbove)}` });
+      }
+      if (triggers.gapAbove && open != null && open > triggers.gapAbove) {
+        dayMet.push({ kind: "gap", label: `open ${fp(open)} > ${fp(triggers.gapAbove)} (gap)` });
+      }
+      if (dayMet.length > 0) {
+        events.push({ ts, date: new Date(ts * 1000), met: dayMet });
+      }
+    }
+    return { events, totalDays };
+  }
+
   function computeLiveTrackerVerdict(triggers, r, watch) {
     const cur = r.current;
     const curOpen = r.dayOpen;
@@ -1518,6 +1554,27 @@
       ? "subscribe hôm nay"
       : `subscribe ${subscribedAgo} ngày trước`;
 
+    // Historical events: check past bars từ addedAt → coi đã met chưa
+    const history = currentData; // raw OHLCV từ analyzeSymbol
+    const { events, totalDays } = computeTriggerHistory(triggers, history, watch.addedAt || Date.now());
+    const eventsHtml = events.length > 0
+      ? `
+        <div class="lt-history lt-history-fired">
+          <div class="lt-history-title">🎯 Đã met trigger <b>${events.length} ngày</b> trong lịch sử (${totalDays} phiên qua từ Day 1)</div>
+          <ul class="lt-history-list">
+            ${events.slice(-5).reverse().map((e) => {
+              const dateStr = e.date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+              const reasonsTxt = e.met.map((m) => m.label).join(" · ");
+              return `<li><b>${dateStr}</b>: ${reasonsTxt}</li>`;
+            }).join("")}
+          </ul>
+          <div class="lt-history-hint">⚠️ Nếu mày từng reset trigger sau khi nó met, có thể đã missed notification. Cron worker chỉ fire 1 lần per watch.</div>
+        </div>
+      `
+      : totalDays > 0
+      ? `<div class="lt-history lt-history-clean">📜 ${totalDays} phiên qua từ Day 1 — chưa lần nào met trigger.</div>`
+      : "";
+
     const cur = r.current;
     const symbol = watch.symbol;
 
@@ -1560,9 +1617,11 @@
 
         <!-- Triggers status -->
         <div class="context-section">
-          <div class="context-section-title">📊 Trạng thái triggers (locked từ Day 1)</div>
+          <div class="context-section-title">📊 Trạng thái triggers HÔM NAY (locked từ Day 1)</div>
           <div class="lt-checks">${checksHtml}</div>
         </div>
+
+        ${eventsHtml}
 
         <!-- Action -->
         <div class="lt-actions">
@@ -1581,17 +1640,19 @@
   }
 
   function renderTplusContextCard(pick, rank, r) {
-    // Live tracker mode: nếu user đã subscribe (lock thresholds) → show live status
-    // thay vì show plan mới. Plan mới chỉ relevant khi chưa subscribe.
+    // Khi user đã subscribe (lock thresholds): render Live Tracker LÊN TRÊN +
+    // giữ nguyên plan analysis chi tiết phía dưới (collapsible) — không xóa
+    // mất thông tin phân tích.
     const symbol = pick?.symbol || r?.symbol;
     const watch = symbol ? getTplusWatchData(symbol) : null;
     if (watch && watch.triggers) {
-      return renderLiveTrackerCard(pick, rank, r, watch);
+      return renderLiveTrackerCard(pick, rank, r, watch) + renderTplusContextCardPlan(pick, rank, r, { collapsed: true });
     }
     return renderTplusContextCardPlan(pick, rank, r);
   }
 
-  function renderTplusContextCardPlan(pick, rank, r) {
+  function renderTplusContextCardPlan(pick, rank, r, opts = {}) {
+    const planCollapsed = opts.collapsed === true;
     const allReasons = pick.reasons || [];
     // Filter ra reasons đã được hiển thị qua chip — tránh duplicate (ChatGPT đề xuất)
     const chipKeywords = ["Vol thấp", "Cách MA50", "ADX", "TKL phiên này"];
@@ -1793,8 +1854,13 @@
       `;
     }
 
+    const cardOpenTag = planCollapsed
+      ? `<details class="an-card context-card context-tplus ctx-plan-collapsed"><summary class="ctx-plan-summary">📋 Plan giao dịch & phân tích chi tiết (collapsed — bấm để mở)</summary>`
+      : `<div class="an-card context-card context-tplus">`;
+    const cardCloseTag = planCollapsed ? `</details>` : `</div>`;
+
     return `
-      <div class="an-card context-card context-tplus">
+      ${cardOpenTag}
         <!-- BIG action banner -->
         <div class="ctx-action-banner" style="border-color:${bannerColor};background:${bannerColor}14">
           <div class="ctx-action-label" style="color:${bannerColor}">${actionLabel}</div>
@@ -1875,7 +1941,7 @@
         <div class="context-disclaimer">
           ⚠️ Mean-reversion có thể fail nếu thị trường tiếp tục giảm. Backtest 2023-2026: score≥4 win rate <b>61%</b>, avg <b>+3.3%/lệnh</b> — 4/10 lệnh thua, tuân thủ SL.
         </div>
-      </div>
+      ${cardCloseTag}
     `;
   }
 
@@ -2103,17 +2169,18 @@
 
   // Bind T+ trigger watch button (after analyze render with T+ context)
   function bindTplusWatchBtn() {
-    const btn = document.querySelector(".tplus-watch-btn");
-    if (!btn) return;
+    // Có thể có nhiều watch button (live tracker + plan card khi watched).
+    // Bind tất cả → toggle nào cũng work + sync UI cả 2.
+    const btns = document.querySelectorAll(".tplus-watch-btn");
+    btns.forEach((btn) => {
     btn.addEventListener("click", async () => {
       const symbol = btn.dataset.symbol;
       if (!symbol) return;
       if (isTplusWatched(symbol)) {
-        // Toggle off
+        // Toggle off → re-render để switch khỏi live tracker mode
         await removeTplusWatch(symbol);
-        btn.classList.remove("active");
-        btn.textContent = "🔔 BÁO KHI TRIGGER MET";
-        btn.title = "Bật notification khi trigger met";
+        if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
+        return;
       } else {
         // Request notification permission first
         if ("Notification" in window && Notification.permission === "default") {
@@ -2126,18 +2193,18 @@
             gapAbove: parseFloat(btn.dataset.gapTrigger) || null,
           };
           await addTplusWatch(symbol, triggers);
-          btn.classList.add("active");
-          btn.textContent = "✅ ĐANG THEO DÕI · BỎ";
-          btn.title = "Đang theo dõi — bấm để bỏ";
           const auth = window.__SSI_AUTH__;
           const tip = auth?.isLoggedIn?.()
             ? "Đã sync Supabase — sẽ báo qua Telegram nếu đã kết nối."
             : "Browser-only. Đăng nhập + kết nối Telegram để nhận push khi đóng app.";
           notifyBrowser(`Đã bật theo dõi ${symbol}`, tip, "#4CAF50");
+          // Re-render để switch sang live tracker mode
+          if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
         } else {
           alert("Cần cấp quyền notification để theo dõi trigger. Vào cài đặt browser bật notification cho trang này.");
         }
       }
+    });
     });
   }
 
