@@ -3450,6 +3450,167 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   letter-spacing: 0.3px;
 }
 
+/* ── Aggregate badges per snapshot ── */
+.tracker-snap-aggbadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  background: rgba(0, 210, 255, 0.04);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #cdd;
+  font-weight: 600;
+}
+
+/* ── Rich pick row (with stats: entry, current, return, status) ── */
+.tracker-snap-picks-rich {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tracker-pick-row {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tracker-pick-row > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.tracker-pick-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tracker-pick-row > summary::after {
+  content: "▾";
+  font-size: 10px;
+  color: #555;
+  margin-left: auto;
+}
+
+.tracker-pick-row[open] > summary::after {
+  content: "▴";
+}
+
+.tracker-pick-row[open] > summary {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 210, 255, 0.04);
+}
+
+.pick-sym {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  letter-spacing: 0.3px;
+  min-width: 48px;
+}
+
+.pick-prices {
+  font-size: 11px;
+  color: #aab;
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-ret {
+  font-weight: 700;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-days {
+  font-size: 11px;
+  color: #777;
+}
+
+.pick-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+}
+
+.pick-status.stat-tp1 { background: rgba(76, 175, 80, 0.15); color: #4CAF50; }
+.pick-status.stat-tp2 { background: rgba(76, 175, 80, 0.25); color: #4CAF50; }
+.pick-status.stat-sl  { background: rgba(255, 68, 68, 0.15); color: #ff7777; }
+.pick-status.stat-exp { background: rgba(255, 152, 0, 0.12); color: #FF9800; }
+.pick-status.stat-hold{ background: rgba(120, 120, 140, 0.10); color: #aab; }
+
+.tracker-pick-detail {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #aab;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.pick-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.pick-detail-cell {
+  color: #999;
+}
+
+.pick-detail-cell b {
+  color: #fff;
+}
+
+.pick-sector-chip {
+  font-size: 10px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.pick-score-chip {
+  font-size: 10px;
+  color: #00d2ff;
+  background: rgba(0, 210, 255, 0.08);
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.pick-reasons {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pick-reason-chip {
+  font-size: 10px;
+  color: #aab;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 7px;
+  border-radius: 3px;
+  border-left: 2px solid rgba(0, 210, 255, 0.3);
+}
+
+.pick-noinfo-txt {
+  color: #666;
+  font-style: italic;
+  font-size: 11px;
+}
+
 /* ════════════════════════════════════════
    DESKTOP RESPONSIVE (>= 900px)
    ════════════════════════════════════════ */

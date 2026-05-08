@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v77"; // sync với sw.js CACHE name suffix
+    const appVersion = "v78"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -4722,7 +4722,7 @@
     const content = $("tracker-content");
     btn.disabled = true;
     btn.textContent = "Đang tải...";
-    content.innerHTML = `<div class="loading"><div class="spinner"></div><div>Fetch giá hiện tại...</div></div>`;
+    content.innerHTML = `<div class="loading"><div class="spinner"></div><div>Fetch lịch sử giá để tính stats...</div></div>`;
 
     try {
       const tracker = RANKING.loadTracker();
@@ -4732,9 +4732,16 @@
           for (const p of s.picks) allSyms.add(p.symbol);
         }
       }
-      const prices = await RANKING.fetchCurrentPrices([...allSyms]);
-      lastTrackerData = { tracker, prices };
-      renderTrackerContent(tracker, prices);
+      // Fetch 90 ngày OHLC để compute peak/MDD/TP/SL outcome
+      const histories = await RANKING.fetchPicksHistory([...allSyms], 90);
+      const prices = {};
+      for (const sym in histories) {
+        const h = histories[sym];
+        if (h?.closes?.length) prices[sym] = h.closes[h.closes.length - 1];
+        else prices[sym] = null;
+      }
+      lastTrackerData = { tracker, prices, histories };
+      renderTrackerContent(tracker, prices, histories);
     } catch (e) {
       content.innerHTML = `
         <div class="error">
@@ -4748,6 +4755,120 @@
       btn.disabled = false;
       btn.textContent = "Cập nhật giá hiện tại";
     }
+  }
+
+  // ── Per-pick stats: walk OHLC từ snap.date → compute peak/MDD/outcome ──
+  // T+ TP/SL: TP1 +3%, TP2 +10%, SL -3% (configurable, có thể tune sau)
+  // DCA: hold dài hơn, không hard TP/SL — chỉ track cur ret + peak/MDD.
+  function computePickStats(pick, snapDate, history, mode) {
+    if (!history || !history.closes?.length || !pick.entryPrice) return null;
+    const snapTs = Math.floor(new Date(snapDate).getTime() / 1000);
+    const startIdx = history.times.findIndex((t) => t >= snapTs);
+    if (startIdx < 0) return null;
+
+    const entry = pick.entryPrice;
+    const tp1Px = entry * 1.03;
+    const tp2Px = entry * 1.10;
+    const slPx  = entry * 0.97;
+
+    let peakRet = 0, peakDay = 0, mddRet = 0, mddDay = 0;
+    let outcome = null; // {kind, day}
+
+    for (let i = startIdx; i < history.closes.length; i++) {
+      const day = i - startIdx;
+      const close = history.closes[i];
+      const high  = history.highs?.[i] ?? close;
+      const low   = history.lows?.[i]  ?? close;
+
+      const closeRet = (close - entry) / entry;
+      if (closeRet > peakRet) { peakRet = closeRet; peakDay = day; }
+      if (closeRet < mddRet)  { mddRet  = closeRet; mddDay  = day; }
+
+      // Outcome detection (only T+ — DCA không hard SL/TP)
+      if (mode === "tplus" && !outcome) {
+        if (low <= slPx) outcome = { kind: "sl", day };
+        else if (high >= tp2Px) outcome = { kind: "tp2", day };
+        else if (high >= tp1Px) outcome = { kind: "tp1", day };
+      }
+    }
+
+    const lastIdx = history.closes.length - 1;
+    const curPrice = history.closes[lastIdx];
+    const curRet = (curPrice - entry) / entry;
+    const daysHeld = lastIdx - startIdx;
+
+    // Status badge: outcome hoặc "expired" (T+ > 10 ngày không hit) hoặc "holding"
+    let status;
+    if (outcome) {
+      status = outcome;
+    } else if (mode === "tplus" && daysHeld > 10) {
+      status = { kind: "expired", day: daysHeld };
+    } else {
+      status = { kind: "holding", day: daysHeld };
+    }
+
+    return { entry, curPrice, curRet, daysHeld, peakRet, peakDay, mddRet, mddDay, status };
+  }
+
+  function renderPickRow(r, mode) {
+    const p = r.pick;
+    const stats = r.stats;
+    const sectorChip = p.sector ? `<span class="pick-sector-chip">${sectorLabel(p.sector)}</span>` : "";
+    const scoreChip = p.score != null ? `<span class="pick-score-chip">${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</span>` : "";
+
+    if (!stats) {
+      return `
+        <details class="tracker-pick-row tracker-pick-noinfo">
+          <summary>
+            <span class="pick-sym">${p.symbol}</span>
+            <span class="pick-noinfo-txt">— không đủ data</span>
+            ${sectorChip}${scoreChip}
+          </summary>
+        </details>
+      `;
+    }
+
+    const retCls = stats.curRet >= 0 ? "up" : "down";
+    const retSign = stats.curRet >= 0 ? "+" : "";
+    const peakCls = stats.peakRet >= 0 ? "up" : "down";
+    const peakSign = stats.peakRet >= 0 ? "+" : "";
+    const mddSign = stats.mddRet >= 0 ? "+" : "";
+    const reasonsHtml = (p.reasons && p.reasons.length)
+      ? `<div class="pick-reasons">${p.reasons.slice(0, 4).map((rr) => `<span class="pick-reason-chip">${rr}</span>`).join("")}</div>`
+      : "";
+
+    return `
+      <details class="tracker-pick-row">
+        <summary>
+          <span class="pick-sym">${p.symbol}</span>
+          <span class="pick-prices">${fp(stats.entry)} → ${fp(stats.curPrice)}</span>
+          <span class="pick-ret pct ${retCls}">${retSign}${(stats.curRet * 100).toFixed(2)}%</span>
+          <span class="pick-days">[${stats.daysHeld}d]</span>
+          ${statusBadge(stats.status)}
+        </summary>
+        <div class="tracker-pick-detail">
+          <div class="pick-detail-row">
+            ${sectorChip}${scoreChip}
+            <span class="pick-detail-cell">Peak: <b class="${peakCls}">${peakSign}${(stats.peakRet * 100).toFixed(1)}%</b> (day ${stats.peakDay})</span>
+            <span class="pick-detail-cell">MDD: <b class="down">${mddSign}${(stats.mddRet * 100).toFixed(1)}%</b> (day ${stats.mddDay})</span>
+          </div>
+          ${reasonsHtml}
+        </div>
+      </details>
+    `;
+  }
+
+  function statusBadge(status) {
+    if (!status) return "";
+    const map = {
+      tp1: { icon: "🎯", txt: "TP1", cls: "stat-tp1" },
+      tp2: { icon: "🎯🎯", txt: "TP2", cls: "stat-tp2" },
+      sl:  { icon: "🚨", txt: "SL", cls: "stat-sl" },
+      expired: { icon: "⏰", txt: "Hết hold", cls: "stat-exp" },
+      holding: { icon: "⏳", txt: "Holding", cls: "stat-hold" },
+    };
+    const m = map[status.kind] || { icon: "?", txt: status.kind, cls: "" };
+    return `<span class="pick-status ${m.cls}" title="day ${status.day}">${m.icon} ${m.txt}${status.day != null ? ` ${status.day}d` : ""}</span>`;
   }
 
   // ── T+ accuracy aggregator: tổng hợp tất cả picks T+ all-time ──
@@ -4912,7 +5033,7 @@
     `;
   }
 
-  function renderTrackerContent(tracker, prices) {
+  function renderTrackerContent(tracker, prices, histories) {
     const content = $("tracker-content");
     let html = "";
     const activeTab = getTrackerTab();
@@ -4947,20 +5068,38 @@
 
       for (const snap of arr) {
         const days = daysSince(snap.date);
-        // Compute returns
+        // Compute per-pick stats với historical OHLC
         const rows = snap.picks.map((p) => {
-          const cur = prices[p.symbol];
-          if (cur == null || !p.entryPrice) {
-            return { symbol: p.symbol, ret: null, cur, entry: p.entryPrice };
+          const stats = histories
+            ? computePickStats(p, snap.date, histories[p.symbol], mode)
+            : null;
+          if (!stats) {
+            return { pick: p, ret: null, stats: null };
           }
-          const ret = (cur - p.entryPrice) / p.entryPrice;
-          return { symbol: p.symbol, ret, cur, entry: p.entryPrice };
+          return { pick: p, ret: stats.curRet, stats };
         });
         const validRows = rows.filter((r) => r.ret !== null);
         const avgRet = validRows.length
           ? validRows.reduce((a, b) => a + b.ret, 0) / validRows.length
           : null;
         const winCount = validRows.filter((r) => r.ret > 0).length;
+
+        // Aggregate stats per snapshot (chỉ T+ có TP/SL)
+        let aggBadges = "";
+        if (mode === "tplus" && validRows.length > 0) {
+          const counts = { tp1: 0, tp2: 0, sl: 0, expired: 0, holding: 0 };
+          for (const r of validRows) {
+            const k = r.stats?.status?.kind;
+            if (k && counts[k] != null) counts[k]++;
+          }
+          const parts = [];
+          if (counts.tp2) parts.push(`🎯🎯 ${counts.tp2}`);
+          if (counts.tp1) parts.push(`🎯 ${counts.tp1}`);
+          if (counts.sl)  parts.push(`🚨 ${counts.sl}`);
+          if (counts.expired) parts.push(`⏰ ${counts.expired}`);
+          if (counts.holding) parts.push(`⏳ ${counts.holding}`);
+          if (parts.length) aggBadges = `<div class="tracker-snap-aggbadges">${parts.join(" · ")}</div>`;
+        }
 
         const aggClass = avgRet == null ? "" : avgRet >= 0 ? "up" : "down";
         const aggSign = avgRet == null || avgRet < 0 ? "" : "+";
@@ -4974,15 +5113,9 @@
                 ? `<span class="tracker-snap-agg pct ${aggClass}">TB ${aggSign}${(avgRet * 100).toFixed(2)}% · ${winCount}/${validRows.length}</span>`
                 : `<span class="tracker-snap-agg">--</span>`}
             </div>
-            <div class="tracker-snap-picks">
-              ${rows.map((r) => {
-                if (r.ret == null) {
-                  return `<span class="tracker-pick"><b>${r.symbol}</b> --</span>`;
-                }
-                const cls = r.ret >= 0 ? "up" : "down";
-                const sign = r.ret >= 0 ? "+" : "";
-                return `<span class="tracker-pick"><b>${r.symbol}</b> <span class="pct ${cls}">${sign}${(r.ret * 100).toFixed(1)}%</span></span>`;
-              }).join("")}
+            ${aggBadges}
+            <div class="tracker-snap-picks-rich">
+              ${rows.map((r) => renderPickRow(r, mode)).join("")}
             </div>
           </div>
         `;
@@ -5027,7 +5160,7 @@
     if (mode === getTrackerTab()) return;
     setTrackerTab(mode);
     if (lastTrackerData) {
-      renderTrackerContent(lastTrackerData.tracker, lastTrackerData.prices);
+      renderTrackerContent(lastTrackerData.tracker, lastTrackerData.prices, lastTrackerData.histories);
     } else {
       refreshTracker();
     }

@@ -1781,6 +1781,27 @@ window.__SSI_RANKING__ = (function () {
     return result;
   }
 
+  // Fetch lịch sử đầy đủ (OHLC + times) cho mỗi mã — phục vụ tracker tính
+  // peak return, max drawdown, TP/SL outcome detection cho từng pick.
+  // days mặc định 90 đủ cover snap T+ (max 10 phiên hold) + DCA (rebalance ~30d).
+  async function fetchPicksHistory(symbols, days = 90) {
+    const result = {};
+    const batchSize = 10;
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (sym) => {
+          try {
+            result[sym] = await ANALYSIS.fetchHistory(sym, "D", days);
+          } catch {
+            result[sym] = null;
+          }
+        })
+      );
+    }
+    return result;
+  }
+
   return {
     UNIVERSE,
     FACTOR_NAMES,
@@ -1795,6 +1816,7 @@ window.__SSI_RANKING__ = (function () {
     takeSnapshot,
     clearTracker,
     fetchCurrentPrices,
+    fetchPicksHistory,
     // Watchlist
     loadWatchlist,
     isInWatchlist,
