@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v81"; // sync với sw.js CACHE name suffix
+    const appVersion = "v82"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1353,7 +1353,7 @@
       desc: "Không vào. Chờ tín hiệu đảo chiều rõ." };
 
     const hardFlags = [flags?.bearTrap, flags?.lowSessionLiq, flags?.sellPressure].filter(Boolean).length;
-    const softFlags = [flags?.lowVol, flags?.deepDowntrend].filter(Boolean).length;
+    const softFlags = [flags?.lowVol, flags?.deepDowntrend, flags?.weeklyDowntrend].filter(Boolean).length;
 
     // Score ≥4 nhưng có hard flag HOẶC ≥2 soft flag → downgrade về Watchlist
     const downgradeBuy = score >= 4 && (hardFlags >= 1 || softFlags >= 2);
@@ -1402,11 +1402,15 @@
   function renderRiskChips(flags) {
     if (!flags) return "";
     const chips = [];
+    // Positive signals first (xanh)
+    if (flags.bullishDivergence) chips.push({ label: "📈 Bullish divergence", color: "#4CAF50" });
+    // Negative signals (đỏ/cam)
     if (flags.bearTrap) chips.push({ label: "⚠️ Bắt dao rơi", color: "#ff5722" });
     if (flags.sellPressure) chips.push({ label: "📉 Lực bán mạnh — vol cao + giá giảm", color: "#ff5722" });
     // Volume severity: critical (< 0.4×) ưu tiên hơn low (< 0.8×). Render 1 chip duy nhất.
     if (flags.volCritical) chips.push({ label: "🚨 Vol cực thấp — khó có lực hồi", color: "#ff5722" });
     else if (flags.lowVol) chips.push({ label: "Vol thấp — thiếu xác nhận", color: "#ff9800" });
+    if (flags.weeklyDowntrend) chips.push({ label: "📅 Weekly RSI<50 — trung hạn yếu", color: "#ff9800" });
     if (flags.deepDowntrend) chips.push({ label: "Downtrend mạnh", color: "#ff9800" });
     if (flags.lowSessionLiq) chips.push({ label: "🐢 Kẹt hàng — vào dễ ra khó", color: "#ff9800" });
     if (chips.length === 0) return "";

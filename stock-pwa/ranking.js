@@ -423,6 +423,61 @@ window.__SSI_RANKING__ = (function () {
       reasons.push("Cách MA50 -12% — downtrend chưa hết");
     }
 
+    // 11. Multi-timeframe weekly RSI filter
+    // Build weekly bars by sampling every 5 daily bars (proxy weekly).
+    // Weekly RSI < 50 = downtrend mạnh hơn daily — risk knife catching.
+    // Phòng case: daily oversold nhưng weekly đang rơi liên tục.
+    let weeklyRsi = null;
+    let weeklyDowntrend = false;
+    if (n >= 75) {
+      const weeklyCloses = [];
+      // Sample every 5 daily bars going backwards from latest
+      for (let i = n - 1; i >= 0; i -= 5) weeklyCloses.unshift(closes[i]);
+      if (weeklyCloses.length >= 15) {
+        weeklyRsi = calcRsi(weeklyCloses, 14);
+        if (weeklyRsi !== null && weeklyRsi < 50) {
+          weeklyDowntrend = true;
+          score -= 1;
+          reasons.push(`Weekly RSI ${weeklyRsi.toFixed(0)}<50 — downtrend trung hạn`);
+        } else if (weeklyRsi !== null && weeklyRsi > 60) {
+          score += 0.5;
+          reasons.push(`Weekly RSI ${weeklyRsi.toFixed(0)}>60 — trend trung hạn OK`);
+        }
+      }
+    }
+
+    // 12. Bullish divergence: giá lower-low, RSI higher-low → reversal signal
+    // Tìm 2 swing low gần nhất trong 30 phiên qua, so sánh RSI tại đó.
+    let bullishDivergence = false;
+    if (n >= 40) {
+      // RSI series for divergence comparison
+      const rsiSeries = [];
+      for (let i = 14; i < n; i++) {
+        rsiSeries[i] = calcRsi(closes.slice(0, i + 1), 14);
+      }
+      // Find swing lows in last 30 bars (pivot: low lower than 3 left + 3 right neighbors)
+      const swingLows = [];
+      const lookback = Math.min(30, n - 4);
+      for (let i = n - lookback; i < n - 3; i++) {
+        if (i < 17) continue;
+        const isPivot = closes[i] < closes[i - 1] && closes[i] < closes[i - 2] && closes[i] < closes[i - 3]
+                     && closes[i] < closes[i + 1] && closes[i] < closes[i + 2] && closes[i] < closes[i + 3];
+        if (isPivot && rsiSeries[i] != null) {
+          swingLows.push({ idx: i, close: closes[i], rsi: rsiSeries[i] });
+        }
+      }
+      // Check last 2 swing lows for bullish divergence
+      if (swingLows.length >= 2) {
+        const last = swingLows[swingLows.length - 1];
+        const prev = swingLows[swingLows.length - 2];
+        if (last.close < prev.close && last.rsi > prev.rsi + 3) {
+          bullishDivergence = true;
+          score += 2;
+          reasons.push(`Bullish divergence — giá đáy thấp hơn (${last.close.toFixed(1)}<${prev.close.toFixed(1)}) nhưng RSI cao hơn (${last.rsi.toFixed(0)}>${prev.rsi.toFixed(0)})`);
+        }
+      }
+    }
+
     // ── Hard filters ──
     let avgTurnover = 0;
     const liqLookback = Math.min(20, n);
@@ -465,6 +520,9 @@ window.__SSI_RANKING__ = (function () {
       lowSessionLiq,
       // Sell pressure: vol cao + giá giảm mạnh = phân phối/xả hàng (hard flag)
       sellPressure: volRatio > 1.5 && dayChangePct < -2,
+      // Multi-timeframe + divergence flags (mới)
+      weeklyDowntrend,
+      bullishDivergence,
     };
 
     return {
@@ -474,6 +532,7 @@ window.__SSI_RANKING__ = (function () {
       currentPrice: currentClose,
       dayChange,
       rsiToday,
+      weeklyRsi,
       mfi,
       avgTurnover,
       filterIlliquid,
@@ -1183,9 +1242,29 @@ window.__SSI_RANKING__ = (function () {
       );
     }
 
-    // Filter by min score, sort by score
+    // Cool-down filter: skip mã đã rec trong 5 phiên qua (tránh re-recommend
+    // mã đang knife-catching như MCH 07/05, 08/05, 10/05 liên tục).
+    // Đọc tracker T+ snapshots từ localStorage.
+    const coolDownSymbols = new Set();
+    try {
+      const tracker = JSON.parse(localStorage.getItem("paper_tracker_v1") || '{"tplus":[]}');
+      const cutoff = Date.now() - 5 * 24 * 3600 * 1000;
+      for (const snap of (tracker.tplus || [])) {
+        if (new Date(snap.date).getTime() < cutoff) continue;
+        for (const p of (snap.picks || [])) {
+          if (p.symbol) coolDownSymbols.add(p.symbol);
+        }
+      }
+    } catch {}
+
+    // Filter by min score, sort by score, apply cool-down
     const valid = stocks
       .filter((s) => s.tplusFactors && s.tplusFactors.score >= minScore)
+      .filter((s) => {
+        if (!coolDownSymbols.has(s.symbol)) return true;
+        // Đã rec gần đây — chỉ pass nếu score cực mạnh (≥ 6.5) overriding cool-down
+        return s.tplusFactors.score >= 6.5;
+      })
       .sort((a, b) => b.tplusFactors.score - a.tplusFactors.score);
 
     const picks = valid.slice(0, topN).map((s) => ({
