@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v82"; // sync với sw.js CACHE name suffix
+    const appVersion = "v83"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -2691,6 +2691,66 @@
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
+
+  // ── Swipe gesture mobile để chuyển tab ngang ──
+  // Vuốt trái → tab kế tiếp, vuốt phải → tab trước. Skip nếu touch start
+  // trên elements cần horizontal scroll (chart, tables, modals).
+  const TAB_ORDER = ["home", "analyze", "ranking", "portfolio"];
+  const NO_SWIPE_SELECTORS = [
+    "canvas",                         // Charts (tradingview, etc.)
+    ".chart-card",                    // Chart card area
+    "#chart-container",
+    ".chart-range",                   // Range buttons inside chart
+    ".sct-table",                     // Sector comparison table (grid)
+    ".cmdp",                          // Command palette
+    ".settings-modal",                // Settings modal
+    ".sheet",                         // Bottom sheet tooltip
+    ".alert-panel.open",              // Alert panel khi mở
+    ".auth-dropdown.open",            // Auth dropdown khi mở
+    "input",                          // Input fields
+    "textarea",
+    ".tracker-pick-row[open]",        // Tracker detail mở
+    ".tracker-snap-picks-rich",       // Tracker rows
+    "[data-no-swipe]",                // Manual opt-out
+  ].join(",");
+
+  let swipeStart = null;
+  document.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { swipeStart = null; return; }
+    const t = e.touches[0];
+    // Skip nếu touch trong element cần horizontal scroll / modal
+    if (e.target.closest(NO_SWIPE_SELECTORS)) { swipeStart = null; return; }
+    swipeStart = { x: t.clientX, y: t.clientY, ts: Date.now() };
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    // Cancel if multi-finger (zoom)
+    if (e.touches.length > 1) swipeStart = null;
+  }, { passive: true });
+
+  document.addEventListener("touchend", (e) => {
+    if (!swipeStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipeStart.x;
+    const dy = t.clientY - swipeStart.y;
+    const dt = Date.now() - swipeStart.ts;
+    swipeStart = null;
+
+    // Threshold: horizontal ≥ 80px, vertical < 60px, fast (< 600ms)
+    if (Math.abs(dx) < 80) return;
+    if (Math.abs(dy) > 60) return;
+    if (dt > 600) return;
+    // Must be predominantly horizontal (dx 1.5x stronger than dy)
+    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+
+    const idx = TAB_ORDER.indexOf(currentTab);
+    if (idx < 0) return;
+    if (dx < 0 && idx < TAB_ORDER.length - 1) {
+      switchTab(TAB_ORDER[idx + 1]); // Swipe trái → next
+    } else if (dx > 0 && idx > 0) {
+      switchTab(TAB_ORDER[idx - 1]); // Swipe phải → previous
+    }
+  }, { passive: true });
 
   // ════════════════════════════════════════════════════
   // ── MARKET REGIME WIDGET ──
