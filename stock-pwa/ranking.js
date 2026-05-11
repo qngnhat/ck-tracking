@@ -655,17 +655,22 @@ window.__SSI_RANKING__ = (function () {
   }
 
   // ── Main: load + compute + rank ──
+  // opts.universe: "curated" (58 mã, default, backtest validated)
+  //              | "full"   (toàn HOSE+HNX ~700, experimental, edge chưa backtest)
   async function loadTopPicks(opts = {}) {
     const {
       topN = 15,
       sectorCap = 2,
       useCache = true,
       onProgress,
+      universe = "curated",
     } = opts;
+
+    const cacheKey = universe === "full" ? `${CACHE_KEY}_full` : CACHE_KEY;
 
     if (useCache) {
       try {
-        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
         if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
           return { ...cached.data, fromCache: true };
         }
@@ -673,7 +678,18 @@ window.__SSI_RANKING__ = (function () {
     }
 
     const startTime = Date.now();
-    const stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+    let stocks;
+    if (universe === "full") {
+      const full = await fetchFullUniverse();
+      if (!full || full.length < 100) {
+        // fallback curated nếu fetch full fail
+        stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+      } else {
+        stocks = full.map((u) => ({ symbol: u.code, sector: u.sector }));
+      }
+    } else {
+      stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
+    }
 
     // Fetch in batches of 10 to avoid overwhelming network
     const batchSize = 10;
@@ -716,7 +732,7 @@ window.__SSI_RANKING__ = (function () {
     };
 
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
+      localStorage.setItem(cacheKey, JSON.stringify({
         timestamp: Date.now(),
         data: result,
       }));

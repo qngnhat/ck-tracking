@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v79"; // sync với sw.js CACHE name suffix
+    const appVersion = "v80"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1212,30 +1212,68 @@
 
     const rankTxt = rank ? `Pick #${rank}` : "";
 
+    // Concrete action: size per pick + next rebalance date + expected outcome
+    // Allocation cố định 1/15 NAV theo backtest. NAV pull từ portfolio nếu có.
+    const TOP_N = 15;
+    const allocPct = (100 / TOP_N).toFixed(1);
+    let nav = 0, allocVnd = null;
+    try {
+      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+      let totalMarket = 0;
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache[h.symbol];
+        if (a?.current) totalMarket += h.qty * a.current * 1000;
+      }
+      nav = totalMarket + cash;
+      if (nav > 0) {
+        allocVnd = nav / TOP_N;
+      }
+    } catch {}
+
+    // Next rebalance: ngày 1 của tháng kế tiếp
+    const now = new Date();
+    const nextRebal = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const daysToRebal = Math.ceil((nextRebal - now) / (24 * 3600 * 1000));
+    const rebalLabel = nextRebal.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+    const sizeLine = allocVnd != null
+      ? `<li><b>Size khuyến nghị</b>: <b>${fmtMoney(allocVnd)}</b> (~${allocPct}% NAV ${fmtMoney(nav)}) — full size 1 lần hoặc chia 2-3 lệnh trong tuần đầu</li>`
+      : `<li><b>Size khuyến nghị</b>: <b>1/${TOP_N} NAV</b> (~${allocPct}%) — vào full size 1 lần hoặc chia 2-3 lệnh trong tuần đầu. Set portfolio cash để app tính số tiền cụ thể.</li>`;
+
     return `
       <div class="an-card context-card context-dca">
         <div class="context-header">
           <span class="context-icon">📈</span>
           <div>
             <div class="context-title">DCA ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</div>
-            <div class="context-subtitle">Khuyến nghị tích lũy dài hạn</div>
+            <div class="context-subtitle">Khuyến nghị tích lũy dài hạn · rebalance ${rebalLabel} (${daysToRebal} ngày nữa)</div>
           </div>
         </div>
+
+        <!-- BIG action banner — concrete plan -->
+        <div class="dca-action-banner">
+          <div class="dca-action-label">🎬 PLAN HÀNH ĐỘNG</div>
+          <ul class="dca-action-list">
+            ${sizeLine}
+            <li><b>Entry</b>: thị trường / quanh giá hiện tại — DCA không time market. Có thể chia 3-5 lệnh trong 1-2 tuần nếu giá đang điều chỉnh.</li>
+            <li><b>Hold</b>: tới rebalance đầu tháng kế (~${daysToRebal} ngày). KHÔNG cut khi -5/-10% — DCA accept volatility.</li>
+            <li><b>Exit trigger</b>: ngày ${rebalLabel} re-fetch DCA picks → nếu mã RỚT khỏi top ${TOP_N}, bán + mua mã mới. Nếu vẫn trong top, giữ tiếp.</li>
+            <li><b>Hard stop</b>: -25% drawdown (rare, panic crash) → cut, đợi reset. Bình thường KHÔNG SL.</li>
+          </ul>
+        </div>
+
         <div class="context-section">
           <div class="context-section-title">Tại sao mã này hợp DCA</div>
           <ul class="context-bullets">${bullets.map((b) => `<li>${b}</li>`).join("")}</ul>
         </div>
-        <div class="context-section">
-          <div class="context-section-title">Đề xuất hành động</div>
-          <ul class="context-bullets">
-            <li>Mua đều với các mã top khác — không tập trung 1 mã</li>
-            <li>Rebalance đầu tháng: bán nếu rớt khỏi top, mua mã mới vào</li>
-            <li>Sector cap đã áp dụng (max 2 mã/ngành) → đã diversify</li>
-            <li>Không cần stop loss chặt — DCA giữ lâu, chấp nhận drawdown ngắn hạn</li>
-          </ul>
+
+        <div class="dca-expect">
+          <b>Kỳ vọng</b>: Win rate ~60% (5-6/10 picks tăng tháng đó) · Avg pick ~+1.5%/30 ngày (≈ +18%/năm CAGR). Drawdown ngắn hạn -10/-15% là bình thường, KHÔNG panic cut.
         </div>
+
         <div class="context-disclaimer">
-          📊 Backtest 8 năm: chiến lược DCA Top 15 đạt CAGR <b>17.8%</b> (vs Equal-Weight 55: 16.4%, VN-Index: 7.9%).
+          📊 Backtest 8 năm: chiến lược DCA Top 15 đạt CAGR <b>17.8%</b> (vs Equal-Weight 55: 16.4%, VN-Index: 7.9%). MaxDD -40% trong 2022 bear.
         </div>
       </div>
     `;
@@ -4455,9 +4493,10 @@
   // ════════════════════════════════════════════════════
   // ── RANKING TAB ──
   // ════════════════════════════════════════════════════
+  const DCA_UNIVERSE_KEY = "ranking_dca_universe";
   let rankingState = {
     mode: "dca",  // "dca" | "tplus"
-    dca: { picks: [], topN: 10, loaded: false },
+    dca: { picks: [], topN: 10, loaded: false, universe: localStorage.getItem(DCA_UNIVERSE_KEY) || "curated" },
     tplus: { picks: [], topN: 10, loaded: false },
     loading: false,
   };
@@ -4546,12 +4585,23 @@
     banner.style.display = "block";
   }
 
+  function syncDcaUniverseToggle() {
+    const wrap = $("ranking-universe-toggle");
+    if (!wrap) return;
+    wrap.style.display = rankingState.mode === "dca" ? "block" : "none";
+    const cur = rankingState.dca.universe || "curated";
+    wrap.querySelectorAll(".uni-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.uni === cur);
+    });
+  }
+
   function switchRankingMode(mode) {
     if (mode === rankingState.mode) return;
     rankingState.mode = mode;
     document.querySelectorAll(".mode-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
+    syncDcaUniverseToggle();
 
     // Update title + disclaimer
     const title = $("ranking-title");
@@ -4628,7 +4678,7 @@
 
     try {
       const loader = mode === "dca" ? RANKING.loadTopPicks : RANKING.loadTopPicksTPlus;
-      const result = await loader({
+      const loadOpts = {
         topN: 15,
         sectorCap: 2,
         useCache: !forceFresh,
@@ -4636,7 +4686,10 @@
           const el = document.getElementById("ranking-progress");
           if (el) el.textContent = `Đang tải ${done}/${total} mã...`;
         },
-      });
+      };
+      // DCA universe option (curated 58 vs full ~700)
+      if (mode === "dca") loadOpts.universe = rankingState.dca.universe || "curated";
+      const result = await loader(loadOpts);
 
       const s = curState();
       s.picks = result.picks;
@@ -5290,9 +5343,39 @@
 
     // Allocation hint (different for DCA vs T+)
     if (mode === "dca") {
+      // Compute NAV-based size + next rebalance for aggregate plan
+      const TOP_N = s.topN;
+      let nav = 0, allocVnd = null;
+      try {
+        const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+        const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+        let totalMarket = 0;
+        for (const h of holdings) {
+          const a = portfolioAnalysisCache[h.symbol];
+          if (a?.current) totalMarket += h.qty * a.current * 1000;
+        }
+        nav = totalMarket + cash;
+        if (nav > 0) allocVnd = nav / TOP_N;
+      } catch {}
+
+      const now = new Date();
+      const nextRebal = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const daysToRebal = Math.ceil((nextRebal - now) / (24 * 3600 * 1000));
+      const rebalLabel = nextRebal.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+      const sizeRow = allocVnd != null
+        ? `<b>${fmtMoney(allocVnd)}</b>/mã (~${(100 / TOP_N).toFixed(1)}% × NAV ${fmtMoney(nav)})`
+        : `<b>NAV / ${TOP_N}</b> mỗi mã (~${(100 / TOP_N).toFixed(1)}%). Set portfolio cash để app tính tiền cụ thể.`;
+
       html += `
-        <div class="allocation-hint">
-          💡 Mua đều ${s.topN} mã trên, rebalance đầu tháng — bán mã rớt khỏi top, mua mã mới vào. Sector cap 2 mã/ngành để tránh concentrate.
+        <div class="dca-aggregate-banner">
+          <div class="dca-aggregate-title">📋 PLAN HÀNH ĐỘNG TOÀN DANH MỤC</div>
+          <ul class="dca-aggregate-list">
+            <li>📦 <b>Mua ${TOP_N} mã trên</b> · Size: ${sizeRow}</li>
+            <li>📅 <b>Rebalance ngày ${rebalLabel}</b> (${daysToRebal} ngày nữa) — bán mã rớt khỏi top, mua mã mới vào</li>
+            <li>🛡️ Sector cap đã apply (max 2 mã/ngành) — đa dạng hóa rủi ro ngành</li>
+            <li>📊 Kỳ vọng CAGR ~17.8%/năm · win rate ~60% picks tăng/tháng · MaxDD -40% trong bear regime</li>
+          </ul>
         </div>
       `;
     } else {
@@ -5372,6 +5455,26 @@
   document.querySelectorAll(".mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchRankingMode(btn.dataset.mode));
   });
+
+  // DCA universe toggle (curated 58 / full ~700)
+  document.querySelectorAll("#ranking-universe-toggle .uni-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const uni = btn.dataset.uni;
+      if (uni === rankingState.dca.universe) return;
+      if (uni === "full") {
+        if (!confirm("Full universe (~700 mã HOSE+HNX) chưa được backtest validate edge. Có thể bao gồm small/mid cap với pump/dump risk. Hard filters (MA200, thanh khoản ≥10 tỷ) vẫn áp dụng. Tiếp tục?")) return;
+      }
+      rankingState.dca.universe = uni;
+      localStorage.setItem(DCA_UNIVERSE_KEY, uni);
+      syncDcaUniverseToggle();
+      RANKING.clearCache();
+      rankingState.dca.loaded = false;
+      loadRanking(true);
+    });
+  });
+
+  // Initial sync: show toggle if start in DCA mode
+  syncDcaUniverseToggle();
 
   $("ranking-refresh").addEventListener("click", () => {
     RANKING.clearCache();

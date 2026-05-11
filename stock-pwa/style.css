@@ -1597,6 +1597,139 @@ body.is-offline {
   transform: scale(0.97);
 }
 
+/* ── DCA universe toggle (curated vs full) ── */
+.ranking-universe-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -10px 0 14px;
+  padding: 8px 10px;
+  background: rgba(0, 210, 255, 0.04);
+  border: 1px solid rgba(0, 210, 255, 0.15);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.ranking-universe-toggle .ctrl-label {
+  font-size: 11px;
+  color: #888;
+  font-weight: 600;
+}
+
+.uni-btn {
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  color: #aab;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  min-height: 32px;
+  transition: all 0.15s;
+}
+
+.uni-btn:hover {
+  background: rgba(0, 210, 255, 0.08);
+}
+
+.uni-btn.active {
+  background: #0f3460;
+  color: #00d2ff;
+  border-color: rgba(0, 210, 255, 0.4);
+}
+
+.uni-hint {
+  flex: 1 0 100%;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #888;
+  line-height: 1.4;
+}
+
+/* ── DCA aggregate plan banner (top of ranking) ── */
+.dca-aggregate-banner {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.08), rgba(0, 210, 255, 0.06));
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 10px;
+}
+
+.dca-aggregate-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4CAF50;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.dca-aggregate-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.dca-aggregate-list li {
+  font-size: 12px;
+  color: #d0e0e8;
+  line-height: 1.6;
+  padding: 3px 0;
+}
+
+.dca-aggregate-list li b {
+  color: #fff;
+}
+
+/* ── DCA action banner in context card (per-pick) ── */
+.dca-action-banner {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: rgba(76, 175, 80, 0.08);
+  border-left: 3px solid #4CAF50;
+  border-radius: 8px;
+}
+
+.dca-action-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4CAF50;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.dca-action-list {
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.dca-action-list li {
+  font-size: 12px;
+  color: #d0e0e8;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.dca-action-list li b {
+  color: #fff;
+}
+
+.dca-expect {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: rgba(0, 210, 255, 0.05);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #cdd;
+  line-height: 1.5;
+}
+
+.dca-expect b {
+  color: #00d2ff;
+}
+
 .ranking-header {
   display: flex;
   justify-content: space-between;
