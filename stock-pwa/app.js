@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v80"; // sync với sw.js CACHE name suffix
+    const appVersion = "v81"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -4811,7 +4811,10 @@
   }
 
   // ── Per-pick stats: walk OHLC từ snap.date → compute peak/MDD/outcome ──
-  // T+ TP/SL: TP1 +3%, TP2 +10%, SL -3% (configurable, có thể tune sau)
+  // T+ TP/SL match backtest spec + plan giao dịch app recommend:
+  //   SL  = -8% (worst case; real plan dùng max(-8%, 2×ATR) — đây dùng -8% fixed)
+  //   TP1 = +5% (target 1 — thường về MA20 ~5-7%)
+  //   TP2 = +12% (target 2 — kháng cự ~10-18%)
   // DCA: hold dài hơn, không hard TP/SL — chỉ track cur ret + peak/MDD.
   function computePickStats(pick, snapDate, history, mode) {
     if (!history || !history.closes?.length || !pick.entryPrice) return null;
@@ -4820,9 +4823,9 @@
     if (startIdx < 0) return null;
 
     const entry = pick.entryPrice;
-    const tp1Px = entry * 1.03;
-    const tp2Px = entry * 1.10;
-    const slPx  = entry * 0.97;
+    const tp1Px = entry * 1.05;
+    const tp2Px = entry * 1.12;
+    const slPx  = entry * 0.92;
 
     let peakRet = 0, peakDay = 0, mddRet = 0, mddDay = 0;
     let outcome = null; // {kind, day}
