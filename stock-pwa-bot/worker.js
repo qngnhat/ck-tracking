@@ -15,7 +15,7 @@
  *   POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=<WORKER_URL>/webhook
  */
 
-const VND_HISTORY_URL = "https://api-finfo.vndirect.com.vn/v4/history";
+const VND_HISTORY_URL = "https://dchart-api.vndirect.com.vn/dchart/history";
 
 export default {
   async fetch(request, env, ctx) {

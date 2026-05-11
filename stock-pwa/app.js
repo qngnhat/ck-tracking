@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v78"; // sync với sw.js CACHE name suffix
+    const appVersion = "v79"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1604,7 +1604,7 @@
           <span class="context-icon">🔔</span>
           <div>
             <div class="context-title">Đang theo dõi ${symbol} ${rank ? `· #${rank}` : ""}</div>
-            <div class="context-subtitle">${subscribedLabel} · giá lúc đó ${cur ? fp(cur) : "?"}</div>
+            <div class="context-subtitle">${subscribedLabel} · giá lúc đó ${triggers.gapAbove ? fp(triggers.gapAbove) : (cur ? fp(cur) : "?")}</div>
           </div>
         </div>
 
