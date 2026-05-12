@@ -911,7 +911,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v83"; // sync với sw.js CACHE name suffix
+    const appVersion = "v84"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -3344,6 +3344,85 @@
     return false;
   }
 
+  // Session state với countdown — phục vụ Today Briefing
+  // VN trading: 9:00-11:30 (sáng) + 13:00-14:45 (chiều), Mon-Fri
+  function getSessionInfo() {
+    const vn = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+    const day = vn.getDay();
+    const min = vn.getHours() * 60 + vn.getMinutes();
+    if (day === 0 || day === 6) {
+      return { state: "weekend", label: "Cuối tuần", icon: "🌴", color: "#888", countdown: null };
+    }
+    if (min < 540) {
+      return {
+        state: "pre", label: "Phiên sáng mở trong", icon: "🌅", color: "#FF9800",
+        countdown: 540 - min, hint: "Chuẩn bị plan ATO",
+      };
+    }
+    if (min >= 540 && min <= 690) {
+      return {
+        state: "morning", label: "Phiên sáng — còn", icon: "🟢", color: "#4CAF50",
+        countdown: 690 - min, hint: "Đang giao dịch",
+      };
+    }
+    if (min > 690 && min < 780) {
+      return {
+        state: "lunch", label: "Nghỉ trưa — phiên chiều mở trong", icon: "🍱", color: "#FF9800",
+        countdown: 780 - min,
+      };
+    }
+    if (min >= 780 && min <= 885) {
+      return {
+        state: "afternoon", label: "Phiên chiều — còn", icon: "🟢", color: "#4CAF50",
+        countdown: 885 - min, hint: "Đang giao dịch",
+      };
+    }
+    return {
+      state: "post", label: "Phiên đã đóng — chuẩn bị mai", icon: "🌙", color: "#888",
+      countdown: null,
+    };
+  }
+
+  // Active T+ watches summary: total + met count today
+  function getActiveWatchSummary() {
+    let total = 0, hasOpenWatches = 0;
+    try {
+      const raw = localStorage.getItem("tplus_trigger_watches_v1");
+      if (!raw) return { total: 0, hasOpenWatches: 0 };
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return { total: 0, hasOpenWatches: 0 };
+      total = arr.length;
+      hasOpenWatches = arr.filter((w) => !w.notified).length;
+    } catch {}
+    return { total, hasOpenWatches };
+  }
+
+  function getDaysToRebalance() {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return Math.ceil((next - now) / (24 * 3600 * 1000));
+  }
+
+  // Portfolio MTD return (rough, from cached analysis)
+  function getPortfolioMtdReturn() {
+    try {
+      const pf = window.__SSI_PORTFOLIO__;
+      if (!pf) return null;
+      const holdings = pf.currentHoldings?.() ?? [];
+      if (!holdings.length) return null;
+      let totalCost = 0, totalNow = 0;
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache[h.symbol];
+        const curPrice = a?.current;
+        if (!curPrice || !h.avgPrice) continue;
+        totalCost += h.qty * h.avgPrice * 1000;
+        totalNow += h.qty * curPrice * 1000;
+      }
+      if (totalCost === 0) return null;
+      return ((totalNow - totalCost) / totalCost) * 100;
+    } catch { return null; }
+  }
+
   function getGreeting() {
     const h = new Date().getHours();
     if (h < 5) return "Khuya rồi";
@@ -4251,10 +4330,63 @@
     }
     const snapshotHtml = renderMarketSnapshotSection(snapshot);
 
+    // Session info + personal stats for briefing
+    const sess = getSessionInfo();
+    const watchSummary = getActiveWatchSummary();
+    const daysToRebal = getDaysToRebalance();
+    const pfMtd = getPortfolioMtdReturn();
+
+    const countdownLabel = sess.countdown != null
+      ? (sess.countdown >= 60
+          ? `${Math.floor(sess.countdown / 60)}h${String(sess.countdown % 60).padStart(2, "0")}`
+          : `${sess.countdown}'`)
+      : null;
+
+    // VN-Index quick line từ regime cache
+    let indexLine = "";
+    if (regime && regime.currentValue != null) {
+      const ret1m = regime.ret1m != null ? `${regime.ret1m >= 0 ? "+" : ""}${regime.ret1m.toFixed(1)}%` : "--";
+      indexLine = `<div class="briefing-context">📊 VN-Index <b>${regime.currentValue.toLocaleString("vi-VN")}</b> · 1M ${ret1m} · <span style="color:${regime.color || '#aab'}">${regime.label || regime.regime || "?"}</span></div>`;
+    }
+
     let html = `
-      <div class="home-greeting">
-        <div class="home-greeting-text">${greeting}</div>
-        <div class="home-date">${dateStr}</div>
+      <div class="home-briefing">
+        <div class="briefing-row1">
+          <div>
+            <div class="briefing-greet">${greeting}!</div>
+            <div class="briefing-date">${dateStr}</div>
+          </div>
+          ${countdownLabel
+            ? `<div class="briefing-session" style="background:${sess.color}22;color:${sess.color};border-color:${sess.color}55">
+                 <span>${sess.icon}</span>
+                 <span class="briefing-session-label">${sess.label}</span>
+                 <b class="briefing-session-countdown">${countdownLabel}</b>
+               </div>`
+            : `<div class="briefing-session" style="background:${sess.color}22;color:${sess.color};border-color:${sess.color}55">
+                 <span>${sess.icon}</span>
+                 <span class="briefing-session-label">${sess.label}</span>
+               </div>`}
+        </div>
+        ${indexLine}
+        <div class="briefing-stats">
+          <div class="briefing-stat ${watchSummary.hasOpenWatches > 0 ? 'stat-active' : ''}" data-target-tab="ranking">
+            <div class="briefing-stat-val">${watchSummary.hasOpenWatches}<small> / ${watchSummary.total}</small></div>
+            <div class="briefing-stat-label">🔔 Watch chờ trigger</div>
+          </div>
+          <div class="briefing-stat">
+            <div class="briefing-stat-val">${daysToRebal}<small>d</small></div>
+            <div class="briefing-stat-label">🔄 Đến rebalance</div>
+          </div>
+          ${pfMtd != null
+            ? `<div class="briefing-stat" data-target-tab="portfolio">
+                 <div class="briefing-stat-val ${pfMtd >= 0 ? 'up' : 'down'}">${pfMtd >= 0 ? "+" : ""}${pfMtd.toFixed(1)}<small>%</small></div>
+                 <div class="briefing-stat-label">💼 Portfolio P&amp;L</div>
+               </div>`
+            : `<div class="briefing-stat briefing-stat-muted" data-target-tab="portfolio">
+                 <div class="briefing-stat-val">--</div>
+                 <div class="briefing-stat-label">💼 Add holdings</div>
+               </div>`}
+        </div>
       </div>
 
       <!-- Hôm nay nên làm -->
@@ -4377,7 +4509,7 @@
     container.innerHTML = html;
 
     // Bind clickable cards
-    container.querySelectorAll(".home-card-clickable").forEach((card) => {
+    container.querySelectorAll(".home-card-clickable, .briefing-stat[data-target-tab]").forEach((card) => {
       card.addEventListener("click", () => {
         const targetTab = card.dataset.targetTab;
         if (targetTab) switchTab(targetTab);

@@ -2315,6 +2315,132 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #888;
 }
 
+/* ── Home Today Briefing card ── */
+.home-briefing {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.08), rgba(76, 175, 80, 0.06));
+  border: 1px solid rgba(0, 210, 255, 0.25);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.briefing-row1 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.briefing-greet {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.briefing-date {
+  font-size: 12px;
+  color: #aab;
+  margin-top: 2px;
+}
+
+.briefing-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.briefing-session-label {
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.briefing-session-countdown {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.briefing-context {
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #cdd;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.briefing-context b {
+  color: #fff;
+}
+
+.briefing-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.briefing-stat {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.briefing-stat:hover {
+  background: rgba(0, 210, 255, 0.06);
+  border-color: rgba(0, 210, 255, 0.2);
+}
+
+.briefing-stat.stat-active {
+  background: rgba(0, 210, 255, 0.08);
+  border-color: rgba(0, 210, 255, 0.3);
+}
+
+.briefing-stat-muted {
+  opacity: 0.6;
+}
+
+.briefing-stat-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.briefing-stat-val.up { color: #4CAF50; }
+.briefing-stat-val.down { color: #ff5722; }
+
+.briefing-stat-val small {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-left: 2px;
+}
+
+.briefing-stat-label {
+  font-size: 10px;
+  color: #aab;
+  margin-top: 4px;
+  letter-spacing: 0.2px;
+}
+
+@media (max-width: 360px) {
+  .briefing-stat-val { font-size: 16px; }
+  .briefing-stat-label { font-size: 9px; }
+  .briefing-greet { font-size: 16px; }
+}
+
 .home-card {
   background: #1a1a2e;
   border: 1px solid #2a2a3e;
