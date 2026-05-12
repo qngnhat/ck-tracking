@@ -475,15 +475,14 @@
   let lastAnalysisResult = null;
 
   function getAnalysisTabDefault() {
-    if (analyzeContext === "dca") return "dca";
     if (analyzeContext === "tplus") return "tplus";
     const persisted = localStorage.getItem(ANALYSIS_TAB_KEY);
-    if (["overview", "dca", "tplus"].includes(persisted)) return persisted;
+    if (["overview", "tplus"].includes(persisted)) return persisted;
     return "overview";
   }
 
   function setAnalysisTab(mode) {
-    if (!["overview", "dca", "tplus"].includes(mode)) mode = "overview";
+    if (!["overview", "tplus"].includes(mode)) mode = "overview";
     document.querySelectorAll(".analysis-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
@@ -492,32 +491,9 @@
     });
     localStorage.setItem(ANALYSIS_TAB_KEY, mode);
 
-    if (mode === "dca") {
-      const c = $("analysis-tab-dca");
-      if (c && !c.dataset.loaded) lazyLoadDcaTab();
-    } else if (mode === "tplus") {
+    if (mode === "tplus") {
       const c = $("analysis-tab-tplus");
       if (c && !c.dataset.loaded) lazyLoadTplusTab();
-    }
-  }
-
-  async function lazyLoadDcaTab() {
-    const container = $("analysis-tab-dca");
-    if (!container || !lastAnalysisResult) return;
-    container.dataset.loaded = "1";
-    container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Tìm ${lastAnalysisResult.symbol} trong Top DCA...</div></div>`;
-    try {
-      const result = await RANKING.loadTopPicks();
-      const picks = result?.picks || [];
-      const idx = picks.findIndex((p) => p.symbol === lastAnalysisResult.symbol);
-      if (idx >= 0) {
-        container.innerHTML = renderDcaContextCard(picks[idx], idx + 1, lastAnalysisResult);
-      } else {
-        container.innerHTML = renderDcaNotInTopFallback(lastAnalysisResult, picks.slice(0, 5));
-      }
-    } catch (e) {
-      container.dataset.loaded = "";
-      container.innerHTML = `<div class="error">Lỗi tải Top DCA: ${e.message} <button class="link-btn" onclick="document.querySelector('.analysis-tab[data-mode=dca]').click()">Thử lại</button></div>`;
     }
   }
 
@@ -542,39 +518,6 @@
       container.dataset.loaded = "";
       container.innerHTML = `<div class="error">Lỗi tải Top T+: ${e.message} <button class="link-btn" onclick="document.querySelector('.analysis-tab[data-mode=tplus]').click()">Thử lại</button></div>`;
     }
-  }
-
-  function renderDcaNotInTopFallback(r, topPicks) {
-    const topList = topPicks?.length
-      ? `<ul class="context-bullets">${topPicks.map((p, i) => `<li>#${i + 1} <b>${p.symbol}</b> · score ${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</li>`).join("")}</ul>`
-      : "";
-    return `
-      <div class="an-card context-card context-dca">
-        <div class="context-header">
-          <span class="context-icon">📈</span>
-          <div>
-            <div class="context-title">DCA · Không trong Top hôm nay</div>
-            <div class="context-subtitle">Mã ${r.symbol} không lọt vào Top DCA picks rebalance gần nhất</div>
-          </div>
-        </div>
-        <div class="context-section">
-          <div class="context-section-title">Vì sao có thể không vào top</div>
-          <ul class="context-bullets">
-            <li>Tổ hợp factors (MA200 quality, drawdown, momentum 6m, foreign flow…) chưa đủ z-score so với top universe</li>
-            <li>Có thể mã đang đi ngang/giảm hoặc thanh khoản TB thấp</li>
-            <li>Sector cap đã bị các mã cùng ngành chiếm chỗ (max 2 mã/ngành)</li>
-          </ul>
-        </div>
-        ${topList ? `
-        <div class="context-section">
-          <div class="context-section-title">Top 5 DCA picks hiện tại</div>
-          ${topList}
-        </div>` : ""}
-        <div class="context-disclaimer">
-          💡 Để xem phân tích DCA chi tiết, mở <b>Top picks → DCA</b> rồi click vào mã đang trong top.
-        </div>
-      </div>
-    `;
   }
 
   function renderTplusNotInTopFallback(r) {
@@ -603,22 +546,16 @@
     root.innerHTML = `
       <div class="analysis-tabs" role="tablist">
         <button class="analysis-tab" data-mode="overview" type="button" role="tab">📊 Tổng quan</button>
-        <button class="analysis-tab" data-mode="dca" type="button" role="tab">📈 DCA</button>
-        <button class="analysis-tab" data-mode="tplus" type="button" role="tab">⚡ T+</button>
+        <button class="analysis-tab" data-mode="tplus" type="button" role="tab">⚡ T+ Plan</button>
       </div>
       <div class="analysis-tab-content" data-mode="overview" id="analysis-tab-overview"></div>
-      <div class="analysis-tab-content" data-mode="dca" id="analysis-tab-dca" style="display:none"></div>
       <div class="analysis-tab-content" data-mode="tplus" id="analysis-tab-tplus" style="display:none"></div>
     `;
 
     // Overview = current default content (always rendered)
     $("analysis-tab-overview").innerHTML = renderOverviewTabContent(r);
 
-    // Pre-render DCA/T+ tab if context exists (came from Ranking click)
-    if (analyzeContext === "dca" && analyzeContextPick) {
-      $("analysis-tab-dca").innerHTML = renderDcaContextCard(analyzeContextPick, analyzeContextRank, r);
-      $("analysis-tab-dca").dataset.loaded = "1";
-    }
+    // Pre-render T+ tab if context exists (came from Ranking click)
     if (analyzeContext === "tplus" && analyzeContextPick) {
       $("analysis-tab-tplus").innerHTML = renderTplusContextCard(analyzeContextPick, analyzeContextRank, r);
       $("analysis-tab-tplus").dataset.loaded = "1";
@@ -842,7 +779,7 @@
       </div>
 
       <div class="disclaimer full-width">
-        ⚠️ "Setup tốt/khá/yếu" là <b>chỉ báo chất lượng kỹ thuật</b>, KHÔNG phải tín hiệu mua/bán. Backtest 8 năm cho thấy hệ scoring tổng hợp này chỉ tốt để đánh giá rủi ro (drawdown thấp), không sinh alpha so với buy-and-hold cả universe. Để chọn mã đầu tư, dùng tab <b>Top picks → DCA</b> (đã validate beat baseline). Quyết định cuối cùng là của bạn.
+        ⚠️ "Setup tốt/khá/yếu" là <b>chỉ báo chất lượng kỹ thuật</b>, KHÔNG phải tín hiệu mua/bán. Để chọn setup T+ chất lượng, dùng tab <b>Lướt sóng T+</b> với plan giao dịch cụ thể. Quyết định cuối cùng là của bạn.
       </div>
     `;
   }
@@ -896,8 +833,8 @@
       : "Không hỗ trợ";
     const showNotifBtn = notifPerm === "default";
 
-    // Universe pref
-    const uni = localStorage.getItem("snap_universe_pref") || "dca";
+    // Universe pref (chỉ còn full — DCA-58 đã removed)
+    const uni = localStorage.getItem("snap_universe_pref") || "full";
 
     // Cache size estimate
     let cacheKeys = 0;
@@ -911,7 +848,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v84"; // sync với sw.js CACHE name suffix
+    const appVersion = "v85"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -933,24 +870,6 @@
           ? `<button class="btn-primary" id="settings-enable-notif">Cho phép thông báo</button>`
           : ""}
         <div class="settings-hint">Cần để nhận trigger T+ khi mở app. Telegram bot không yêu cầu (bot tự gửi).</div>
-      </section>
-
-      <section class="settings-section">
-        <h3>📊 Hiển thị</h3>
-        <div class="settings-row">
-          <span class="settings-label">Universe quét thị trường</span>
-          <div class="settings-radio-group">
-            <label class="settings-radio">
-              <input type="radio" name="settings-uni" value="dca" ${uni === "dca" ? "checked" : ""}>
-              <span>DCA-58</span>
-            </label>
-            <label class="settings-radio">
-              <input type="radio" name="settings-uni" value="full" ${uni === "full" ? "checked" : ""}>
-              <span>Full ~700</span>
-            </label>
-          </div>
-        </div>
-        <div class="settings-hint">DCA-58: nhanh (curated). Full: chậm hơn nhưng cover toàn HOSE.</div>
       </section>
 
       <section class="settings-section">
@@ -1031,8 +950,7 @@
       case "picks":
         msg = "Xóa cache top picks (sẽ fetch lại khi vào tab)?";
         action = () => {
-          ["dca_top_picks_v1", "tplus_top_picks_v1", "vnindex_regime_v1",
-           "market_snapshot_dca_v1", "market_snapshot_full_v1"].forEach((k) => localStorage.removeItem(k));
+          ["tplus_top_picks_v1", "vnindex_regime_v1", "market_snapshot_full_v1"].forEach((k) => localStorage.removeItem(k));
         };
         break;
       case "watchlist":
@@ -1045,7 +963,7 @@
         };
         break;
       case "tracker":
-        msg = "Xóa toàn bộ lịch sử khuyến nghị (DCA + T+)?";
+        msg = "Xóa toàn bộ lịch sử khuyến nghị T+?";
         action = () => RANKING.clearTracker?.();
         break;
       case "all":
@@ -1171,112 +1089,6 @@
     if (!r) return;
     closeCmdp();
     setTimeout(() => r.action(), 50);
-  }
-
-  // ── Context cards (when navigating from DCA/T+ ranking) ──
-  function renderDcaContextCard(pick, rank, r) {
-    const f = pick.factors || {};
-    const bullets = [];
-
-    if (f.ma200Quality != null) {
-      const pct = (f.ma200Quality * 100).toFixed(0);
-      const quality = f.ma200Quality >= 0.8 ? "rất ổn định" : f.ma200Quality >= 0.5 ? "ổn định" : "đang yếu";
-      bullets.push(`Trên MA200 <b>${pct}%</b> thời gian (252 phiên) — trend dài hạn ${quality}`);
-    }
-    if (f.lowDrawdown != null) {
-      const dd = (f.lowDrawdown * 100).toFixed(1);
-      const safety = Math.abs(f.lowDrawdown) < 0.2 ? "rất an toàn" : Math.abs(f.lowDrawdown) < 0.35 ? "vừa phải" : "có biến động";
-      bullets.push(`Max drawdown 252 ngày: <b>${dd}%</b> — ${safety}`);
-    }
-    if (f.momentum6m != null) {
-      const m = (f.momentum6m * 100).toFixed(1);
-      const sign = f.momentum6m >= 0 ? "+" : "";
-      const desc = f.momentum6m > 0.2 ? "đà tăng tốt" : f.momentum6m > 0 ? "đà tăng nhẹ" : "đi ngang/giảm";
-      bullets.push(`Hiệu suất 6 tháng: <b>${sign}${m}%</b> — ${desc}`);
-    }
-    if (f.trendConsistency != null) {
-      bullets.push(`Trend Sharpe (252d): <b>${f.trendConsistency.toFixed(3)}</b> — đo độ đều đặn của xu hướng`);
-    }
-    if (f.avgTurnover != null) {
-      const billions = (f.avgTurnover / 1e9).toFixed(1);
-      bullets.push(`Thanh khoản TB 20 phiên: <b>${billions} tỷ/ngày</b>`);
-    }
-    if (f.foreignFlow60d != null && Math.abs(f.foreignFlow60d) > 0.1) {
-      const positive = f.foreignFlow60d > 0;
-      bullets.push(
-        positive
-          ? `Khối ngoại đang <span style="color:#4CAF50"><b>gom ròng</b></span> trong 60 phiên — smart money tích lũy`
-          : `Khối ngoại đang <span style="color:#ff4444"><b>xả ròng</b></span> trong 60 phiên — cảnh báo`
-      );
-    }
-
-    const rankTxt = rank ? `Pick #${rank}` : "";
-
-    // Concrete action: size per pick + next rebalance date + expected outcome
-    // Allocation cố định 1/15 NAV theo backtest. NAV pull từ portfolio nếu có.
-    const TOP_N = 15;
-    const allocPct = (100 / TOP_N).toFixed(1);
-    let nav = 0, allocVnd = null;
-    try {
-      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
-      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
-      let totalMarket = 0;
-      for (const h of holdings) {
-        const a = portfolioAnalysisCache[h.symbol];
-        if (a?.current) totalMarket += h.qty * a.current * 1000;
-      }
-      nav = totalMarket + cash;
-      if (nav > 0) {
-        allocVnd = nav / TOP_N;
-      }
-    } catch {}
-
-    // Next rebalance: ngày 1 của tháng kế tiếp
-    const now = new Date();
-    const nextRebal = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const daysToRebal = Math.ceil((nextRebal - now) / (24 * 3600 * 1000));
-    const rebalLabel = nextRebal.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
-
-    const sizeLine = allocVnd != null
-      ? `<li><b>Size khuyến nghị</b>: <b>${fmtMoney(allocVnd)}</b> (~${allocPct}% NAV ${fmtMoney(nav)}) — full size 1 lần hoặc chia 2-3 lệnh trong tuần đầu</li>`
-      : `<li><b>Size khuyến nghị</b>: <b>1/${TOP_N} NAV</b> (~${allocPct}%) — vào full size 1 lần hoặc chia 2-3 lệnh trong tuần đầu. Set portfolio cash để app tính số tiền cụ thể.</li>`;
-
-    return `
-      <div class="an-card context-card context-dca">
-        <div class="context-header">
-          <span class="context-icon">📈</span>
-          <div>
-            <div class="context-title">DCA ${rankTxt} · Score ${pick.score >= 0 ? "+" : ""}${pick.score.toFixed(2)}</div>
-            <div class="context-subtitle">Khuyến nghị tích lũy dài hạn · rebalance ${rebalLabel} (${daysToRebal} ngày nữa)</div>
-          </div>
-        </div>
-
-        <!-- BIG action banner — concrete plan -->
-        <div class="dca-action-banner">
-          <div class="dca-action-label">🎬 PLAN HÀNH ĐỘNG</div>
-          <ul class="dca-action-list">
-            ${sizeLine}
-            <li><b>Entry</b>: thị trường / quanh giá hiện tại — DCA không time market. Có thể chia 3-5 lệnh trong 1-2 tuần nếu giá đang điều chỉnh.</li>
-            <li><b>Hold</b>: tới rebalance đầu tháng kế (~${daysToRebal} ngày). KHÔNG cut khi -5/-10% — DCA accept volatility.</li>
-            <li><b>Exit trigger</b>: ngày ${rebalLabel} re-fetch DCA picks → nếu mã RỚT khỏi top ${TOP_N}, bán + mua mã mới. Nếu vẫn trong top, giữ tiếp.</li>
-            <li><b>Hard stop</b>: -25% drawdown (rare, panic crash) → cut, đợi reset. Bình thường KHÔNG SL.</li>
-          </ul>
-        </div>
-
-        <div class="context-section">
-          <div class="context-section-title">Tại sao mã này hợp DCA</div>
-          <ul class="context-bullets">${bullets.map((b) => `<li>${b}</li>`).join("")}</ul>
-        </div>
-
-        <div class="dca-expect">
-          <b>Kỳ vọng</b>: Win rate ~60% (5-6/10 picks tăng tháng đó) · Avg pick ~+1.5%/30 ngày (≈ +18%/năm CAGR). Drawdown ngắn hạn -10/-15% là bình thường, KHÔNG panic cut.
-        </div>
-
-        <div class="context-disclaimer">
-          📊 Backtest 8 năm: chiến lược DCA Top 15 đạt CAGR <b>17.8%</b> (vs Equal-Weight 55: 16.4%, VN-Index: 7.9%). MaxDD -40% trong 2022 bear.
-        </div>
-      </div>
-    `;
   }
 
   // ── Hold profile (dynamic theo signal mã) ──
@@ -2675,7 +2487,7 @@
   // ── TAB NAVIGATION ──
   // ════════════════════════════════════════════════════
   const RANKING = window.__SSI_RANKING__;
-  let currentTab = "home";
+  let currentTab = "ranking"; // mặc định Lướt sóng T+ — fast access
 
   function switchTab(tab) {
     if (tab === currentTab) return;
@@ -3440,10 +3252,8 @@
     return `${days[d.getDay()]}, ${dd}/${mm}/${d.getFullYear()}`;
   }
 
-  function buildTodayActions(regime, dcaCount, tplusCount, lastDcaSnap) {
-    const now = new Date();
-    const dom = now.getDate();
-    const dow = now.getDay();
+  function buildTodayActions(regime, tplusCount) {
+    const dow = new Date().getDay();
     const isWeekend = dow === 0 || dow === 6;
     const open = isMarketOpenNow();
     const actions = [];
@@ -3453,7 +3263,7 @@
       actions.push({ icon: "🌴", text: "Cuối tuần — TTCK đóng cửa. Có thể review tracker hoặc plan tuần sau." });
     } else if (open) {
       if (tplusCount > 0) {
-        actions.push({ icon: "⚡", text: `Đang trong giờ giao dịch — có <b>${tplusCount} setup T+</b> chất lượng. Check Top picks → T+.` });
+        actions.push({ icon: "⚡", text: `Đang trong giờ giao dịch — có <b>${tplusCount} setup T+</b> chất lượng. Check tab Lướt sóng T+.` });
       } else {
         actions.push({ icon: "💤", text: "Trong giờ giao dịch nhưng không có setup T+ chất lượng. Đợi cơ hội rõ hơn." });
       }
@@ -3461,25 +3271,10 @@
       actions.push({ icon: "💤", text: "Ngoài giờ giao dịch hôm nay. Plan cho phiên kế nếu cần." });
     }
 
-    // DCA timing
-    if (!isWeekend && dom <= 5) {
-      const lastSnapDate = lastDcaSnap ? new Date(lastDcaSnap.date) : null;
-      const sameMonth = lastSnapDate &&
-        lastSnapDate.getMonth() === now.getMonth() &&
-        lastSnapDate.getFullYear() === now.getFullYear();
-      if (!sameMonth) {
-        actions.push({ icon: "🔄", text: "<b>Đầu tháng</b> — đến lúc rebalance DCA. Mở Top picks → DCA, so list mới với portfolio hiện tại." });
-      } else {
-        actions.push({ icon: "✅", text: "Đã có DCA snapshot tháng này — tốt." });
-      }
-    } else if (dom >= 28) {
-      actions.push({ icon: "📅", text: "Cuối tháng — chuẩn bị cho rebalance DCA tuần tới." });
-    }
-
     // Regime advisory
     if (regime) {
       if (regime.regime === "BEAR" || regime.regime === "BEAR_WEAK") {
-        actions.push({ icon: "⚠️", text: `Thị trường <b>${regime.label}</b> — T+ rủi ro cao, threshold đã auto bump lên ≥5.0. Tập trung DCA quality.` });
+        actions.push({ icon: "⚠️", text: `Thị trường <b>${regime.label}</b> — T+ rủi ro cao, threshold đã auto bump lên ≥5.0. Pick chọn lọc kỹ.` });
       } else if (regime.regime === "BULL") {
         actions.push({ icon: "🚀", text: `Thị trường <b>${regime.label}</b> — uptrend rõ, các setup mean-reversion có thể là nhịp pull back ngắn.` });
       }
@@ -3489,8 +3284,8 @@
   }
 
   // ── Market outlook composer ──
-  // Reuse cached data (regime, T+ picks, DCA picks). Không trigger heavy scan.
-  function computeMarketOutlook(regime, tplusCache, dcaCache) {
+  // Reuse cached data (regime, T+ picks). Không trigger heavy scan.
+  function computeMarketOutlook(regime, tplusCache) {
     const out = {
       // Layer 1: Index state
       l1: {
@@ -3509,7 +3304,6 @@
       l2: {
         tplusEligible: tplusCache?.eligibleCount,
         tplusTotal: tplusCache?.allCount,
-        dcaCount: dcaCache?.picks?.length || 0,
         tplusAge: tplusCache?.timestamp ? Math.round((Date.now() - tplusCache.timestamp) / 60000) : null, // phút
       },
       // Layer 3: Money flow + sector
@@ -3652,10 +3446,6 @@
             <span class="mo-label">Setup T+ confluence:</span>
             <span class="mo-val"><b>${l2.tplusEligible}/${l2.tplusTotal}</b> mã (${ratio.toFixed(1)}%)</span>
           </div>
-          <div class="mo-row">
-            <span class="mo-label">DCA top picks:</span>
-            <span class="mo-val">${l2.dcaCount} mã pass ranking</span>
-          </div>
           <div class="mo-row mo-sub-row">
             <span class="mo-sub">Cập nhật: ${ageTxt}</span>
           </div>
@@ -3665,7 +3455,7 @@
       l2Html = `
         <div class="mo-layer">
           <div class="mo-layer-title">📈 Breadth (sức khỏe rộng)</div>
-          <div class="mo-row mo-empty">Chưa có data — vào tab Top picks → bấm ↻ để quét.</div>
+          <div class="mo-row mo-empty">Chưa có data — vào tab Lướt sóng T+ → bấm ↻ để quét.</div>
         </div>
       `;
     }
@@ -3922,13 +3712,6 @@
 
   // ── Market snapshot section: sector heat + leaders + distribution + 52W ──
   function renderMarketSnapshotSection(snapshot) {
-    const universeToggle = `
-      <div class="snap-universe-toggle">
-        <button class="snap-uni-btn ${snapshot?.universe !== "full" ? "active" : ""}" data-universe="dca" id="snap-uni-dca">DCA-58</button>
-        <button class="snap-uni-btn ${snapshot?.universe === "full" ? "active" : ""}" data-universe="full" id="snap-uni-full">Full ~700</button>
-      </div>
-    `;
-
     if (!snapshot) {
       return `
         <div class="home-card snap-card">
@@ -3936,8 +3719,7 @@
             🚀 Sector heat & Mã dẫn dắt
             <button class="home-card-action" id="snap-load-btn" title="Quét universe">↻ Quét</button>
           </div>
-          ${universeToggle}
-          <div class="home-card-empty">Chưa có data — bấm ↻ để scan. DCA-58 ~30s, Full ~700 ~5 phút (foreign flow skip cho speed).</div>
+          <div class="home-card-empty">Chưa có data — bấm ↻ để scan toàn HOSE+HNX (~5 phút, foreign flow skip cho speed).</div>
         </div>
       `;
     }
@@ -4131,7 +3913,7 @@
       </div>
     ` : "";
 
-    const universeLabel = snapshot.universe === "full" ? `Full HOSE+HNX (~${b.total} mã)` : `DCA universe (${b.total} mã)`;
+    const universeLabel = `HOSE+HNX (~${b.total} mã)`;
 
     const comparisonHtml = renderSectorComparisonTable(snapshot);
     const trendingHtml = renderTrendingLists(snapshot);
@@ -4288,52 +4070,31 @@
       regime = cached?.data || null;
     } catch {}
 
-    let dcaCached = null, tplusCached = null;
+    let tplusCached = null;
     try {
-      dcaCached = JSON.parse(localStorage.getItem("dca_top_picks_v1") || "null")?.data;
       tplusCached = JSON.parse(localStorage.getItem("tplus_top_picks_v1") || "null")?.data;
     } catch {}
 
-    const tracker = RANKING.loadTracker();
-    const lastDcaSnap = tracker.dca?.[tracker.dca.length - 1] || null;
-    const lastTplusSnap = tracker.tplus?.[tracker.tplus.length - 1] || null;
-
-    const actions = buildTodayActions(
-      regime,
-      dcaCached?.eligibleCount || 0,
-      tplusCached?.eligibleCount || 0,
-      lastDcaSnap
-    );
+    const actions = buildTodayActions(regime, tplusCached?.eligibleCount || 0);
 
     const watchlist = RANKING.loadWatchlist();
     const watchlistCount = watchlist.length;
 
     // Compute market outlook (Layer 1+2+3+4)
-    const outlook = computeMarketOutlook(regime, tplusCached, dcaCached);
+    const outlook = computeMarketOutlook(regime, tplusCached);
     const outlookHtml = renderMarketOutlookSection(outlook);
 
-    // Market snapshot (sector heat + leaders + distribution + 52W) — load cache theo universe pref
+    // Market snapshot (sector heat + leaders + distribution + 52W) — load cache
     let snapshot = null;
-    const preferredUniverse = localStorage.getItem("snap_universe_pref") || "dca";
-    const cacheKey = preferredUniverse === "full" ? "market_snapshot_full_v1" : "market_snapshot_dca_v1";
     try {
-      const snapCached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      const snapCached = JSON.parse(localStorage.getItem("market_snapshot_full_v1") || "null");
       if (snapCached?.data) snapshot = snapCached.data;
     } catch {}
-    // Fallback: nếu cache preferred không có, thử cache còn lại
-    if (!snapshot) {
-      const altKey = preferredUniverse === "full" ? "market_snapshot_dca_v1" : "market_snapshot_full_v1";
-      try {
-        const altCached = JSON.parse(localStorage.getItem(altKey) || "null");
-        if (altCached?.data) snapshot = altCached.data;
-      } catch {}
-    }
     const snapshotHtml = renderMarketSnapshotSection(snapshot);
 
     // Session info + personal stats for briefing
     const sess = getSessionInfo();
     const watchSummary = getActiveWatchSummary();
-    const daysToRebal = getDaysToRebalance();
     const pfMtd = getPortfolioMtdReturn();
 
     const countdownLabel = sess.countdown != null
@@ -4372,10 +4133,6 @@
           <div class="briefing-stat ${watchSummary.hasOpenWatches > 0 ? 'stat-active' : ''}" data-target-tab="ranking">
             <div class="briefing-stat-val">${watchSummary.hasOpenWatches}<small> / ${watchSummary.total}</small></div>
             <div class="briefing-stat-label">🔔 Watch chờ trigger</div>
-          </div>
-          <div class="briefing-stat">
-            <div class="briefing-stat-val">${daysToRebal}<small>d</small></div>
-            <div class="briefing-stat-label">🔄 Đến rebalance</div>
           </div>
           ${pfMtd != null
             ? `<div class="briefing-stat" data-target-tab="portfolio">
@@ -4450,44 +4207,14 @@
       `;
     }
 
-    // 3. DCA top picks preview
-    if (dcaCached && dcaCached.picks && dcaCached.picks.length > 0) {
-      const top5 = dcaCached.picks.slice(0, 5);
-      html += `
-        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="dca">
-          <div class="home-card-title">📈 Top 5 mã DCA</div>
-          ${top5.map((p, i) => `
-            <div class="home-pick-row">
-              <span class="home-pick-rank">#${i + 1}</span>
-              <span class="home-pick-symbol">${p.symbol}</span>
-              <span class="home-pick-sector">${sectorLabel(p.sector)}</span>
-              <span class="home-pick-score">+${p.score.toFixed(2)}</span>
-            </div>
-          `).join("")}
-          <div class="home-card-cta">Xem đầy đủ →</div>
-        </div>
-      `;
-    } else {
-      html += `
-        <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-mode="dca">
-          <div class="home-card-title">📈 Top picks DCA</div>
-          <div class="home-card-empty">Chưa load. Tap để xem ranking đầy đủ.</div>
-        </div>
-      `;
-    }
-
-    // 4. Tracker summary
-    const dcaSnaps = tracker.dca?.length || 0;
+    // Tracker summary (T+ only)
+    const tracker = RANKING.loadTracker();
     const tplusSnaps = tracker.tplus?.length || 0;
-    if (dcaSnaps + tplusSnaps > 0) {
+    if (tplusSnaps > 0) {
       html += `
         <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-tracker="1">
-          <div class="home-card-title">📊 Tracker performance</div>
+          <div class="home-card-title">📊 Lịch sử khuyến nghị T+</div>
           <div class="home-tracker-row">
-            <div class="home-tracker-item">
-              <div class="home-tracker-num">${dcaSnaps}</div>
-              <div class="home-tracker-label">DCA snapshots</div>
-            </div>
             <div class="home-tracker-item">
               <div class="home-tracker-num">${tplusSnaps}</div>
               <div class="home-tracker-label">T+ snapshots</div>
@@ -4513,10 +4240,6 @@
       card.addEventListener("click", () => {
         const targetTab = card.dataset.targetTab;
         if (targetTab) switchTab(targetTab);
-        if (card.dataset.targetMode) {
-          // Switch ranking mode after tab switch
-          setTimeout(() => switchRankingMode(card.dataset.targetMode), 50);
-        }
         if (card.dataset.targetTracker) {
           setTimeout(() => {
             const trackerHeader = document.getElementById("tracker-header");
@@ -4548,30 +4271,18 @@
       } catch {}
     }
 
-    // Universe toggle: chọn DCA-58 hoặc Full ~700
-    container.querySelectorAll(".snap-uni-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const uni = btn.dataset.universe;
-        if (!uni) return;
-        localStorage.setItem("snap_universe_pref", uni);
-        renderHome(); // switch hiển thị cache của universe khác
-      });
-    });
-
-    // Market snapshot scan button
+    // Market snapshot scan button — always full universe now
     const snapBtn = document.getElementById("snap-load-btn");
     if (snapBtn) {
       snapBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        const uni = localStorage.getItem("snap_universe_pref") || "dca";
         snapBtn.disabled = true;
         const oldText = snapBtn.textContent;
-        snapBtn.textContent = uni === "full" ? "0/?" : "0/58";
+        snapBtn.textContent = "0/?";
         try {
           await RANKING.loadMarketSnapshot({
             useCache: false,
-            universe: uni,
+            universe: "full",
             onProgress: (done, total) => {
               snapBtn.textContent = `${done}/${total}`;
             },
@@ -4689,16 +4400,14 @@
   // ════════════════════════════════════════════════════
   // ── RANKING TAB ──
   // ════════════════════════════════════════════════════
-  const DCA_UNIVERSE_KEY = "ranking_dca_universe";
   let rankingState = {
-    mode: "dca",  // "dca" | "tplus"
-    dca: { picks: [], topN: 10, loaded: false, universe: localStorage.getItem(DCA_UNIVERSE_KEY) || "curated" },
+    mode: "tplus",  // chỉ còn T+ — DCA đã removed
     tplus: { picks: [], topN: 10, loaded: false },
     loading: false,
   };
 
   function curState() {
-    return rankingState[rankingState.mode];
+    return rankingState.tplus;
   }
 
   // ── Holiday banner: cảnh báo nghỉ lễ VN cho T+ ──
@@ -4727,13 +4436,9 @@
   }
 
   // Market regime hint cho T+ tab (mapping regime → đề xuất hành động)
-  async function renderRegimeHint(mode) {
+  async function renderRegimeHint() {
     const banner = $("regime-hint-banner");
     if (!banner) return;
-    if (mode !== "tplus") {
-      banner.style.display = "none";
-      return;
-    }
     try {
       const regime = await RANKING.getMarketRegime();
       if (!regime) { banner.style.display = "none"; return; }
@@ -4759,13 +4464,9 @@
     }
   }
 
-  function renderHolidayBanner(mode) {
+  function renderHolidayBanner() {
     const banner = $("holiday-banner");
     if (!banner) return;
-    if (mode !== "tplus") {
-      banner.style.display = "none";
-      return;
-    }
     const h = nextVnHoliday(5);
     if (!h) {
       banner.style.display = "none";
@@ -4781,78 +4482,18 @@
     banner.style.display = "block";
   }
 
-  function syncDcaUniverseToggle() {
-    const wrap = $("ranking-universe-toggle");
-    if (!wrap) return;
-    wrap.style.display = rankingState.mode === "dca" ? "block" : "none";
-    const cur = rankingState.dca.universe || "curated";
-    wrap.querySelectorAll(".uni-btn").forEach((b) => {
-      b.classList.toggle("active", b.dataset.uni === cur);
-    });
-  }
-
-  function switchRankingMode(mode) {
-    if (mode === rankingState.mode) return;
-    rankingState.mode = mode;
-    document.querySelectorAll(".mode-btn").forEach((b) => {
-      b.classList.toggle("active", b.dataset.mode === mode);
-    });
-    syncDcaUniverseToggle();
-
-    // Update title + disclaimer
-    const title = $("ranking-title");
-    const disc = $("ranking-disclaimer");
-    if (mode === "dca") {
-      title.textContent = "Top mã DCA";
-      disc.textContent = "⚠️ DCA cập nhật 24h, rebalance đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.";
-    } else {
-      title.textContent = "Top mã T+";
-      disc.textContent = "⚠️ T+ cập nhật mỗi giờ trong giờ giao dịch. Setup hiếm, có thể không có mã nào hôm nay. Hold 5-15 phiên, stop loss -8%.";
-    }
-
-    // Update topN button state
-    const tn = curState().topN;
-    document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => {
-      b.classList.toggle("active", parseInt(b.dataset.n, 10) === tn);
-    });
-
-    // Holiday warning (T+ only) + market regime hint
-    renderHolidayBanner(mode);
-    renderRegimeHint(mode);
-
-    // Render or show intro
-    if (curState().loaded) {
-      renderRanking();
-      // Try to update meta from cache info if available
-    } else {
-      showRankingIntro();
-    }
-  }
-
   function showRankingIntro() {
-    const mode = rankingState.mode;
     const content = $("ranking-content");
-    if (mode === "dca") {
-      content.innerHTML = `
-        <div class="empty-state ranking-intro">
-          <div class="empty-icon">📈</div>
-          <h2>Khuyến nghị DCA dài hạn</h2>
-          <p>Bảng xếp hạng top mã đáng tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả universe.</p>
-          <button class="btn-primary" id="ranking-load-btn">Tải bảng xếp hạng</button>
-        </div>
-      `;
-    } else {
-      content.innerHTML = `
-        <div class="empty-state ranking-intro">
-          <div class="empty-icon">⚡</div>
-          <h2>Cơ hội T+ (lướt sóng ngắn hạn)</h2>
-          <p>Quét universe tìm setup confluence: RSI&lt;25 + BB lower + MFI&lt;20 + volume catalyst đồng thời. Hold 5-15 phiên.</p>
-          <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Backtest validated:</b> setup chất lượng (score≥4) có win rate 61%, avg +3.3%/lệnh trên test set 2023-2026.</p>
-          <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> setup T+ chất lượng rất hiếm — có thể 0 mã nhiều ngày liên tiếp. Đó là tính năng, không phải bug — kỷ luật không trade khi không có cơ hội rõ.</p>
-          <button class="btn-primary" id="ranking-load-btn">Quét cơ hội T+</button>
-        </div>
-      `;
-    }
+    content.innerHTML = `
+      <div class="empty-state ranking-intro">
+        <div class="empty-icon">⚡</div>
+        <h2>Lướt sóng T+</h2>
+        <p>Quét universe tìm setup confluence: RSI&lt;25 + BB lower + MFI&lt;20 + volume catalyst đồng thời. Hold 5-15 phiên.</p>
+        <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Backtest validated:</b> setup chất lượng (score≥4) có win rate 61%, avg +3.3%/lệnh trên test set 2023-2026.</p>
+        <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> setup T+ chất lượng rất hiếm — có thể 0 mã nhiều ngày liên tiếp. Đó là tính năng, không phải bug — kỷ luật không trade khi không có cơ hội rõ.</p>
+        <button class="btn-primary" id="ranking-load-btn">Quét cơ hội T+</button>
+      </div>
+    `;
     document.getElementById("ranking-load-btn").addEventListener("click", () => {
       RANKING.clearCache();
       loadRanking(true);
@@ -4863,29 +4504,23 @@
     if (rankingState.loading) return;
     rankingState.loading = true;
 
-    const mode = rankingState.mode;
     const content = $("ranking-content");
     content.innerHTML = `
       <div class="ranking-loading">
         <div class="spinner"></div>
-        <div id="ranking-progress">Đang tải dữ liệu 0/55...</div>
+        <div id="ranking-progress">Đang quét toàn HOSE+HNX...</div>
       </div>
     `;
 
     try {
-      const loader = mode === "dca" ? RANKING.loadTopPicks : RANKING.loadTopPicksTPlus;
-      const loadOpts = {
+      const result = await RANKING.loadTopPicksTPlus({
         topN: 15,
-        sectorCap: 2,
         useCache: !forceFresh,
         onProgress: (done, total) => {
           const el = document.getElementById("ranking-progress");
-          if (el) el.textContent = `Đang tải ${done}/${total} mã...`;
+          if (el) el.textContent = `Đang quét ${done}/${total} mã...`;
         },
-      };
-      // DCA universe option (curated 58 vs full ~700)
-      if (mode === "dca") loadOpts.universe = rankingState.dca.universe || "curated";
-      const result = await loader(loadOpts);
+      });
 
       const s = curState();
       s.picks = result.picks;
@@ -4893,12 +4528,14 @@
       s.lastResult = result;
       renderRanking();
       updateRankingMeta(result);
+      renderRegimeHint();
+      renderHolidayBanner();
 
       // Auto-snapshot for paper tracker
       if (result.picks.length > 0 && !result.fromCache) {
         const tracker = RANKING.loadTracker();
-        if (RANKING.shouldSnapshot(mode, tracker)) {
-          RANKING.takeSnapshot(mode, result.picks, result.regime);
+        if (RANKING.shouldSnapshot("tplus", tracker)) {
+          RANKING.takeSnapshot("tplus", result.picks, result.regime);
         }
       }
       renderTrackerSection();
@@ -4920,40 +4557,26 @@
   }
 
   // ════════════════════════════════════════════════════
-  // ── PAPER TRACKER ──
+  // ── PAPER TRACKER (T+ only) ──
   // ════════════════════════════════════════════════════
-  const TRACKER_TAB_KEY = "tracker_tab";
-  let trackerTab = localStorage.getItem(TRACKER_TAB_KEY) || null;
-
   function getTrackerTab() {
-    if (trackerTab === "dca" || trackerTab === "tplus") return trackerTab;
-    return rankingState.mode === "dca" ? "dca" : "tplus";
+    return "tplus";
   }
 
-  function setTrackerTab(mode) {
-    trackerTab = mode;
-    localStorage.setItem(TRACKER_TAB_KEY, mode);
-    document.querySelectorAll(".tracker-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.mode === mode);
-    });
+  function setTrackerTab() {
+    // no-op (chỉ T+, không còn switch)
   }
 
   function renderTrackerSection() {
     const section = $("tracker-section");
     if (!section) return;
     const tracker = RANKING.loadTracker();
-    const dcaCount = tracker.dca?.length || 0;
     const tplusCount = tracker.tplus?.length || 0;
-    if (dcaCount + tplusCount === 0) {
+    if (tplusCount === 0) {
       section.style.display = "none";
       return;
     }
     section.style.display = "block";
-    const dcaBadge = $("tracker-count-dca");
-    const tplusBadge = $("tracker-count-tplus");
-    if (dcaBadge) dcaBadge.textContent = dcaCount;
-    if (tplusBadge) tplusBadge.textContent = tplusCount;
-    setTrackerTab(getTrackerTab());
   }
 
   function fmtDateShort(iso) {
@@ -4976,10 +4599,8 @@
     try {
       const tracker = RANKING.loadTracker();
       const allSyms = new Set();
-      for (const m of ["dca", "tplus"]) {
-        for (const s of tracker[m] || []) {
-          for (const p of s.picks) allSyms.add(p.symbol);
-        }
+      for (const s of tracker.tplus || []) {
+        for (const p of s.picks) allSyms.add(p.symbol);
       }
       // Fetch 90 ngày OHLC để compute peak/MDD/TP/SL outcome
       const histories = await RANKING.fetchPicksHistory([...allSyms], 90);
@@ -5288,21 +4909,14 @@
   function renderTrackerContent(tracker, prices, histories) {
     const content = $("tracker-content");
     let html = "";
-    const activeTab = getTrackerTab();
 
-    // T+ accuracy summary card chỉ hiện khi đang ở tab T+
-    if (activeTab === "tplus") {
-      const accStats = computeTplusAccuracyStats(tracker, prices);
-      if (accStats) html += renderTplusAccuracyCard(accStats);
-    }
+    // T+ accuracy summary card
+    const accStats = computeTplusAccuracyStats(tracker, prices);
+    if (accStats) html += renderTplusAccuracyCard(accStats);
 
-    const modesToRender = [activeTab];
-    for (const mode of modesToRender) {
-      const rawArr = tracker[mode] || [];
-      if (rawArr.length === 0) continue;
-
+    const rawArr = tracker.tplus || [];
+    if (rawArr.length > 0) {
       // Group snapshots theo ngày (local) — multi-snap cùng ngày → keep latest
-      // (tránh duplicate render khi cron / multi-device tạo nhiều snap/day).
       const byDate = new Map();
       for (const s of rawArr) {
         const dKey = new Date(s.date).toLocaleDateString("vi-VN");
@@ -5312,18 +4926,17 @@
         }
       }
       const arr = [...byDate.values()].sort((a, b) => new Date(b.date) - new Date(a.date));
-      const modeLabel = mode === "dca" ? "📈 DCA Snapshots" : "⚡ T+ Snapshots";
       const dupNote = arr.length < rawArr.length
         ? ` <small class="tracker-dup-note">(${rawArr.length} snapshots → ${arr.length} ngày, gộp dup)</small>`
         : "";
-      html += `<div class="tracker-mode-block"><div class="tracker-mode-title">${modeLabel} (${arr.length} ngày)${dupNote}</div>`;
+      html += `<div class="tracker-mode-block"><div class="tracker-mode-title">⚡ T+ Snapshots (${arr.length} ngày)${dupNote}</div>`;
 
       for (const snap of arr) {
         const days = daysSince(snap.date);
         // Compute per-pick stats với historical OHLC
         const rows = snap.picks.map((p) => {
           const stats = histories
-            ? computePickStats(p, snap.date, histories[p.symbol], mode)
+            ? computePickStats(p, snap.date, histories[p.symbol], "tplus")
             : null;
           if (!stats) {
             return { pick: p, ret: null, stats: null };
@@ -5336,9 +4949,9 @@
           : null;
         const winCount = validRows.filter((r) => r.ret > 0).length;
 
-        // Aggregate stats per snapshot (chỉ T+ có TP/SL)
+        // Aggregate stats per snapshot (T+ TP/SL)
         let aggBadges = "";
-        if (mode === "tplus" && validRows.length > 0) {
+        if (validRows.length > 0) {
           const counts = { tp1: 0, tp2: 0, sl: 0, expired: 0, holding: 0 };
           for (const r of validRows) {
             const k = r.stats?.status?.kind;
@@ -5367,7 +4980,7 @@
             </div>
             ${aggBadges}
             <div class="tracker-snap-picks-rich">
-              ${rows.map((r) => renderPickRow(r, mode)).join("")}
+              ${rows.map((r) => renderPickRow(r, "tplus")).join("")}
             </div>
           </div>
         `;
@@ -5376,19 +4989,13 @@
     }
 
     if (!html) {
-      const otherTab = activeTab === "tplus" ? "dca" : "tplus";
-      const otherCount = tracker[otherTab]?.length || 0;
-      const otherLabel = otherTab === "dca" ? "📈 DCA" : "⚡ T+";
-      const hint = otherCount > 0
-        ? ` Switch sang tab <b>${otherLabel}</b> (${otherCount} snapshots).`
-        : "";
-      content.innerHTML = `<div class="empty-state ranking-intro"><p>Chưa có snapshot ${activeTab === "tplus" ? "T+" : "DCA"} nào.${hint}</p></div>`;
+      content.innerHTML = `<div class="empty-state ranking-intro"><p>Chưa có snapshot T+ nào.</p></div>`;
     } else {
       content.innerHTML = html;
     }
   }
 
-  // Track latest tracker fetch result để re-render khi đổi tab (khỏi fetch lại)
+  // Track latest tracker fetch result để re-render
   let lastTrackerData = null;
 
   // Toggle tracker body
@@ -5400,21 +5007,6 @@
       body.style.display = open ? "none" : "block";
       icon.textContent = open ? "▼" : "▲";
       if (!open) refreshTracker(); // auto-fetch on open
-    }
-  });
-
-  // Tracker tab click
-  document.addEventListener("click", (e) => {
-    const tab = e.target.closest(".tracker-tab");
-    if (!tab) return;
-    const mode = tab.dataset.mode;
-    if (mode !== "dca" && mode !== "tplus") return;
-    if (mode === getTrackerTab()) return;
-    setTrackerTab(mode);
-    if (lastTrackerData) {
-      renderTrackerContent(lastTrackerData.tracker, lastTrackerData.prices, lastTrackerData.histories);
-    } else {
-      refreshTracker();
     }
   });
 
@@ -5437,52 +5029,45 @@
     const content = $("ranking-content");
     const s = curState();
     const picks = s.picks.slice(0, s.topN);
-    const mode = rankingState.mode;
 
     if (picks.length === 0) {
-      const msg = mode === "tplus"
-        ? "Không có setup T+ nào đủ chất lượng hôm nay. Đó là chuyện bình thường — đừng ép vào lệnh khi không có cơ hội rõ. Quay lại sau hoặc thử ngày khác."
-        : "Không có mã nào đủ điều kiện trong top hiện tại.";
-      content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">${mode === "tplus" ? "💤" : "⚠️"}</div><p>${msg}</p></div>`;
+      content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">💤</div><p>Không có setup T+ nào đủ chất lượng hôm nay. Đó là chuyện bình thường — đừng ép vào lệnh khi không có cơ hội rõ. Quay lại sau hoặc thử ngày khác.</p></div>`;
       return;
     }
 
     // T+ distribution stats: Spec Buy / Watchlist breakdown + flag activation
-    let statsHtml = "";
-    if (mode === "tplus") {
-      const allPicks = s.picks; // before topN slice
-      let specBuy = 0, watchlist = 0;
-      const flagCounts = { bearTrap: 0, lowSessionLiq: 0, sellPressure: 0, lowVol: 0, deepDowntrend: 0, volCritical: 0 };
-      for (const p of allPicks) {
-        const f = p.flags || {};
-        const v = getVerdict(p.score, f, null);
-        if (v?.tag === "Spec Buy") specBuy++;
-        else if (v?.tag === "Watchlist") watchlist++;
-        for (const k of Object.keys(flagCounts)) {
-          if (f[k]) flagCounts[k]++;
-        }
+    const allPicks = s.picks; // before topN slice
+    let specBuy = 0, watchlist = 0;
+    const flagCounts = { bearTrap: 0, lowSessionLiq: 0, sellPressure: 0, lowVol: 0, deepDowntrend: 0, volCritical: 0 };
+    for (const p of allPicks) {
+      const f = p.flags || {};
+      const v = getVerdict(p.score, f, null);
+      if (v?.tag === "Spec Buy") specBuy++;
+      else if (v?.tag === "Watchlist") watchlist++;
+      for (const k of Object.keys(flagCounts)) {
+        if (f[k]) flagCounts[k]++;
       }
-      const flagsActive = Object.entries(flagCounts)
-        .filter(([_, c]) => c > 0)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4)
-        .map(([k, c]) => {
-          const labels = {
-            bearTrap: "Bắt dao rơi", lowSessionLiq: "Kẹt hàng", sellPressure: "Lực bán",
-            lowVol: "Vol thấp", deepDowntrend: "Downtrend", volCritical: "Vol cực thấp",
-          };
-          return `${labels[k]} ${c}`;
-        })
-        .join(" · ");
-      statsHtml = `
-        <div class="tplus-stats">
-          <span class="tplus-stats-line">
-            📊 <b>${allPicks.length}</b> picks: 🟢 ${specBuy} Spec Buy · 🟡 ${watchlist} Watchlist
-            ${flagsActive ? `<br><span class="tplus-stats-flags">⚠️ Risk flags: ${flagsActive}</span>` : ""}
-          </span>
-        </div>
-      `;
     }
+    const flagsActive = Object.entries(flagCounts)
+      .filter(([_, c]) => c > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([k, c]) => {
+        const labels = {
+          bearTrap: "Bắt dao rơi", lowSessionLiq: "Kẹt hàng", sellPressure: "Lực bán",
+          lowVol: "Vol thấp", deepDowntrend: "Downtrend", volCritical: "Vol cực thấp",
+        };
+        return `${labels[k]} ${c}`;
+      })
+      .join(" · ");
+    const statsHtml = `
+      <div class="tplus-stats">
+        <span class="tplus-stats-line">
+          📊 <b>${allPicks.length}</b> picks: 🟢 ${specBuy} Spec Buy · 🟡 ${watchlist} Watchlist
+          ${flagsActive ? `<br><span class="tplus-stats-flags">⚠️ Risk flags: ${flagsActive}</span>` : ""}
+        </span>
+      </div>
+    `;
 
     let html = statsHtml + '<div class="picks-list">';
     picks.forEach((p, i) => {
@@ -5490,30 +5075,15 @@
       const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
       const dayChangeSign = f.dayChange >= 0 ? "+" : "";
 
-      let tagsHtml = "";
-      if (mode === "dca") {
-        // For DCA: top 3 z-scores as strong, bottom 2 as weak
-        const factorList = RANKING.FACTOR_NAMES
-          .map((fn) => ({ name: fn, z: f[fn + "_z"] }))
-          .filter((x) => x.z !== null && !isNaN(x.z))
-          .sort((a, b) => b.z - a.z);
-        const topFactors = factorList.slice(0, 3).map((x) => factorTag(x.name, x.z, true)).join("");
-        const weakFactors = factorList.slice(-2).filter((x) => x.z < 0)
-          .map((x) => factorTag(x.name, x.z, false)).join("");
-        tagsHtml = topFactors + weakFactors;
-      } else {
-        // For T+: show reasons from score
-        tagsHtml = (p.reasons || []).map((r) =>
-          `<span class="factor-tag tag-strong">${r}</span>`
-        ).join("");
-      }
+      // T+ reasons display
+      const tagsHtml = (p.reasons || []).map((r) =>
+        `<span class="factor-tag tag-strong">${r}</span>`
+      ).join("");
 
-      // Rank priority sub-label (chỉ T+; DCA dùng rebalance logic khác)
+      // Rank priority sub-label (T+ only)
       let priorityLabel = "";
-      if (mode === "tplus") {
-        if (i === 0 && p.score >= 5) priorityLabel = `<div class="pick-rank-tag pick-rank-priority">Ưu tiên cao</div>`;
-        else if (i <= 1) priorityLabel = `<div class="pick-rank-tag pick-rank-backup">Backup</div>`;
-      }
+      if (i === 0 && p.score >= 5) priorityLabel = `<div class="pick-rank-tag pick-rank-priority">Ưu tiên cao</div>`;
+      else if (i <= 1) priorityLabel = `<div class="pick-rank-tag pick-rank-backup">Backup</div>`;
 
       const isWatched = RANKING.isInWatchlist(p.symbol);
       html += `
@@ -5540,50 +5110,12 @@
     });
     html += "</div>";
 
-    // Allocation hint (different for DCA vs T+)
-    if (mode === "dca") {
-      // Compute NAV-based size + next rebalance for aggregate plan
-      const TOP_N = s.topN;
-      let nav = 0, allocVnd = null;
-      try {
-        const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
-        const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
-        let totalMarket = 0;
-        for (const h of holdings) {
-          const a = portfolioAnalysisCache[h.symbol];
-          if (a?.current) totalMarket += h.qty * a.current * 1000;
-        }
-        nav = totalMarket + cash;
-        if (nav > 0) allocVnd = nav / TOP_N;
-      } catch {}
-
-      const now = new Date();
-      const nextRebal = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const daysToRebal = Math.ceil((nextRebal - now) / (24 * 3600 * 1000));
-      const rebalLabel = nextRebal.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
-
-      const sizeRow = allocVnd != null
-        ? `<b>${fmtMoney(allocVnd)}</b>/mã (~${(100 / TOP_N).toFixed(1)}% × NAV ${fmtMoney(nav)})`
-        : `<b>NAV / ${TOP_N}</b> mỗi mã (~${(100 / TOP_N).toFixed(1)}%). Set portfolio cash để app tính tiền cụ thể.`;
-
-      html += `
-        <div class="dca-aggregate-banner">
-          <div class="dca-aggregate-title">📋 PLAN HÀNH ĐỘNG TOÀN DANH MỤC</div>
-          <ul class="dca-aggregate-list">
-            <li>📦 <b>Mua ${TOP_N} mã trên</b> · Size: ${sizeRow}</li>
-            <li>📅 <b>Rebalance ngày ${rebalLabel}</b> (${daysToRebal} ngày nữa) — bán mã rớt khỏi top, mua mã mới vào</li>
-            <li>🛡️ Sector cap đã apply (max 2 mã/ngành) — đa dạng hóa rủi ro ngành</li>
-            <li>📊 Kỳ vọng CAGR ~17.8%/năm · win rate ~60% picks tăng/tháng · MaxDD -40% trong bear regime</li>
-          </ul>
-        </div>
-      `;
-    } else {
-      html += `
-        <div class="allocation-hint">
-          ⚡ Hold ~5-15 phiên (sau 10 phiên không hồi → cắt). Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
-        </div>
-      `;
-    }
+    // T+ allocation hint
+    html += `
+      <div class="allocation-hint">
+        ⚡ Hold ~5-15 phiên (sau 10 phiên không hồi → cắt). Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
+      </div>
+    `;
 
     content.innerHTML = html;
 
@@ -5594,7 +5126,7 @@
         const sym = card.dataset.symbol;
         const rank = parseInt(card.dataset.rank, 10);
         const pick = picks.find((p) => p.symbol === sym);
-        analyzeContext = mode;
+        analyzeContext = "tplus";
         analyzeContextPick = pick;
         analyzeContextRank = rank;
         switchTab("analyze");
@@ -5649,31 +5181,6 @@
       if (curState().picks.length > 0) renderRanking();
     });
   });
-
-  // Mode toggle (DCA / T+)
-  document.querySelectorAll(".mode-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchRankingMode(btn.dataset.mode));
-  });
-
-  // DCA universe toggle (curated 58 / full ~700)
-  document.querySelectorAll("#ranking-universe-toggle .uni-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const uni = btn.dataset.uni;
-      if (uni === rankingState.dca.universe) return;
-      if (uni === "full") {
-        if (!confirm("Full universe (~700 mã HOSE+HNX) chưa được backtest validate edge. Có thể bao gồm small/mid cap với pump/dump risk. Hard filters (MA200, thanh khoản ≥10 tỷ) vẫn áp dụng. Tiếp tục?")) return;
-      }
-      rankingState.dca.universe = uni;
-      localStorage.setItem(DCA_UNIVERSE_KEY, uni);
-      syncDcaUniverseToggle();
-      RANKING.clearCache();
-      rankingState.dca.loaded = false;
-      loadRanking(true);
-    });
-  });
-
-  // Initial sync: show toggle if start in DCA mode
-  syncDcaUniverseToggle();
 
   $("ranking-refresh").addEventListener("click", () => {
     RANKING.clearCache();

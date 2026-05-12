@@ -141,16 +141,10 @@ window.__SSI_RANKING__ = (function () {
     }
   }
 
-  // Set of DCA universe codes for quick membership check
-  const DCA_UNIVERSE_SET = new Set(UNIVERSE.map((u) => u.code));
+  // Curated 58 mã (CORE_VN30 + EXTENDED) — vẫn dùng làm fallback nếu fetchFullUniverse fail
+  // + làm reference cho foreign flow fetch (chỉ fetch NN cho mã curated để speed up).
+  const CURATED_UNIVERSE_SET = new Set(UNIVERSE.map((u) => u.code));
 
-  const FACTOR_NAMES = [
-    "ma200Quality", "lowDrawdown", "momentum6m",
-    "trendConsistency", "liquidity", "foreignFlow60d",
-  ];
-
-  const CACHE_KEY = "dca_top_picks_v1";
-  const CACHE_TTL_MS = 24 * 3600 * 1000; // 24h
   const CACHE_KEY_TPLUS = "tplus_top_picks_v1";
   const CACHE_TTL_TPLUS_MS = 1 * 3600 * 1000; // 1h (refresh hourly during market hours)
 
@@ -549,154 +543,6 @@ window.__SSI_RANKING__ = (function () {
   }
 
   // ── Compute factors for one stock from OHLCV + foreign flow data ──
-  function computeFactors(ohlcv, foreignDailyData) {
-    const closes = ohlcv.closes;
-    const highs = ohlcv.highs;
-    const volumes = ohlcv.volumes;
-    const n = closes.length;
-    if (n < 200) return null;
-
-    const currentClose = closes[n - 1];
-
-    // 1. MA200 quality: % time above MA200 in last min(252, n-200) bars
-    const ma200Lookback = Math.min(252, n - 200);
-    let aboveCount = 0;
-    for (let i = n - ma200Lookback; i < n; i++) {
-      const ma = sma(closes, 200, i);
-      if (ma !== null && closes[i] > ma) aboveCount++;
-    }
-    const ma200Quality = ma200Lookback > 0 ? aboveCount / ma200Lookback : null;
-
-    // 2. Low drawdown 252 (negative number; higher = better)
-    const ddLookback = Math.min(252, n);
-    let runningMax = closes[n - ddLookback];
-    let maxDD = 0;
-    for (let i = n - ddLookback; i < n; i++) {
-      if (closes[i] > runningMax) runningMax = closes[i];
-      const dd = (closes[i] - runningMax) / runningMax;
-      if (dd < maxDD) maxDD = dd;
-    }
-    const lowDrawdown = maxDD;
-
-    // 3. Momentum 6m (cap at 100%)
-    const idx6mAgo = Math.max(0, n - 127);
-    const close6m = closes[idx6mAgo];
-    const momentum6m = close6m > 0 ? Math.min(1.0, currentClose / close6m - 1) : null;
-
-    // 4. Trend consistency: 252-day daily-return Sharpe
-    const retLookback = Math.min(252, n - 1);
-    const dailyRets = [];
-    for (let i = n - retLookback; i < n; i++) {
-      if (closes[i - 1] > 0) {
-        dailyRets.push((closes[i] - closes[i - 1]) / closes[i - 1]);
-      }
-    }
-    let trendConsistency = null;
-    if (dailyRets.length > 30) {
-      const mean = dailyRets.reduce((a, b) => a + b, 0) / dailyRets.length;
-      const variance = dailyRets.reduce((a, b) => a + (b - mean) ** 2, 0) / dailyRets.length;
-      const std = Math.sqrt(variance);
-      trendConsistency = std > 0 ? mean / std : 0;
-    }
-
-    // 5. Liquidity: log of avg 20-day turnover (close in thousand-VND → ×1000)
-    let sumTurnover = 0;
-    let count = 0;
-    const liqLookback = Math.min(20, n);
-    for (let i = n - liqLookback; i < n; i++) {
-      sumTurnover += closes[i] * volumes[i] * 1000;
-      count++;
-    }
-    const avgTurnover = count > 0 ? sumTurnover / count : 0;
-    const liquidity = Math.log1p(avgTurnover);
-
-    // 6. Foreign flow 60-day cumulative (sign × log magnitude)
-    let nn60d = 0;
-    if (foreignDailyData && foreignDailyData.length > 0) {
-      const recent = foreignDailyData.slice(-60);
-      nn60d = recent.reduce((s, r) => s + (r.netVal || 0), 0);
-    }
-    const foreignFlow60d = Math.sign(nn60d) * Math.log1p(Math.abs(nn60d) / 1e9);
-
-    // ── Hard filters ──
-    const ma200Now = sma(closes, 200, n);
-    const ma200_20agoIdx = n - 20;
-    const ma200_20ago = ma200_20agoIdx >= 200 ? sma(closes, 200, ma200_20agoIdx) : null;
-    const ma200Declining = ma200Now !== null && ma200_20ago !== null && ma200Now < ma200_20ago;
-    const filterBelowMa200 = ma200Now === null || currentClose < ma200Now || ma200Declining;
-    const filterTooHot = momentum6m !== null && momentum6m >= 1.0;
-    const filterIlliquid = avgTurnover < 10e9;
-
-    return {
-      ma200Quality, lowDrawdown, momentum6m, trendConsistency,
-      liquidity, foreignFlow60d,
-      filterBelowMa200, filterTooHot, filterIlliquid,
-      avgTurnover, currentPrice: currentClose,
-      // Day change for display
-      dayChange: n >= 2 ? (currentClose - closes[n - 2]) / closes[n - 2] : 0,
-      ma200: ma200Now,
-    };
-  }
-
-  // ── Cross-sectional z-score across all stocks ──
-  function computeZscores(allStocks) {
-    for (const fn of FACTOR_NAMES) {
-      const values = allStocks
-        .map((s) => (s.factors ? s.factors[fn] : null))
-        .filter((v) => v !== null && !isNaN(v));
-      if (values.length < 5) continue;
-
-      const mean = values.reduce((a, b) => a + b, 0) / values.length;
-      const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
-      const std = Math.sqrt(variance);
-
-      for (const stock of allStocks) {
-        if (!stock.factors) continue;
-        const v = stock.factors[fn];
-        stock.factors[fn + "_z"] =
-          v !== null && !isNaN(v) && std > 0 ? (v - mean) / std : null;
-      }
-    }
-
-    // Combine z-scores → DCA score (need ≥4 of 6 factors)
-    for (const stock of allStocks) {
-      if (!stock.factors) {
-        stock.score = null;
-        stock.eligible = false;
-        continue;
-      }
-      const zVals = FACTOR_NAMES.map((fn) => stock.factors[fn + "_z"]).filter(
-        (v) => v !== null && !isNaN(v)
-      );
-      if (zVals.length < 4) {
-        stock.score = null;
-      } else {
-        stock.score = zVals.reduce((a, b) => a + b, 0) / zVals.length;
-      }
-      const f = stock.factors;
-      stock.eligible = !(f.filterBelowMa200 || f.filterTooHot || f.filterIlliquid);
-      if (!stock.eligible) stock.score = null;
-    }
-  }
-
-  // ── Top-N selection with sector cap ──
-  function selectTopN(allStocks, n, sectorCap) {
-    const valid = allStocks.filter((s) => s.score !== null && s.eligible);
-    valid.sort((a, b) => b.score - a.score);
-
-    const picks = [];
-    const sectorCount = {};
-    for (const stock of valid) {
-      if (sectorCap !== null) {
-        if ((sectorCount[stock.sector] || 0) >= sectorCap) continue;
-      }
-      picks.push(stock);
-      sectorCount[stock.sector] = (sectorCount[stock.sector] || 0) + 1;
-      if (picks.length >= n) break;
-    }
-    return picks;
-  }
-
   // ── Fetch foreign flow daily data (returns raw array, not summary) ──
   async function fetchForeignDaily(symbol, daysBack = 70) {
     const toDate = new Date().toISOString().split("T")[0];
@@ -713,95 +559,7 @@ window.__SSI_RANKING__ = (function () {
     }
   }
 
-  // ── Main: load + compute + rank ──
-  // opts.universe: "curated" (58 mã, default, backtest validated)
-  //              | "full"   (toàn HOSE+HNX ~700, experimental, edge chưa backtest)
-  async function loadTopPicks(opts = {}) {
-    const {
-      topN = 15,
-      sectorCap = 2,
-      useCache = true,
-      onProgress,
-      universe = "curated",
-    } = opts;
-
-    const cacheKey = universe === "full" ? `${CACHE_KEY}_full` : CACHE_KEY;
-
-    if (useCache) {
-      try {
-        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-          return { ...cached.data, fromCache: true };
-        }
-      } catch {}
-    }
-
-    const startTime = Date.now();
-    let stocks;
-    if (universe === "full") {
-      const full = await fetchFullUniverse();
-      if (!full || full.length < 100) {
-        // fallback curated nếu fetch full fail
-        stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
-      } else {
-        stocks = full.map((u) => ({ symbol: u.code, sector: u.sector }));
-      }
-    } else {
-      stocks = UNIVERSE.map((u) => ({ symbol: u.code, sector: u.sector }));
-    }
-
-    // Fetch in batches of 10 to avoid overwhelming network
-    const batchSize = 10;
-    let done = 0;
-    for (let i = 0; i < stocks.length; i += batchSize) {
-      const batch = stocks.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async (stock) => {
-          try {
-            const [ohlcv, foreign] = await Promise.all([
-              ANALYSIS.fetchHistory(stock.symbol, "D", 320),
-              fetchForeignDaily(stock.symbol, 70),
-            ]);
-            stock.factors = computeFactors(ohlcv, foreign);
-          } catch (e) {
-            stock.error = e.message;
-            stock.factors = null;
-          }
-          done++;
-          if (onProgress) onProgress(done, stocks.length);
-        })
-      );
-    }
-
-    computeZscores(stocks);
-    const picks = selectTopN(stocks, topN, sectorCap);
-
-    const result = {
-      picks: picks.map((p) => ({
-        symbol: p.symbol,
-        sector: p.sector,
-        score: p.score,
-        factors: p.factors,
-      })),
-      allCount: stocks.length,
-      eligibleCount: stocks.filter((s) => s.eligible).length,
-      timestamp: Date.now(),
-      duration: Date.now() - startTime,
-      fromCache: false,
-    };
-
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify({
-        timestamp: Date.now(),
-        data: result,
-      }));
-    } catch {}
-
-    return result;
-  }
-
   function clearCache() {
-    localStorage.removeItem(CACHE_KEY);
     localStorage.removeItem(CACHE_KEY_TPLUS);
   }
 
@@ -1226,9 +984,12 @@ window.__SSI_RANKING__ = (function () {
       await Promise.all(
         batch.map(async (stock) => {
           try {
-            const isDcaUniverse = DCA_UNIVERSE_SET.has(stock.symbol);
+            // Foreign flow fetch chỉ cho mã trong curated universe (large/mid caps)
+            // — bỏ qua small caps để speed up scan 2x. NN reversal signal worth
+            // +1.5/13 max, drop OK cho mã ngoài curated.
+            const isCurated = CURATED_UNIVERSE_SET.has(stock.symbol);
             const ohlcv = await ANALYSIS.fetchHistory(stock.symbol, "D", 200);
-            const foreign = isDcaUniverse
+            const foreign = isCurated
               ? await fetchForeignDaily(stock.symbol, 10).catch(() => null)
               : null;
             stock.tplusFactors = computeTPlusFactors(ohlcv, foreign);
@@ -1296,26 +1057,22 @@ window.__SSI_RANKING__ = (function () {
     return result;
   }
 
-  // ── Paper Trading Tracker ────────────────────────
-  // Auto-snapshot top picks để theo dõi performance thực tế vs backtest.
-  // - DCA: snapshot 1 lần/tháng
-  // - T+: snapshot mỗi ngày có picks
-  // Stored in localStorage. Max 24 snapshots/mode (~2 năm DCA, ~1 tháng T+).
+  // ── Paper Trading Tracker (T+ only) ────────────────────────
+  // Auto-snapshot top picks mỗi ngày có picks để theo dõi performance vs backtest.
+  // Stored in localStorage. Max 60 snapshots (~3 tháng trading days).
   const TRACKER_KEY = "paper_tracker_v1";
-  const MAX_SNAPSHOTS_DCA = 24;
   const MAX_SNAPSHOTS_TPLUS = 60;
 
   function loadTracker() {
     try {
       const raw = localStorage.getItem(TRACKER_KEY);
-      if (!raw) return { dca: [], tplus: [] };
+      if (!raw) return { tplus: [] };
       const parsed = JSON.parse(raw);
       return {
-        dca: Array.isArray(parsed.dca) ? parsed.dca : [],
         tplus: Array.isArray(parsed.tplus) ? parsed.tplus : [],
       };
     } catch {
-      return { dca: [], tplus: [] };
+      return { tplus: [] };
     }
   }
 
@@ -1326,17 +1083,12 @@ window.__SSI_RANKING__ = (function () {
   }
 
   function shouldSnapshot(mode, tracker) {
-    const arr = tracker[mode] || [];
+    // T+ only — 1 lần/ngày (theo local date)
+    const arr = tracker.tplus || [];
     if (arr.length === 0) return true;
     const last = new Date(arr[arr.length - 1].date);
     const now = new Date();
-    if (mode === "dca") {
-      // 1 lần/tháng
-      return last.getMonth() !== now.getMonth() || last.getFullYear() !== now.getFullYear();
-    } else {
-      // 1 lần/ngày (theo local date)
-      return last.toDateString() !== now.toDateString();
-    }
+    return last.toDateString() !== now.toDateString();
   }
 
   function takeSnapshot(mode, picks, regime) {
@@ -1351,16 +1103,16 @@ window.__SSI_RANKING__ = (function () {
       reasons: p.reasons || null,
     }));
     const entry = { date: dateIso, regime: regimeStr, picks: picksData };
-    tracker[mode].push(entry);
-    const max = mode === "dca" ? MAX_SNAPSHOTS_DCA : MAX_SNAPSHOTS_TPLUS;
-    if (tracker[mode].length > max) {
-      tracker[mode] = tracker[mode].slice(-max);
+    if (!tracker.tplus) tracker.tplus = [];
+    tracker.tplus.push(entry);
+    if (tracker.tplus.length > MAX_SNAPSHOTS_TPLUS) {
+      tracker.tplus = tracker.tplus.slice(-MAX_SNAPSHOTS_TPLUS);
     }
     saveTracker(tracker);
     // DB write-through
     if (_isOnline()) {
       _AUTH().dbInsert("tracker_snapshots", {
-        mode,
+        mode: "tplus",
         snapshot_date: dateIso,
         regime: regimeStr,
         picks: picksData,
@@ -1392,18 +1144,16 @@ window.__SSI_RANKING__ = (function () {
       order: { column: "snapshot_date", ascending: true },
     });
     if (data) {
-      const tracker = { dca: [], tplus: [] };
+      const tracker = { tplus: [] };
       for (const row of data) {
-        const entry = {
+        if (row.mode !== "tplus") continue; // skip legacy DCA rows
+        tracker.tplus.push({
           date: row.snapshot_date,
           regime: row.regime,
           picks: row.picks || [],
-        };
-        if (row.mode === "dca") tracker.dca.push(entry);
-        else if (row.mode === "tplus") tracker.tplus.push(entry);
+        });
       }
       // Trim to max
-      tracker.dca = tracker.dca.slice(-MAX_SNAPSHOTS_DCA);
       tracker.tplus = tracker.tplus.slice(-MAX_SNAPSHOTS_TPLUS);
       saveTracker(tracker);
     }
@@ -1899,8 +1649,6 @@ window.__SSI_RANKING__ = (function () {
 
   return {
     UNIVERSE,
-    FACTOR_NAMES,
-    loadTopPicks,
     loadTopPicksTPlus,
     getMarketRegime,
     loadMarketSnapshot,

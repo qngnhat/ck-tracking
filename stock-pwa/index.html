@@ -6,12 +6,12 @@
   <meta name="theme-color" content="#1a1a2e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Phân tích CP">
+  <meta name="apple-mobile-web-app-title" content="Bonggnez">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
-  <title>Phân tích Cổ phiếu</title>
+  <title>Bonggnez · Lướt sóng VN</title>
 </head>
 <body>
   <div class="offline-banner" id="offline-banner" hidden>
@@ -20,8 +20,8 @@
   <header class="app-header">
     <div class="app-header-row">
       <div class="app-title">
-        <span class="app-logo">📊</span>
-        <span>Phân tích CP</span>
+        <span class="app-logo">⚡</span>
+        <span>Bonggnez</span>
       </div>
       <button class="bell-btn" id="bell-btn" title="Cảnh báo">
         <span class="bell-icon">🔔</span>
@@ -32,9 +32,9 @@
       </button>
     </div>
     <div class="tab-nav">
-      <button class="tab-btn active" data-tab="home">🏠</button>
+      <button class="tab-btn" data-tab="home">🏠</button>
       <button class="tab-btn" data-tab="analyze">📊 Phân tích</button>
-      <button class="tab-btn" data-tab="ranking">🏆 Top picks</button>
+      <button class="tab-btn active" data-tab="ranking">⚡ Lướt sóng</button>
       <button class="tab-btn" data-tab="portfolio">💼 Danh mục</button>
     </div>
   </header>
@@ -244,7 +244,7 @@
   </div>
 
   <!-- Home tab -->
-  <div class="tab-content tab-home active">
+  <div class="tab-content tab-home">
     <main id="home-container"></main>
   </div>
 
@@ -302,23 +302,11 @@
   </div>
 
   <!-- Ranking tab -->
-  <div class="tab-content tab-ranking">
+  <div class="tab-content tab-ranking active">
     <main id="ranking-container">
-      <div class="ranking-mode-toggle">
-        <button class="mode-btn active" data-mode="dca">📈 DCA dài hạn</button>
-        <button class="mode-btn" data-mode="tplus">⚡ T+ ngắn hạn</button>
-      </div>
-
-      <div class="ranking-universe-toggle" id="ranking-universe-toggle" style="display:none">
-        <span class="ctrl-label">Universe:</span>
-        <button class="uni-btn active" data-uni="curated">Curated 58 ✓</button>
-        <button class="uni-btn" data-uni="full">Full ~700 ⚠️</button>
-        <small class="uni-hint">Curated: validated edge CAGR +17.8% backtest. Full: experimental, edge chưa backtest, bao gồm small/mid cap.</small>
-      </div>
-
       <div class="ranking-header">
         <div>
-          <h2 class="ranking-title" id="ranking-title">Top mã DCA</h2>
+          <h2 class="ranking-title" id="ranking-title">Lướt sóng T+</h2>
           <div class="ranking-meta" id="ranking-meta">Tải lần đầu để xem khuyến nghị</div>
         </div>
         <div class="ranking-actions">
@@ -339,16 +327,16 @@
       <div id="holiday-banner" class="holiday-banner" style="display:none"></div>
 
       <div id="ranking-content">
-        <div class="empty-state ranking-intro" id="intro-dca">
-          <div class="empty-icon">📈</div>
-          <h2>Khuyến nghị DCA dài hạn</h2>
-          <p>Bảng xếp hạng top mã đáng tích lũy hàng tháng, dựa trên 6 yếu tố kỹ thuật + dòng tiền khối ngoại. Backtest 8 năm cho thấy chiến lược này vượt buy-and-hold cả universe.</p>
+        <div class="empty-state ranking-intro" id="intro-tplus">
+          <div class="empty-icon">⚡</div>
+          <h2>Lướt sóng T+</h2>
+          <p>Bảng xếp hạng top setup mean-reversion ngắn hạn dựa trên confluence các tín hiệu kỹ thuật + volume + dòng tiền khối ngoại. Hold 5-15 phiên, target +5-12%, SL -8%.</p>
           <button class="btn-primary" id="ranking-load-btn">Tải bảng xếp hạng</button>
         </div>
       </div>
 
       <div class="ranking-disclaimer" id="ranking-disclaimer">
-        ⚠️ DCA cập nhật 24h, rebalance đầu tháng. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
+        ⚠️ T+ cập nhật mỗi giờ trong giờ giao dịch. Setup hiếm là tính năng, không phải bug. Hold 5-15 phiên, stop loss -8%. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
       </div>
 
       <!-- Paper Tracker (lịch sử khuyến nghị + verify performance) -->
@@ -358,10 +346,6 @@
           <span class="tracker-toggle-icon" id="tracker-toggle-icon">▼</span>
         </div>
         <div class="tracker-body" id="tracker-body" style="display:none">
-          <div class="tracker-tabs" role="tablist">
-            <button class="tracker-tab" data-mode="tplus" type="button" role="tab">⚡ T+ <span class="tracker-tab-count" id="tracker-count-tplus">0</span></button>
-            <button class="tracker-tab" data-mode="dca" type="button" role="tab">📈 DCA <span class="tracker-tab-count" id="tracker-count-dca">0</span></button>
-          </div>
           <div class="tracker-controls">
             <button class="btn-primary tracker-refresh-btn" id="tracker-refresh-btn">Cập nhật giá hiện tại</button>
             <button class="link-btn" id="tracker-clear-btn">Xóa lịch sử</button>

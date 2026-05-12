@@ -1,7 +1,7 @@
 {
-  "name": "Phân tích Cổ phiếu VN",
-  "short_name": "Phân tích CP",
-  "description": "Phân tích kỹ thuật và cơ bản cổ phiếu thị trường chứng khoán Việt Nam",
+  "name": "Bonggnez · Lướt sóng VN",
+  "short_name": "Bonggnez",
+  "description": "App phân tích & lướt sóng T+ thị trường chứng khoán Việt Nam — confluence signal, plan giao dịch cụ thể, alert Telegram.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
