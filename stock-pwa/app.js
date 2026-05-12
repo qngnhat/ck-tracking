@@ -574,8 +574,8 @@
       btn.addEventListener("click", () => setAnalysisTab(btn.dataset.mode));
     });
 
-    // Bind tooltip taps
-    root.querySelectorAll(".label.has-tip").forEach((el) => {
+    // Bind tooltip taps (label.has-tip + any .has-tip element like profile chips/rows)
+    root.querySelectorAll(".has-tip").forEach((el) => {
       el.addEventListener("click", () => {
         showTooltip(el.dataset.tipTitle, el.dataset.tipBody);
       });
@@ -855,7 +855,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v86"; // sync với sw.js CACHE name suffix
+    const appVersion = "v87"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -2002,43 +2002,111 @@
       : p.volPercentile > 25 ? `Trung tính (${fmt0(p.volPercentile)}% percentile)`
       : `Bottom 25% (low activity)`;
 
+    // Tooltips (escape quotes)
+    const esc = (s) => String(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+    const tipVol = esc(
+      `ATR % (Average True Range) đo biến động trung bình mỗi phiên. Hiện tại ${fmt1(p.atrPct)}% (percentile ${fmt0(p.atrPercentile)}% so với 1 năm).\n\n` +
+      `• Calm (<1.5%): mã ổn định, biến động thấp.\n` +
+      `• Normal (1.5-3%): biến động vừa.\n` +
+      `• Volatile (3-5%): biến động cao, cần size nhỏ + SL rộng.\n` +
+      `• Wild (>5%): rất biến động, dễ pump/dump.\n\n` +
+      `Profile multiplier áp dụng vào T+ scoring: mã volatile sẵn → vol spike không novel, weight giảm.`
+    );
+
+    const tipTrend = esc(
+      `Phân loại theo độ dài trend up trung bình + pullback depth.\n\n` +
+      `Hiện tại: trend TB ${fmt0(p.avgUpTrendLen)} phiên, pullback ${fmt1(p.avgPullbackPct)}%.\n\n` +
+      `• Steady climber: trend dài (>15 phiên) + pullback nhỏ (<7%). Mã đẹp cho trend-following.\n` +
+      `• Trend-follower: trend vừa (10-15 phiên), pullback OK.\n` +
+      `• Range-bound: trend ngắn, đi ngang.\n` +
+      `• Choppy: trend rất ngắn (<5 phiên), không có direction rõ.\n\n` +
+      `Adaptive: Steady climber → trend signals ×1.3, Choppy → ×0.7.`
+    );
+
+    const tipBeta = esc(
+      `Beta đo độ nhạy của mã so với VN-Index trên 100 phiên gần nhất.\n\n` +
+      `Hiện tại β ${p.beta != null ? p.beta.toFixed(2) : "--"} → ${p.betaLabel}.\n\n` +
+      `• High-beta (β>1.3): khuếch đại move của VNI. VNI +5% → mã +6.5%+.\n` +
+      `• Market (0.8-1.3): cùng pace với index.\n` +
+      `• Low-beta (0.3-0.8): ít nhạy hơn index.\n` +
+      `• Defensive (<0.3): độc lập với index — phù hợp diversification.\n\n` +
+      `High-beta trong BULL regime → outperform; trong BEAR → underperform mạnh.`
+    );
+
+    const tipTrendBehavior = esc(
+      `Trend lengths được tính từ pivot lows → pivot highs trong 250 phiên qua.\n` +
+      `Pullback depth = giảm từ pivot high tới pivot low kế tiếp (% từ peak).\n\n` +
+      `Trend trung bình ${fmt0(p.avgUpTrendLen)} phiên → kỳ vọng hold thời gian này.\n` +
+      `Pullback TB ${fmt1(p.avgPullbackPct)}% → SL nên đặt > pullback bình thường để tránh false stop.`
+    );
+
+    const tipBreakout = esc(
+      `Breakout = giá vượt w20-high (đỉnh 20 phiên) trong 252 phiên qua.\n` +
+      `Win rate = % breakouts có giá tăng tiếp sau 10 phiên.\n\n` +
+      `Hiện tại: ${p.breakoutCount} lần breakout, win rate ${fmt0(p.breakoutWinRate)}%, avg +${fmt1(p.breakoutAvgRet)}% sau 10d.\n\n` +
+      `• >65% reliable: breakout signal mạnh cho mã này.\n` +
+      `• 50-65% OK: breakout có edge nhẹ.\n` +
+      `• <50% yếu: mã hay fake breakout, giảm trust signal.\n\n` +
+      `Adaptive: weight breakout × (winRate/50). Reliable mã được boost, fake-breakout mã giảm.`
+    );
+
+    const tipSelloff = esc(
+      `Sell-off = giảm > 10% trong 5 phiên liên tiếp trong 2 năm qua.\n` +
+      `Recovery time = số phiên đến khi giá vượt lại đỉnh trước sell-off.\n` +
+      `Bounce 10d = return trung bình 10 phiên sau khi sell-off bottom.\n\n` +
+      `Hiện tại: ${p.selloffCount} lần -10%+.\n` +
+      `${p.avgRecoveryBars != null ? `Recovery TB ${fmt0(p.avgRecoveryBars)} phiên, bounce 10d +${fmt1(p.avgBounce10)}%.` : "Chưa có history recovery."}\n\n` +
+      `Adaptive: nếu mã có history recovery (>=2 lần) → RSI<30 signal được apply weight × recoveryReliability. Mã chưa từng hồi mạnh → RSI<30 chỉ là noise, drop.`
+    );
+
+    const tipVolToday = esc(
+      `Volume hôm nay = ${p.volMultiple != null ? p.volMultiple.toFixed(1) : "--"}× TB 1 năm.\n` +
+      `Percentile = vị trí volume hôm nay trong distribution 252 phiên.\n\n` +
+      `• Top 5% (>95th percentile): rare event — institutional activity, news catalyst.\n` +
+      `• Top 25% (>75th percentile): above average activity.\n` +
+      `• 25-75%: trung tính.\n` +
+      `• Bottom 25%: low activity, signal kém tin cậy.\n\n` +
+      `Vol regime giúp distinguish "high vol cho riêng mã này" vs "thấp tuyệt đối". Mã illiquid tự nhiên vol thấp, không phải bug.`
+    );
+
     return `
       <div class="an-card full-width stock-profile-card">
-        <div class="an-title">🎭 Đặc thù giao dịch của mã</div>
+        <div class="an-title">🎭 Đặc thù giao dịch của mã <small style="font-size:11px;color:#888;font-weight:400">(tap để xem giải thích)</small></div>
 
         <div class="profile-chips">
-          <span class="profile-chip" style="border-color:${volColor}55;color:${volColor}">
+          <span class="profile-chip has-tip" data-tip-title="Volatility · ${p.volLabel}" data-tip-body="${tipVol}" style="border-color:${volColor}55;color:${volColor}">
             <b>${p.volLabel}</b> · ATR ${fmt1(p.atrPct)}%
           </span>
-          <span class="profile-chip" style="border-color:${trendColor}55;color:${trendColor}">
+          <span class="profile-chip has-tip" data-tip-title="Trend behavior · ${p.trendLabel}" data-tip-body="${tipTrend}" style="border-color:${trendColor}55;color:${trendColor}">
             <b>${p.trendLabel}</b>
           </span>
-          <span class="profile-chip" style="border-color:${betaColor}55;color:${betaColor}">
+          <span class="profile-chip has-tip" data-tip-title="Beta vs VN-Index · ${p.betaLabel}" data-tip-body="${tipBeta}" style="border-color:${betaColor}55;color:${betaColor}">
             <b>${p.betaLabel}</b> · β ${p.beta != null ? p.beta.toFixed(2) : "--"}
           </span>
         </div>
 
         <div class="profile-rows">
-          <div class="profile-row">
+          <div class="profile-row has-tip" data-tip-title="📈 Trend behavior" data-tip-body="${tipTrendBehavior}">
             <span class="profile-label">📈 Trend behavior</span>
             <span class="profile-val">Trend trung bình <b>${fmt0(p.avgUpTrendLen)} phiên</b> · pullback ${fmt1(p.avgPullbackPct)}%</span>
           </div>
-          <div class="profile-row">
+          <div class="profile-row has-tip" data-tip-title="🚀 Breakout history (1 năm)" data-tip-body="${tipBreakout}">
             <span class="profile-label">🚀 Breakout history (1y)</span>
             <span class="profile-val"><b>${p.breakoutCount}</b> lần · ${bkLabel} · avg +${fmt1(p.breakoutAvgRet)}%/10d</span>
           </div>
-          <div class="profile-row">
+          <div class="profile-row has-tip" data-tip-title="📉 Sell-off patterns (2 năm)" data-tip-body="${tipSelloff}">
             <span class="profile-label">📉 Sell-off patterns (2y)</span>
             <span class="profile-val">${recoveryStr}</span>
           </div>
-          <div class="profile-row">
+          <div class="profile-row has-tip" data-tip-title="📊 Volume regime" data-tip-body="${tipVolToday}">
             <span class="profile-label">📊 Volume hôm nay</span>
             <span class="profile-val">${volRegStr}${p.volMultiple != null ? ` · ${p.volMultiple.toFixed(1)}× TB` : ""}</span>
           </div>
         </div>
 
         <div class="profile-hint">
-          💡 Profile từ ${Math.min(252, currentData?.closes?.length || 0)} phiên gần nhất. Adaptive multipliers áp dụng vào T+ scoring để weight phù hợp với cá tính mã.
+          💡 Profile từ ${Math.min(252, currentData?.closes?.length || 0)} phiên gần nhất. Tap mỗi mục để xem giải thích chi tiết. Adaptive multipliers áp dụng vào T+ scoring.
         </div>
       </div>
     `;

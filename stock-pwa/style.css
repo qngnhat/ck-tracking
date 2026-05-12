@@ -867,6 +867,22 @@ button {
   white-space: nowrap;
 }
 
+.profile-chip.has-tip {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.profile-chip.has-tip::after {
+  content: " ⓘ";
+  opacity: 0.5;
+  margin-left: 2px;
+}
+
+.profile-chip.has-tip:hover,
+.profile-chip.has-tip:active {
+  background: rgba(0, 210, 255, 0.08);
+}
+
 .profile-rows {
   display: flex;
   flex-direction: column;
@@ -881,6 +897,23 @@ button {
   padding: 6px 8px;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
   font-size: 12px;
+  transition: background 0.15s;
+}
+
+.profile-row.has-tip {
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.profile-row.has-tip:hover,
+.profile-row.has-tip:active {
+  background: rgba(0, 210, 255, 0.04);
+}
+
+.profile-row.has-tip .profile-label::after {
+  content: " ⓘ";
+  opacity: 0.4;
+  font-size: 10px;
 }
 
 .profile-row:last-child {
@@ -1619,6 +1652,7 @@ body.is-offline {
   font-size: 14px;
   color: #d0d0d0;
   line-height: 1.7;
+  white-space: pre-line; /* preserve \n line breaks trong tooltip body */
 }
 
 /* ── Foreign flow helpers ── */
