@@ -176,8 +176,13 @@ async function checkAllWatches(env) {
 
   const priceData = {};
   for (const sym of symbols) {
-    const data = await fetchVndHistory(sym, 5).catch(() => null);
-    if (data) priceData[sym] = data;
+    try {
+      const data = await fetchVndHistory(sym, 5);
+      priceData[sym] = data;
+      console.log(`[cron] fetched ${sym}: ${data.closes.length} bars, last close=${data.closes[data.closes.length-1]}, vol=${data.volumes[data.volumes.length-1]}`);
+    } catch (e) {
+      console.warn(`[cron] VND fetch ${sym} FAILED:`, e.message || e);
+    }
   }
 
   // 3. Collect users to send messages
@@ -190,6 +195,7 @@ async function checkAllWatches(env) {
   for (const u of users || []) {
     if (u.chat_id) chatByUser.set(u.user_id, u.chat_id);
   }
+  console.log(`[cron] users loaded: ${chatByUser.size}/${userIdsToFetch.length} (priceData syms: ${Object.keys(priceData).length})`);
 
   // 4. Process each watch
   let triggered = 0;
@@ -203,7 +209,15 @@ async function checkAllWatches(env) {
     const curVol = data.volumes[data.volumes.length - 1];
     const curOpen = data.opens[data.opens.length - 1];
 
-    const t = w.triggers || {};
+    // Defensive parse: nếu Supabase column type là JSON/TEXT thì w.triggers
+    // về JS dạng string → t.volAbove sẽ undefined → silent fail. JSONB thì
+    // auto-parsed thành object. Parse cả 2 case cho chắc.
+    let t = w.triggers || {};
+    if (typeof t === "string") {
+      try { t = JSON.parse(t); } catch { t = {}; }
+    }
+    console.log(`[cron] ${w.symbol}: cur=${cur} vol=${curVol} open=${curOpen} t=${JSON.stringify(t)}`);
+
     const reasons = [];
     if (t.closeAbove && cur >= t.closeAbove) {
       reasons.push(`close *${cur.toFixed(2)}* ≥ ${t.closeAbove.toFixed(2)}`);
@@ -244,7 +258,17 @@ async function fetchVndHistory(symbol, days = 5) {
   const to = Math.floor(Date.now() / 1000);
   const from = to - days * 24 * 3600;
   const url = `${VND_HISTORY_URL}?resolution=D&symbol=${symbol}&from=${from}&to=${to}`;
-  const res = await fetch(url);
+  // VND blocks Cloudflare Worker default fetch (no UA, custom origin) → 403.
+  // Giả browser headers cho qua. dchart endpoint chính là widget chart VNDirect.
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+      "Origin": "https://dchart.vndirect.com.vn",
+      "Referer": "https://dchart.vndirect.com.vn/",
+    },
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.s !== "ok" || !data.c?.length) throw new Error("no data");
