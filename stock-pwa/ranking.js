@@ -291,8 +291,249 @@ window.__SSI_RANKING__ = (function () {
     return { macd: m, signal: sig, hist: m - sig };
   }
 
-  // ── T+ Score (mean-reversion focused) ───────────────
-  function computeTPlusFactors(ohlcv, foreignDailyData) {
+  // ── T+ Score (Strong Leaders — momentum/RS/breakout/accumulation) ──
+  // VN narrow-leadership regime: chỉ 1 vài mã mạnh tăng, mean-reversion fail.
+  // Focus: relative strength vs market, breakout patterns, volume accumulation,
+  // MA alignment. Profile multipliers (Phase C) áp dụng nếu được truyền vào.
+  function computeTPlusFactors(ohlcv, foreignDailyData, ctx = {}) {
+    const closes = ohlcv.closes;
+    const highs = ohlcv.highs;
+    const lows = ohlcv.lows;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 60) return null;
+
+    const vnindexCloses = ctx.vnindexCloses || null;
+    const profile = ctx.stockProfile || null;
+    const mult = profile?.multipliers || {};
+    const wVol = mult.volMultiplier ?? 1;
+    const wBreakout = mult.breakoutReliability ?? 1;
+    const wTrend = mult.trendReliability ?? 1;
+    const wRecovery = mult.recoveryReliability ?? 1;
+
+    const currentClose = closes[n - 1];
+    const reasons = [];
+    let score = 0;
+
+    // ── A. Relative Strength vs VN-Index (PRIMARY SIGNAL) ──
+    if (vnindexCloses && vnindexCloses.length >= 25) {
+      // 5d và 20d return của mã vs VNI
+      const stock5d = (currentClose / closes[n - 6] - 1) * 100;
+      const stock20d = (currentClose / closes[n - 21] - 1) * 100;
+      const vniLast = vnindexCloses[vnindexCloses.length - 1];
+      const vni5d = (vniLast / vnindexCloses[vnindexCloses.length - 6] - 1) * 100;
+      const vni20d = (vniLast / vnindexCloses[vnindexCloses.length - 21] - 1) * 100;
+      const rs5 = stock5d - vni5d;
+      const rs20 = stock20d - vni20d;
+
+      if (rs5 > 5 && rs20 > 8) {
+        score += 3;
+        reasons.push(`Strong leader · RS 5d +${rs5.toFixed(1)}% / 20d +${rs20.toFixed(1)}% vs VNI`);
+      } else if (rs5 > 2 && rs20 > 3) {
+        score += 1.5;
+        reasons.push(`Outperform VNI · RS 5d +${rs5.toFixed(1)}%`);
+      } else if (rs5 < -3 && rs20 < -5) {
+        score -= 2;
+        reasons.push(`Laggard · RS 5d ${rs5.toFixed(1)}% / 20d ${rs20.toFixed(1)}% vs VNI`);
+      }
+    }
+
+    // ── B. Breakout signals (new highs) ──
+    // w20 high break
+    const w20H = Math.max(...closes.slice(n - 21, n - 1));
+    const recentBreakout = closes.slice(n - 5).some((c) => c > w20H * 1.005);
+    if (recentBreakout) {
+      score += 2 * wBreakout;
+      reasons.push(`Break w20-high gần đây${wBreakout !== 1 ? ` (reliability ×${wBreakout.toFixed(1)})` : ""}`);
+    }
+    // w52 high break (rare, strong)
+    if (n >= 252) {
+      const w52H = Math.max(...closes.slice(n - 252, n - 1));
+      if (currentClose > w52H * 0.99) {
+        score += 3 * wBreakout;
+        reasons.push(`Gần đỉnh 52w (mới breakout)${wBreakout !== 1 ? ` ×${wBreakout.toFixed(1)}` : ""}`);
+      }
+    }
+    // Ceiling streak (tăng trần liên tục)
+    let ceilingStreak = 0;
+    for (let i = n - 1; i >= Math.max(0, n - 5); i--) {
+      const pct = i >= 1 ? (closes[i] - closes[i - 1]) / closes[i - 1] * 100 : 0;
+      if (pct >= 6.5) ceilingStreak++; // VN HOSE ceiling ~7%
+      else break;
+    }
+    if (ceilingStreak >= 2) {
+      score += 2 * wBreakout;
+      reasons.push(`Tăng trần ${ceilingStreak} phiên liên tiếp`);
+    } else if (ceilingStreak === 1) {
+      score += 1;
+      reasons.push(`Tăng trần phiên hôm nay`);
+    }
+
+    // ── C. Volume accumulation (Wyckoff-style) ──
+    // Up-day vol vs Down-day vol trong 20 phiên
+    let upVol = 0, downVol = 0, upDays = 0, downDays = 0;
+    for (let i = n - 20; i < n; i++) {
+      const change = closes[i] - closes[i - 1];
+      if (change > 0) { upVol += volumes[i]; upDays++; }
+      else if (change < 0) { downVol += volumes[i]; downDays++; }
+    }
+    const avgUpVol = upDays > 0 ? upVol / upDays : 0;
+    const avgDownVol = downDays > 0 ? downVol / downDays : 0;
+    const updownRatio = avgDownVol > 0 ? avgUpVol / avgDownVol : 0;
+    if (updownRatio > 1.5) {
+      score += 2;
+      reasons.push(`Vol accumulation ${updownRatio.toFixed(1)}× (up-day vol > down-day vol)`);
+    } else if (updownRatio > 1.2) {
+      score += 1;
+      reasons.push(`Vol nghiêng mua ${updownRatio.toFixed(1)}×`);
+    } else if (updownRatio < 0.7) {
+      score -= 1;
+      reasons.push(`Vol distribution ${updownRatio.toFixed(1)}× (down-day vol cao)`);
+    }
+
+    // Today vol spike confirmation
+    let avgVol = 0;
+    if (n >= 21) {
+      for (let i = n - 21; i < n - 1; i++) avgVol += volumes[i];
+      avgVol /= 20;
+    }
+    const volRatio = avgVol > 0 ? volumes[n - 1] / avgVol : 0;
+    const dayChangePct = n >= 2 ? ((currentClose - closes[n - 2]) / closes[n - 2]) * 100 : 0;
+    if (volRatio > 2 && dayChangePct >= 0) {
+      score += 1.5 * wVol;
+      reasons.push(`Vol ${volRatio.toFixed(1)}× TB + giá ${dayChangePct >= 0 ? "+" : ""}${dayChangePct.toFixed(1)}% — lực cầu xác nhận`);
+    } else if (volRatio > 1.5 && dayChangePct < -2) {
+      score -= 1.5;
+      reasons.push(`Vol cao + giá giảm ${dayChangePct.toFixed(1)}% — phân phối`);
+    }
+
+    // ── D. MA alignment (perfect uptrend stack) ──
+    const ma5 = closes.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
+    const ma10 = n >= 10 ? closes.slice(n - 10).reduce((a, b) => a + b, 0) / 10 : null;
+    const ma20 = n >= 20 ? closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20 : null;
+    let ma50 = null;
+    if (n >= 50) ma50 = closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+
+    const aligned = ma5 != null && ma10 != null && ma20 != null && ma50 != null
+      && ma5 > ma10 && ma10 > ma20 && ma20 > ma50 && currentClose > ma5;
+    if (aligned) {
+      score += 2 * wTrend;
+      reasons.push(`MA alignment perfect (5>10>20>50) — uptrend mạnh`);
+    } else if (ma20 != null && ma50 != null && currentClose > ma20 && ma20 > ma50) {
+      score += 1 * wTrend;
+      reasons.push(`Trend up (giá > MA20 > MA50)`);
+    }
+
+    // MA20 rising slope
+    if (n >= 25 && ma20 != null) {
+      const ma20_5ago = closes.slice(n - 25, n - 5).reduce((a, b) => a + b, 0) / 20;
+      if (ma20 > ma20_5ago * 1.005) {
+        score += 0.5;
+        reasons.push(`MA20 đang dốc lên`);
+      }
+    }
+
+    // ── E. ADX + DI direction (trend strength) ──
+    const adxData = calcAdx(highs, lows, closes, 14);
+    if (adxData && adxData.adx > 25 && adxData.plusDI > adxData.minusDI) {
+      score += 1.5 * wTrend;
+      reasons.push(`ADX ${adxData.adx.toFixed(0)} +DI dominant — trend mạnh`);
+    } else if (adxData && adxData.adx > 25 && adxData.minusDI > adxData.plusDI) {
+      score -= 1.5;
+      reasons.push(`ADX ${adxData.adx.toFixed(0)} -DI dominant — downtrend mạnh`);
+    }
+
+    // ── F. Sell-off bounce (mean-reversion residual — chỉ keep nếu profile recovery reliable) ──
+    // Chỉ score nếu có context profile cho thấy mã có lịch sử recovery
+    const rsiToday = calcRsi(closes, 14);
+    if (rsiToday !== null && rsiToday < 30 && wRecovery >= 1.0) {
+      score += 1.5 * wRecovery;
+      reasons.push(`RSI<30 + profile có recovery history${wRecovery !== 1 ? ` ×${wRecovery.toFixed(1)}` : ""}`);
+    }
+
+    // ── G. Foreign flow buying ──
+    if (foreignDailyData && foreignDailyData.length >= 5) {
+      const recent = foreignDailyData.slice(-5);
+      const positiveDays = recent.filter((d) => (d.netVal || 0) > 0).length;
+      const sumNet = recent.reduce((s, r) => s + (r.netVal || 0), 0);
+      if (positiveDays >= 4 && sumNet > 0) {
+        score += 1.5;
+        reasons.push(`NN mua ròng ${positiveDays}/5 phiên`);
+      } else if (positiveDays <= 1 && sumNet < 0) {
+        score -= 1;
+        reasons.push(`NN bán ròng mạnh`);
+      }
+    }
+
+    // ── Hard filters ──
+    let avgTurnover = 0;
+    const liqLookback = Math.min(20, n);
+    for (let i = n - liqLookback; i < n; i++) {
+      avgTurnover += closes[i] * volumes[i] * 1000;
+    }
+    avgTurnover /= liqLookback;
+
+    const filterIlliquid = avgTurnover < 5e9; // < 5 tỷ/day
+    let filterOverExtended = false;
+    if (n >= 21) {
+      const ret20d = (currentClose / closes[n - 21] - 1) * 100;
+      filterOverExtended = ret20d > 50; // tăng > 50% trong 20 phiên → over-extended
+    }
+
+    if (filterIlliquid || filterOverExtended) {
+      score = -999;
+    }
+
+    // Day change
+    const dayChange = n >= 2 ? (currentClose - closes[n - 2]) / closes[n - 2] : 0;
+    const sessionTurnover = currentClose * volumes[n - 1] * 1000;
+    const lowSessionLiq = sessionTurnover < 2e9;
+
+    if (lowSessionLiq && !filterIlliquid && score > -900) {
+      score -= 0.5;
+      reasons.push("TKL phiên này <2 tỷ — kẹt hàng");
+    }
+
+    // Risk flags
+    const flags = {
+      bearTrap: !!(adxData && adxData.adx > 30 && adxData.minusDI > adxData.plusDI),
+      lowVol: volRatio > 0 && volRatio < 0.8,
+      volCritical: volRatio > 0 && volRatio < 0.4,
+      deepDowntrend: !!(ma50 && currentClose < ma50 * 0.92),
+      lowSessionLiq,
+      sellPressure: volRatio > 1.5 && dayChangePct < -2,
+      distribution: updownRatio > 0 && updownRatio < 0.7,
+      overExtended: false, // already filtered
+      strongLeader: false, // set below
+      breakoutFresh: false,
+    };
+    // Set positive flags
+    if (vnindexCloses && vnindexCloses.length >= 25) {
+      const stock20d = (currentClose / closes[n - 21] - 1) * 100;
+      const vniLast = vnindexCloses[vnindexCloses.length - 1];
+      const vni20d = (vniLast / vnindexCloses[vnindexCloses.length - 21] - 1) * 100;
+      if (stock20d - vni20d > 8) flags.strongLeader = true;
+    }
+    if (recentBreakout) flags.breakoutFresh = true;
+
+    return {
+      score,
+      reasons,
+      flags,
+      currentPrice: currentClose,
+      dayChange,
+      rsiToday,
+      avgTurnover,
+      filterIlliquid,
+      filterCrash: filterOverExtended, // rename concept
+      updownRatio,
+      // Strong leader stats
+      profile: profile || null,
+    };
+  }
+
+  // ── Legacy mean-reversion (giữ làm fallback, không export) ──────
+  function computeTPlusFactorsLegacy(ohlcv, foreignDailyData) {
     const closes = ohlcv.closes;
     const highs = ohlcv.highs;
     const lows = ohlcv.lows;
@@ -967,16 +1208,22 @@ window.__SSI_RANKING__ = (function () {
     }
 
     const startTime = Date.now();
-    // T+ quét full HOSE + HNX (~700 mã). Fallback về DCA universe nếu API fail.
+    // T+ quét full HOSE + HNX (~700 mã). Fallback về curated universe nếu API fail.
     let universeList = await fetchFullUniverse();
     if (!universeList || universeList.length < 100) {
       universeList = UNIVERSE;
     }
     const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector }));
 
-    // Skip foreign flow fetch cho mã ngoài DCA universe để tăng tốc 2x.
-    // NN reversal signal worth +1.5/13 max — drop OK cho mã extended.
-    // Batch 20 parallel cho fast scan.
+    // Fetch VN-Index history 1 lần cho RS computation
+    let vnindexCloses = null;
+    try {
+      const vni = await ANALYSIS.fetchHistory("VNINDEX", "D", 250);
+      vnindexCloses = vni.closes;
+    } catch {}
+
+    // Foreign flow fetch chỉ cho mã trong curated universe (large/mid caps)
+    // để speed up scan 2x. NN signal worth +1.5/13 max.
     const batchSize = 20;
     let done = 0;
     for (let i = 0; i < stocks.length; i += batchSize) {
@@ -984,15 +1231,17 @@ window.__SSI_RANKING__ = (function () {
       await Promise.all(
         batch.map(async (stock) => {
           try {
-            // Foreign flow fetch chỉ cho mã trong curated universe (large/mid caps)
-            // — bỏ qua small caps để speed up scan 2x. NN reversal signal worth
-            // +1.5/13 max, drop OK cho mã ngoài curated.
             const isCurated = CURATED_UNIVERSE_SET.has(stock.symbol);
-            const ohlcv = await ANALYSIS.fetchHistory(stock.symbol, "D", 200);
+            const ohlcv = await ANALYSIS.fetchHistory(stock.symbol, "D", 250);
             const foreign = isCurated
               ? await fetchForeignDaily(stock.symbol, 10).catch(() => null)
               : null;
-            stock.tplusFactors = computeTPlusFactors(ohlcv, foreign);
+            // Compute stock profile cho adaptive scoring (Phase C)
+            const stockProfile = ANALYSIS.computeStockProfile(ohlcv, vnindexCloses);
+            stock.tplusFactors = computeTPlusFactors(ohlcv, foreign, {
+              vnindexCloses,
+              stockProfile,
+            });
           } catch (e) {
             stock.error = e.message;
             stock.tplusFactors = null;

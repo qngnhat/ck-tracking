@@ -466,6 +466,222 @@ window.__SSI_ANALYSIS__ = (function () {
     }
   }
 
+  // ════════════════════════════════════════════════════
+  // ── Stock Personality Profile ──
+  // Mỗi mã có "cá tính" riêng từ historical patterns.
+  // Compute profile từ ~250 phiên history → cung cấp context khi scoring:
+  //   - Volatility regime (Calm/Normal/Volatile/Wild)
+  //   - Trend behavior (steady climber, choppy, range-bound)
+  //   - Breakout history (count + win rate sau N phiên)
+  //   - Sell-off patterns (count + recovery time)
+  //   - Volume regime (today vs 1y percentile)
+  //   - Beta vs VN-Index (sensitivity)
+  // ════════════════════════════════════════════════════
+  function computeStockProfile(data, vnindexCloses = null) {
+    const { highs, lows, closes, volumes } = data;
+    const n = closes.length;
+    if (n < 60) return null;
+
+    // ── A. Volatility profile ──
+    const atrSeries = [];
+    for (let i = 14; i < n; i++) {
+      const slice = { highs: highs.slice(0, i + 1), lows: lows.slice(0, i + 1), closes: closes.slice(0, i + 1) };
+      const a = calculateATR(slice.highs, slice.lows, slice.closes, 14);
+      if (a !== null) atrSeries.push((a / closes[i]) * 100);
+    }
+    const atrPctNow = atrSeries[atrSeries.length - 1] ?? null;
+    const atrSorted = [...atrSeries].sort((a, b) => a - b);
+    const atrPercentile = atrPctNow != null && atrSorted.length > 0
+      ? (atrSorted.indexOf(atrPctNow) / atrSorted.length) * 100
+      : null;
+    let volLabel;
+    if (atrPctNow == null) volLabel = "Unknown";
+    else if (atrPctNow < 1.5) volLabel = "Calm";
+    else if (atrPctNow < 3) volLabel = "Normal";
+    else if (atrPctNow < 5) volLabel = "Volatile";
+    else volLabel = "Wild";
+
+    // ── B. Trend behavior: typical trend length + pullback depth ──
+    // Find local high/low pivots (5-bar) → measure trend lengths
+    const trends = []; // {dir: 'up'|'down', length: bars}
+    let pivotHighIdx = null, pivotLowIdx = null;
+    for (let i = 5; i < n - 5; i++) {
+      const isHigh = closes[i] > Math.max(...closes.slice(i - 5, i)) && closes[i] > Math.max(...closes.slice(i + 1, i + 6));
+      const isLow = closes[i] < Math.min(...closes.slice(i - 5, i)) && closes[i] < Math.min(...closes.slice(i + 1, i + 6));
+      if (isHigh) {
+        if (pivotLowIdx !== null) trends.push({ dir: "up", length: i - pivotLowIdx });
+        pivotHighIdx = i;
+      }
+      if (isLow) {
+        if (pivotHighIdx !== null) trends.push({ dir: "down", length: i - pivotHighIdx });
+        pivotLowIdx = i;
+      }
+    }
+    const upTrends = trends.filter((t) => t.dir === "up");
+    const avgUpTrendLen = upTrends.length > 0
+      ? upTrends.reduce((a, b) => a + b.length, 0) / upTrends.length
+      : null;
+
+    // Pullback depth trong uptrend: từ pivot high tới pivot low kế tiếp
+    const pullbacks = [];
+    let lastPivotHigh = null;
+    for (let i = 5; i < n - 5; i++) {
+      const isHigh = closes[i] > Math.max(...closes.slice(i - 5, i)) && closes[i] > Math.max(...closes.slice(i + 1, i + 6));
+      const isLow = closes[i] < Math.min(...closes.slice(i - 5, i)) && closes[i] < Math.min(...closes.slice(i + 1, i + 6));
+      if (isHigh) lastPivotHigh = closes[i];
+      if (isLow && lastPivotHigh !== null) {
+        pullbacks.push((lastPivotHigh - closes[i]) / lastPivotHigh * 100);
+      }
+    }
+    const avgPullbackPct = pullbacks.length > 0
+      ? pullbacks.reduce((a, b) => a + b, 0) / pullbacks.length
+      : null;
+
+    let trendLabel;
+    if (avgUpTrendLen === null) trendLabel = "Unknown";
+    else if (avgUpTrendLen > 15 && avgPullbackPct !== null && avgPullbackPct < 7) trendLabel = "Steady climber";
+    else if (avgUpTrendLen > 10) trendLabel = "Trend-follower";
+    else if (avgUpTrendLen < 5) trendLabel = "Choppy";
+    else trendLabel = "Range-bound";
+
+    // ── C. Breakout history: w20-high breakouts in last 252 days ──
+    const breakouts = [];
+    const lookback = Math.min(252, n);
+    for (let i = Math.max(20, n - lookback); i < n - 10; i++) {
+      const w20H = Math.max(...closes.slice(i - 20, i));
+      if (closes[i] > w20H * 1.005) {
+        // Breakout — check return 10 phiên sau
+        if (i + 10 < n) {
+          const ret10 = (closes[i + 10] - closes[i]) / closes[i] * 100;
+          breakouts.push({ idx: i, ret10 });
+        }
+      }
+    }
+    const breakoutCount = breakouts.length;
+    const breakoutWins = breakouts.filter((b) => b.ret10 > 0).length;
+    const breakoutWinRate = breakoutCount > 0 ? (breakoutWins / breakoutCount) * 100 : null;
+    const breakoutAvgRet = breakoutCount > 0
+      ? breakouts.reduce((a, b) => a + b.ret10, 0) / breakoutCount
+      : null;
+
+    // ── D. Sell-off patterns: 5-day drops > 10% + recovery time ──
+    const selloffs = [];
+    for (let i = 5; i < n - 1; i++) {
+      const drop = (closes[i] - closes[i - 5]) / closes[i - 5] * 100;
+      if (drop <= -10) {
+        // Find recovery: bars until close back > pre-drop high
+        const preHigh = Math.max(...closes.slice(Math.max(0, i - 10), i - 4));
+        let recoveryBars = null;
+        for (let j = i + 1; j < Math.min(n, i + 60); j++) {
+          if (closes[j] >= preHigh) { recoveryBars = j - i; break; }
+        }
+        // Bounce magnitude trong 10 phiên sau
+        const bounce10 = i + 10 < n ? (closes[i + 10] - closes[i]) / closes[i] * 100 : null;
+        selloffs.push({ idx: i, drop, recoveryBars, bounce10 });
+        i += 10; // skip past — avoid double-counting
+      }
+    }
+    const selloffCount = selloffs.length;
+    const selloffsWithRecovery = selloffs.filter((s) => s.recoveryBars !== null);
+    const avgRecoveryBars = selloffsWithRecovery.length > 0
+      ? selloffsWithRecovery.reduce((a, b) => a + b.recoveryBars, 0) / selloffsWithRecovery.length
+      : null;
+    const avgBounce10 = selloffs.filter((s) => s.bounce10 !== null).length > 0
+      ? selloffs.filter((s) => s.bounce10 !== null).reduce((a, b) => a + b.bounce10, 0) / selloffs.filter((s) => s.bounce10 !== null).length
+      : null;
+    const recoveryWinRate = selloffsWithRecovery.length / Math.max(1, selloffCount) * 100;
+
+    // ── E. Volume regime: today vol percentile in 1y ──
+    const vols = volumes.slice(Math.max(0, n - 252)).filter((v) => v > 0);
+    const volsSorted = [...vols].sort((a, b) => a - b);
+    const volToday = volumes[n - 1];
+    const volPercentile = volsSorted.length > 0
+      ? (volsSorted.indexOf(volToday) / volsSorted.length) * 100
+      : null;
+    const avgVol = vols.length > 0 ? vols.reduce((a, b) => a + b, 0) / vols.length : null;
+    const volMultiple = avgVol && volToday > 0 ? volToday / avgVol : null;
+
+    // ── F. Beta vs VN-Index ──
+    let beta = null;
+    if (vnindexCloses && vnindexCloses.length >= 50) {
+      const len = Math.min(closes.length, vnindexCloses.length, 100);
+      const stockRets = [];
+      const indexRets = [];
+      for (let i = 1; i < len; i++) {
+        const sIdx = closes.length - len + i;
+        const iIdx = vnindexCloses.length - len + i;
+        if (sIdx > 0 && iIdx > 0 && closes[sIdx - 1] > 0 && vnindexCloses[iIdx - 1] > 0) {
+          stockRets.push((closes[sIdx] - closes[sIdx - 1]) / closes[sIdx - 1]);
+          indexRets.push((vnindexCloses[iIdx] - vnindexCloses[iIdx - 1]) / vnindexCloses[iIdx - 1]);
+        }
+      }
+      if (stockRets.length > 30) {
+        const meanS = stockRets.reduce((a, b) => a + b, 0) / stockRets.length;
+        const meanI = indexRets.reduce((a, b) => a + b, 0) / indexRets.length;
+        let cov = 0, varI = 0;
+        for (let i = 0; i < stockRets.length; i++) {
+          cov += (stockRets[i] - meanS) * (indexRets[i] - meanI);
+          varI += (indexRets[i] - meanI) ** 2;
+        }
+        beta = varI > 0 ? cov / varI : null;
+      }
+    }
+    let betaLabel;
+    if (beta === null) betaLabel = "Unknown";
+    else if (beta > 1.3) betaLabel = "High-beta";
+    else if (beta > 0.8) betaLabel = "Market";
+    else if (beta > 0.3) betaLabel = "Low-beta";
+    else betaLabel = "Defensive";
+
+    // ── Adaptive multipliers cho T+ scoring (Phase C) ──
+    // Range [0.5, 1.5] để adjust signal weights based on profile
+    const multipliers = {
+      // Vol catalyst: weight giảm nếu mã historically vol cao (vol spike không novel)
+      volMultiplier: volPercentile != null && volPercentile > 90 ? 1.3 : 1.0,
+      // Breakout: weight × winRate / 50 (50% baseline)
+      breakoutReliability: breakoutWinRate != null
+        ? Math.max(0.5, Math.min(1.5, breakoutWinRate / 50))
+        : 1.0,
+      // Sell-off bounce: weight × recoveryWinRate / 60 (60% baseline)
+      recoveryReliability: selloffCount >= 2
+        ? Math.max(0.5, Math.min(1.5, recoveryWinRate / 60))
+        : 1.0,
+      // Trend: steady climbers → trust trend signals more
+      trendReliability: trendLabel === "Steady climber" ? 1.3
+        : trendLabel === "Trend-follower" ? 1.1
+        : trendLabel === "Choppy" ? 0.7
+        : 1.0,
+    };
+
+    return {
+      // Volatility
+      atrPct: atrPctNow,
+      atrPercentile,
+      volLabel,
+      // Trend
+      avgUpTrendLen,
+      avgPullbackPct,
+      trendLabel,
+      // Breakout
+      breakoutCount,
+      breakoutWinRate,
+      breakoutAvgRet,
+      // Sell-off
+      selloffCount,
+      avgRecoveryBars,
+      avgBounce10,
+      recoveryWinRate,
+      // Volume
+      volPercentile,
+      volMultiple,
+      // Beta
+      beta,
+      betaLabel,
+      // Adaptive multipliers (consumed by T+ scoring Phase C)
+      multipliers,
+    };
+  }
+
   // ── Main analyze function ──
   function analyze(symbol, data, extras = {}) {
     const { highs, lows, closes, volumes, opens } = data;
@@ -511,6 +727,8 @@ window.__SSI_ANALYSIS__ = (function () {
     const mfi = calculateMFI(highs, lows, closes, volumes);
     const fundamentals = extras.fundamentals || null;
     const foreignFlow = extras.foreignFlow || null;
+    const vnindexCloses = extras.vnindexCloses || null;
+    const stockProfile = computeStockProfile(data, vnindexCloses);
 
     // ── Trend signal ──
     let trend = "Trung tính";
@@ -803,6 +1021,7 @@ window.__SSI_ANALYSIS__ = (function () {
       buyZoneHigh,
       stopLoss,
       flags,
+      stockProfile,
     };
 
     result.textAnalysis = generateTextAnalysis(result);
@@ -999,6 +1218,7 @@ window.__SSI_ANALYSIS__ = (function () {
     fetchStockList,
     analyze,
     computeForwardStats,
+    computeStockProfile,
     INDEX_SYMBOLS,
   };
 })();

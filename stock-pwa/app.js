@@ -187,15 +187,20 @@
     currentResolution = DEFAULT_RESOLUTION;
 
     try {
-      const [data, fundamentals, foreignFlow] = await Promise.all([
+      const [data, fundamentals, foreignFlow, vnindex] = await Promise.all([
         ANALYSIS.fetchHistory(symbol, "D", 250),
         ANALYSIS.fetchFundamentals(symbol).catch(() => null),
         ANALYSIS.fetchForeignFlow(symbol).catch(() => null),
+        ANALYSIS.fetchHistory("VNINDEX", "D", 250).catch(() => null),
       ]);
       currentData = data;
       chartData = data; // daily = same as analysis by default
       currentSymbol = symbol;
-      const r = ANALYSIS.analyze(symbol, data, { fundamentals, foreignFlow });
+      const r = ANALYSIS.analyze(symbol, data, {
+        fundamentals,
+        foreignFlow,
+        vnindexCloses: vnindex?.closes || null,
+      });
       renderAnalysis(r);
       renderChart();
       updateStatus();
@@ -768,6 +773,8 @@
         ${perfPills(r.performance)}
       </div>
 
+      ${renderStockProfileCard(r)}
+
       ${renderTplusEligibilityCheck(r)}
 
       ${renderForwardStatsCard(r)}
@@ -848,7 +855,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v85"; // sync với sw.js CACHE name suffix
+    const appVersion = "v86"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -1215,11 +1222,13 @@
     if (!flags) return "";
     const chips = [];
     // Positive signals first (xanh)
+    if (flags.strongLeader) chips.push({ label: "🚀 Strong leader (RS vs VNI)", color: "#4CAF50" });
+    if (flags.breakoutFresh) chips.push({ label: "🎯 Fresh breakout", color: "#4CAF50" });
     if (flags.bullishDivergence) chips.push({ label: "📈 Bullish divergence", color: "#4CAF50" });
     // Negative signals (đỏ/cam)
+    if (flags.distribution) chips.push({ label: "📦 Distribution (down-vol > up-vol)", color: "#ff5722" });
     if (flags.bearTrap) chips.push({ label: "⚠️ Bắt dao rơi", color: "#ff5722" });
     if (flags.sellPressure) chips.push({ label: "📉 Lực bán mạnh — vol cao + giá giảm", color: "#ff5722" });
-    // Volume severity: critical (< 0.4×) ưu tiên hơn low (< 0.8×). Render 1 chip duy nhất.
     if (flags.volCritical) chips.push({ label: "🚨 Vol cực thấp — khó có lực hồi", color: "#ff5722" });
     else if (flags.lowVol) chips.push({ label: "Vol thấp — thiếu xác nhận", color: "#ff9800" });
     if (flags.weeklyDowntrend) chips.push({ label: "📅 Weekly RSI<50 — trung hạn yếu", color: "#ff9800" });
@@ -1947,6 +1956,94 @@
   }
 
   // ── Forward stats card (dự đoán dựa lịch sử cùng setup) ──
+  // ── Stock Personality Profile card ──
+  function renderStockProfileCard(r) {
+    const p = r?.stockProfile;
+    if (!p) return "";
+
+    const fmt1 = (v) => v == null ? "--" : v.toFixed(1);
+    const fmt0 = (v) => v == null ? "--" : v.toFixed(0);
+
+    // Volatility chip color
+    const volColor = p.volLabel === "Calm" ? "#4CAF50"
+      : p.volLabel === "Normal" ? "#8BC34A"
+      : p.volLabel === "Volatile" ? "#FF9800"
+      : p.volLabel === "Wild" ? "#ff5722" : "#888";
+
+    const trendColor = p.trendLabel === "Steady climber" ? "#4CAF50"
+      : p.trendLabel === "Trend-follower" ? "#8BC34A"
+      : p.trendLabel === "Choppy" ? "#ff5722"
+      : p.trendLabel === "Range-bound" ? "#FF9800" : "#888";
+
+    const betaColor = p.betaLabel === "High-beta" ? "#ff5722"
+      : p.betaLabel === "Market" ? "#FF9800"
+      : p.betaLabel === "Low-beta" ? "#8BC34A"
+      : p.betaLabel === "Defensive" ? "#4CAF50" : "#888";
+
+    // Breakout reliability label
+    const bkWinRate = p.breakoutWinRate;
+    const bkLabel = bkWinRate == null ? "Chưa có data"
+      : bkWinRate >= 65 ? `Reliable (${fmt0(bkWinRate)}% win)`
+      : bkWinRate >= 50 ? `OK (${fmt0(bkWinRate)}% win)`
+      : `Yếu (${fmt0(bkWinRate)}% win — hay fake)`;
+
+    // Recovery label
+    const rcCount = p.selloffCount;
+    const recoveryStr = rcCount === 0
+      ? "Chưa từng -10% trong 2y (ổn định)"
+      : p.avgRecoveryBars != null
+      ? `${rcCount} lần -10%+ · recovery TB ${fmt0(p.avgRecoveryBars)} phiên · bounce 10d +${fmt1(p.avgBounce10)}%`
+      : `${rcCount} lần -10%+ · chưa hồi`;
+
+    // Vol regime label
+    const volRegStr = p.volPercentile == null ? "--"
+      : p.volPercentile > 90 ? `Top ${fmt0(100 - p.volPercentile)}% (rare high)`
+      : p.volPercentile > 75 ? `Top 25% (above avg)`
+      : p.volPercentile > 25 ? `Trung tính (${fmt0(p.volPercentile)}% percentile)`
+      : `Bottom 25% (low activity)`;
+
+    return `
+      <div class="an-card full-width stock-profile-card">
+        <div class="an-title">🎭 Đặc thù giao dịch của mã</div>
+
+        <div class="profile-chips">
+          <span class="profile-chip" style="border-color:${volColor}55;color:${volColor}">
+            <b>${p.volLabel}</b> · ATR ${fmt1(p.atrPct)}%
+          </span>
+          <span class="profile-chip" style="border-color:${trendColor}55;color:${trendColor}">
+            <b>${p.trendLabel}</b>
+          </span>
+          <span class="profile-chip" style="border-color:${betaColor}55;color:${betaColor}">
+            <b>${p.betaLabel}</b> · β ${p.beta != null ? p.beta.toFixed(2) : "--"}
+          </span>
+        </div>
+
+        <div class="profile-rows">
+          <div class="profile-row">
+            <span class="profile-label">📈 Trend behavior</span>
+            <span class="profile-val">Trend trung bình <b>${fmt0(p.avgUpTrendLen)} phiên</b> · pullback ${fmt1(p.avgPullbackPct)}%</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-label">🚀 Breakout history (1y)</span>
+            <span class="profile-val"><b>${p.breakoutCount}</b> lần · ${bkLabel} · avg +${fmt1(p.breakoutAvgRet)}%/10d</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-label">📉 Sell-off patterns (2y)</span>
+            <span class="profile-val">${recoveryStr}</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-label">📊 Volume hôm nay</span>
+            <span class="profile-val">${volRegStr}${p.volMultiple != null ? ` · ${p.volMultiple.toFixed(1)}× TB` : ""}</span>
+          </div>
+        </div>
+
+        <div class="profile-hint">
+          💡 Profile từ ${Math.min(252, currentData?.closes?.length || 0)} phiên gần nhất. Adaptive multipliers áp dụng vào T+ scoring để weight phù hợp với cá tính mã.
+        </div>
+      </div>
+    `;
+  }
+
   function renderForwardStatsCard(r) {
     const fs = r.forwardStats;
     if (!fs || (!fs.fwd5 && !fs.fwd10 && !fs.fwd20)) return "";
