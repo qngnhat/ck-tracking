@@ -80,6 +80,27 @@ export default {
       ctx.waitUntil(checkAllWatches(env));
       return new Response("Cron triggered", { status: 200 });
     }
+    if (url.pathname === "/climax-test" && request.method === "POST") {
+      // Manual trigger Vol Climax scan + alerts
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(sendClimaxAlerts(env));
+      return new Response("Climax scan triggered", { status: 200 });
+    }
+    if (url.pathname === "/climax-dryrun" && request.method === "GET") {
+      // Scan + return matches as JSON (no Telegram broadcast) — debug only
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const matches = await scanVolClimaxMatches();
+      return new Response(JSON.stringify({ count: matches.length, matches }, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response("Stock PWA Bot Worker", { status: 200 });
   },
 
@@ -96,6 +117,8 @@ export default {
       }
       console.log("[cron-eod] EOD digest fired at", new Date().toISOString());
       ctx.waitUntil(sendEodDigest(env));
+      // Vol Climax Bounce alerts — broadcast cho mọi user connected
+      ctx.waitUntil(sendClimaxAlerts(env));
       return;
     }
     // Default: check triggers (mỗi 3 min)
@@ -338,6 +361,138 @@ async function checkAllWatches(env) {
   }
 
   console.log(`[cron] ${upgraded}/${watches.length} watches upgraded met_count`);
+}
+
+// ── Vol Climax Bounce broadcast (bắt đáy T+3) ────────────
+// Cross-validated 8.5 năm (2018-2026): Win 58.9%, Avg +1.07%/lệnh, Sharpe 0.92.
+// Pattern hiếm (~38 lệnh/năm) → user dễ miss nếu không nhận notification EOD.
+
+// Universe: CORE_VN30 + EXTENDED (~58 mã) — port từ stock-pwa/ranking.js
+// (Large+Mid liquid stocks, đủ scan trong cron budget)
+const VOL_CLIMAX_UNIVERSE = [
+  // VN30 core
+  "VCB", "BID", "CTG", "TCB", "VPB", "MBB", "ACB", "HDB", "STB", "SHB",
+  "TPB", "LPB", "VIB", "SSB", "VHM", "VIC", "VRE", "MSN", "VNM", "SAB",
+  "VJC", "VPL", "MWG", "HPG", "GVR", "DGC", "GAS", "PLX", "FPT", "SSI",
+  // Extended Large+Mid
+  "EIB", "NVL", "BCM", "KDH", "DXG", "KBC", "DIG", "NLG", "PDR",
+  "PNJ", "DGW", "FRT", "HSG", "NKG", "DCM", "DPM", "PC1", "BSR",
+  "POW", "REE", "NT2", "CMG", "VCI", "VND", "HCM", "DHG", "IMP", "DBD",
+];
+
+function calcRsi(closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  let avgG = gains / period, avgL = losses / period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
+    avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (avgL === 0) return 100;
+  return 100 - 100 / (1 + avgG / avgL);
+}
+
+function detectVolClimaxBounce(data) {
+  const closes = data.closes;
+  const opens = data.opens;
+  const volumes = data.volumes;
+  const n = closes?.length || 0;
+  if (n < 25) return null;
+
+  const cur = closes[n - 1];
+  const curOpen = opens[n - 1];
+  const curVol = volumes[n - 1];
+  const prev3 = closes[n - 4];
+
+  const ret3d = ((cur - prev3) / prev3) * 100;
+  const volSlice = volumes.slice(n - 21, n - 1);
+  const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+  const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+  const dayGreen = cur > curOpen;
+  const rsi = calcRsi(closes, 14);
+
+  if (rsi == null) return null;
+
+  const matched = ret3d < -7 && volRatio > 2.0 && dayGreen && rsi < 35;
+  if (!matched) return null;
+
+  return {
+    ret3d, volRatio, rsi,
+    currentPrice: cur,
+    // Bounce strength score = vol × |drop%| (lực bounce indicator)
+    bounceStrength: volRatio * Math.abs(ret3d),
+  };
+}
+
+async function scanVolClimaxMatches() {
+  const matches = [];
+  // Batch parallel để fit CPU budget (10 concurrent VND fetches)
+  const batchSize = 10;
+  for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
+    const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(async (sym) => {
+      try {
+        const data = await fetchVndHistory(sym, 60);
+        const match = detectVolClimaxBounce(data);
+        return match ? { symbol: sym, ...match } : null;
+      } catch (e) {
+        console.warn(`[climax] ${sym} fetch fail:`, e.message);
+        return null;
+      }
+    }));
+    matches.push(...results.filter(Boolean));
+  }
+  matches.sort((a, b) => b.bounceStrength - a.bounceStrength);
+  return matches;
+}
+
+async function sendClimaxAlerts(env) {
+  console.log("[climax] scanning universe...");
+  const matches = await scanVolClimaxMatches();
+  console.log(`[climax] ${matches.length} matches found`);
+
+  if (matches.length === 0) return;
+
+  // Fetch all connected users
+  const sb = sbClient(env);
+  const users = await sbQuery(sb, "user_telegram", {
+    select: "chat_id",
+  });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  if (chats.length === 0) {
+    console.log("[climax] no connected users");
+    return;
+  }
+
+  // Compose message (markdown)
+  const today = new Date().toLocaleDateString("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
+  let text = `🔻 *Bắt đáy T+ — ${today}*\n\n`;
+  text += `*${matches.length} mã* match Vol Climax Bounce hôm nay:\n\n`;
+  for (const m of matches.slice(0, 5)) {
+    text += `*${m.symbol}* @ ${m.currentPrice.toFixed(2)}\n`;
+    text += `  3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ⚡${m.bounceStrength.toFixed(1)}\n\n`;
+  }
+  if (matches.length > 5) text += `_(... và ${matches.length - 5} mã khác trong app)_\n\n`;
+  text += `📍 *Plan*: Mua ATO/ATC sáng mai · SL -4% · Bán close T+3\n`;
+  text += `⚠️ Backtest 8.5y: Win 59%, Avg +1.07%/lệnh. Pattern hiếm — size 10-15% NAV/lệnh, max 2-3 lệnh.`;
+
+  let sent = 0;
+  for (const chatId of chats) {
+    try {
+      await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      sent++;
+    } catch (e) {
+      console.warn(`[climax] send fail ${chatId}:`, e.message);
+    }
+  }
+  console.log(`[climax] alerts sent to ${sent}/${chats.length} users`);
 }
 
 // ── VNDirect data fetch ─────────────────────────────────
