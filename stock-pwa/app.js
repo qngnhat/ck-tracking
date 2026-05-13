@@ -901,7 +901,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v88"; // sync với sw.js CACHE name suffix
+    const appVersion = "v89"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -2233,12 +2233,22 @@
   }
 
   // Bind T+ trigger watch button (after analyze render with T+ context)
+  // No-op — kept for backward compat with existing call sites.
+  // Watch button click giờ handle qua event delegation (bind once globally).
   function bindTplusWatchBtn() {
-    // Có thể có nhiều watch button (live tracker + plan card khi watched).
-    // Bind tất cả → toggle nào cũng work + sync UI cả 2.
-    const btns = document.querySelectorAll(".tplus-watch-btn");
-    btns.forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    // Intentionally empty — handler ở document-level delegation init.
+  }
+
+  // Event delegation: bind 1 lần trên document → bất kỳ .tplus-watch-btn nào
+  // (cả button hiện tại lẫn future buttons sau re-render) đều work mà không
+  // cần rebind. Fix bug: toggle off → re-render → button mới không có listener.
+  let tplusWatchToggleInflight = false;
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".tplus-watch-btn");
+    if (!btn) return;
+    if (tplusWatchToggleInflight) return; // debounce double-click
+    tplusWatchToggleInflight = true;
+    try {
       const symbol = btn.dataset.symbol;
       if (!symbol) return;
       if (isTplusWatched(symbol)) {
@@ -2246,32 +2256,32 @@
         await removeTplusWatch(symbol);
         if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
         return;
-      } else {
-        // Request notification permission first
-        if ("Notification" in window && Notification.permission === "default") {
-          await Notification.requestPermission();
-        }
-        if ("Notification" in window && Notification.permission === "granted") {
-          const triggers = {
-            closeAbove: parseFloat(btn.dataset.closeTrigger) || null,
-            volAbove: parseFloat(btn.dataset.volTrigger) || null,
-            gapAbove: parseFloat(btn.dataset.gapTrigger) || null,
-          };
-          await addTplusWatch(symbol, triggers);
-          const auth = window.__SSI_AUTH__;
-          const tip = auth?.isLoggedIn?.()
-            ? "Đã sync Supabase — sẽ báo qua Telegram nếu đã kết nối."
-            : "Browser-only. Đăng nhập + kết nối Telegram để nhận push khi đóng app.";
-          notifyBrowser(`Đã bật theo dõi ${symbol}`, tip, "#4CAF50");
-          // Re-render để switch sang live tracker mode
-          if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
-        } else {
-          alert("Cần cấp quyền notification để theo dõi trigger. Vào cài đặt browser bật notification cho trang này.");
-        }
       }
-    });
-    });
-  }
+      // Toggle on — request notification permission first
+      if ("Notification" in window && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+      if ("Notification" in window && Notification.permission === "granted") {
+        const triggers = {
+          closeAbove: parseFloat(btn.dataset.closeTrigger) || null,
+          volAbove: parseFloat(btn.dataset.volTrigger) || null,
+          gapAbove: parseFloat(btn.dataset.gapTrigger) || null,
+        };
+        await addTplusWatch(symbol, triggers);
+        const auth = window.__SSI_AUTH__;
+        const tip = auth?.isLoggedIn?.()
+          ? "Đã sync Supabase — sẽ báo qua Telegram nếu đã kết nối."
+          : "Browser-only. Đăng nhập + kết nối Telegram để nhận push khi đóng app.";
+        notifyBrowser(`Đã bật theo dõi ${symbol}`, tip, "#4CAF50");
+        // Re-render để switch sang live tracker mode
+        if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
+      } else {
+        alert("Cần cấp quyền notification để theo dõi trigger. Vào cài đặt browser bật notification cho trang này.");
+      }
+    } finally {
+      tplusWatchToggleInflight = false;
+    }
+  });
 
   // Bind pool button after analyze rendered
   function bindForwardStatsPoolBtn() {
