@@ -81,13 +81,22 @@ export default {
       return new Response("Cron triggered", { status: 200 });
     }
     if (url.pathname === "/climax-test" && request.method === "POST") {
-      // Manual trigger Vol Climax scan + alerts
+      // Manual trigger market digest (legacy name kept for backward compat)
       const secret = url.searchParams.get("secret");
       if (secret !== env.WEBHOOK_SECRET) {
         return new Response("Forbidden", { status: 403 });
       }
-      ctx.waitUntil(sendClimaxAlerts(env));
-      return new Response("Climax scan triggered", { status: 200 });
+      ctx.waitUntil(sendMarketDigest(env));
+      return new Response("Market digest triggered", { status: 200 });
+    }
+    if (url.pathname === "/digest-test" && request.method === "POST") {
+      // Same as climax-test but clearer name
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(sendMarketDigest(env));
+      return new Response("Market digest triggered", { status: 200 });
     }
     if (url.pathname === "/climax-dryrun" && request.method === "GET") {
       // Scan + return matches as JSON (no Telegram broadcast) — debug only
@@ -116,9 +125,11 @@ export default {
         return;
       }
       console.log("[cron-eod] EOD digest fired at", new Date().toISOString());
+      // Per-user watchlist digest (cho user có watches active)
       ctx.waitUntil(sendEodDigest(env));
-      // Vol Climax Bounce alerts — broadcast cho mọi user connected
-      ctx.waitUntil(sendClimaxAlerts(env));
+      // Market digest (VN-Index + top gainers/losers/vol + Bắt đáy T+)
+      // Gửi cho tất cả user connected, kể cả không có watch
+      ctx.waitUntil(sendMarketDigest(env));
       return;
     }
     // Default: check triggers (mỗi 3 min)
@@ -462,26 +473,210 @@ function detectVolClimaxBounce(data) {
   };
 }
 
-async function scanVolClimaxMatches() {
-  const matches = [];
-  // Batch parallel để fit CPU budget (10 concurrent VND fetches)
+// Compute per-stock daily stats (1 pass với climax detection để tiết kiệm API calls)
+function computeStockStats(data) {
+  const closes = data.closes;
+  const volumes = data.volumes;
+  const n = closes?.length || 0;
+  if (n < 2) return null;
+  const cur = closes[n - 1];
+  const prev = closes[n - 2];
+  const vol = volumes[n - 1];
+  const changePct = prev > 0 ? ((cur - prev) / prev) * 100 : 0;
+  const turnover = cur * vol * 1000; // VND
+  return { cur, prev, vol, changePct, turnover };
+}
+
+async function scanAllSymbols() {
+  // 1 pass: fetch + compute climax + market stats
+  const allStocks = [];
   const batchSize = 10;
   for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
     const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
     const results = await Promise.all(batch.map(async (sym) => {
       try {
         const data = await fetchVndHistory(sym, 60);
-        const match = detectVolClimaxBounce(data);
-        return match ? { symbol: sym, ...match } : null;
+        const climax = detectVolClimaxBounce(data);
+        const stats = computeStockStats(data);
+        return { symbol: sym, climax, stats };
       } catch (e) {
-        console.warn(`[climax] ${sym} fetch fail:`, e.message);
+        console.warn(`[scan] ${sym} fetch fail:`, e.message);
         return null;
       }
     }));
-    matches.push(...results.filter(Boolean));
+    allStocks.push(...results.filter((r) => r && r.stats));
   }
-  matches.sort((a, b) => b.bounceStrength - a.bounceStrength);
-  return matches;
+
+  // Climax matches
+  const matches = allStocks
+    .filter((s) => s.climax)
+    .map((s) => ({ symbol: s.symbol, ...s.climax }))
+    .sort((a, b) => b.bounceStrength - a.bounceStrength);
+
+  // Market stats: sort by change %
+  const withStats = allStocks.filter((s) => s.stats);
+  const sortedByChange = [...withStats].sort((a, b) => b.stats.changePct - a.stats.changePct);
+  const gainers = sortedByChange.slice(0, 5);
+  const losers = sortedByChange.slice(-5).reverse();
+  const topVol = [...withStats].sort((a, b) => b.stats.turnover - a.stats.turnover).slice(0, 5);
+
+  // VN market overall: avg change + breadth
+  const avgChange = withStats.reduce((sum, s) => sum + s.stats.changePct, 0) / withStats.length;
+  const upCount = withStats.filter((s) => s.stats.changePct > 0).length;
+  const downCount = withStats.filter((s) => s.stats.changePct < 0).length;
+  const totalTurnover = withStats.reduce((sum, s) => sum + s.stats.turnover, 0);
+
+  return {
+    matches,
+    market: { avgChange, upCount, downCount, totalTurnover, totalScanned: withStats.length },
+    gainers,
+    losers,
+    topVol,
+  };
+}
+
+// Backwards-compat wrapper (cũ dùng)
+async function scanVolClimaxMatches() {
+  const result = await scanAllSymbols();
+  return result.matches;
+}
+
+// ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
+async function sendMarketDigest(env) {
+  console.log("[digest] scanning universe + market stats...");
+  const result = await scanAllSymbols();
+  const { matches, market, gainers, losers, topVol } = result;
+  console.log(`[digest] ${matches.length} climax · ${market.upCount}↑/${market.downCount}↓ · avg ${market.avgChange.toFixed(2)}%`);
+
+  // Fetch VN-Index để có index data
+  let vniInfo = null;
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 5);
+    const n = vni.closes.length;
+    if (n >= 2) {
+      const cur = vni.closes[n - 1];
+      const prev = vni.closes[n - 2];
+      vniInfo = {
+        cur,
+        change: ((cur - prev) / prev) * 100,
+        vol: vni.volumes[n - 1],
+      };
+    }
+  } catch (e) {
+    console.warn("[digest] VN-Index fetch fail:", e.message);
+  }
+
+  // Fetch all connected users
+  const sb = sbClient(env);
+  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  if (chats.length === 0) {
+    console.log("[digest] no connected users");
+    return;
+  }
+
+  // ── Compose comprehensive market digest ──
+  function addTradingDays(date, n) {
+    const d = new Date(date);
+    let added = 0;
+    while (added < n) {
+      d.setUTCDate(d.getUTCDate() + 1);
+      const dow = d.getUTCDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    return d;
+  }
+  function fmtDM(d) {
+    return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  function fmtBn(n) {
+    return (n / 1e9).toFixed(0);
+  }
+
+  const today = new Date();
+  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+
+  let text = `📊 *Tổng kết phiên ${todayLabel}*\n\n`;
+
+  // VN-Index
+  if (vniInfo) {
+    const arrow = vniInfo.change >= 0 ? "🟢" : "🔴";
+    const sign = vniInfo.change >= 0 ? "+" : "";
+    text += `${arrow} *VN-Index*: ${vniInfo.cur.toFixed(2)} (${sign}${vniInfo.change.toFixed(2)}%)\n\n`;
+  }
+
+  // Market breadth
+  const breadthArrow = market.upCount > market.downCount ? "🟢" : "🔴";
+  text += `*Breadth* (${market.totalScanned} mã Large+Mid):\n`;
+  text += `  ${breadthArrow} ${market.upCount}↑ / ${market.downCount}↓ · avg ${market.avgChange >= 0 ? "+" : ""}${market.avgChange.toFixed(2)}%\n`;
+  text += `  💧 Thanh khoản: ${fmtBn(market.totalTurnover)} tỷ\n\n`;
+
+  // Top gainers
+  text += `🟢 *Top 5 tăng*:\n`;
+  for (const g of gainers) {
+    text += `  ${g.symbol}  +${g.stats.changePct.toFixed(1)}% @ ${g.stats.cur.toFixed(2)}\n`;
+  }
+
+  // Top losers
+  text += `\n🔴 *Top 5 giảm*:\n`;
+  for (const l of losers) {
+    text += `  ${l.symbol}  ${l.stats.changePct.toFixed(1)}% @ ${l.stats.cur.toFixed(2)}\n`;
+  }
+
+  // Top vol
+  text += `\n💧 *Top thanh khoản*:\n`;
+  for (const t of topVol) {
+    const sign = t.stats.changePct >= 0 ? "+" : "";
+    text += `  ${t.symbol}  ${fmtBn(t.stats.turnover)}tỷ (${sign}${t.stats.changePct.toFixed(1)}%)\n`;
+  }
+
+  // Bắt đáy T+ section
+  const tierA = matches.filter((m) => m.tier === "A");
+  const tierB = matches.filter((m) => m.tier === "B");
+
+  text += `\n━━━━━━━━━━━━━━━\n`;
+  text += `🔻 *Bắt đáy T+ (Vol Climax Bounce)*\n`;
+  text += `${tierA.length} Tier A · ${tierB.length} Tier B\n`;
+
+  if (matches.length === 0) {
+    text += `\n📭 Không có signal hôm nay.\n`;
+    text += `Pattern hiếm ~80-95/năm = ~2 lệnh/tuần avg.\n`;
+  } else {
+    text += `\n`;
+    const t1 = addTradingDays(today, 1);
+    const t3 = addTradingDays(today, 4);
+    const t5 = addTradingDays(today, 6);
+    const t1Label = fmtDM(t1);
+    const t3Label = fmtDM(t3);
+    const t5Label = fmtDM(t5);
+
+    const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)];
+    for (const m of showMatches.slice(0, 5)) {
+      const cur = m.currentPrice;
+      const entryMax = cur * 1.02;
+      const entryMid = (entryMax + cur * 0.99) / 2;
+      const sl = entryMid * 0.92;
+      const target = entryMid * 1.03;
+
+      const tierTag = m.tier === "A" ? "🟢 A" : "🔵 B";
+      text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
+      text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
+    }
+    text += `Size: 15% NAV Tier A, 10% Tier B. Max 2-3 lệnh.\n`;
+  }
+
+  text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;
+
+  let sent = 0;
+  for (const chatId of chats) {
+    try {
+      await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      sent++;
+    } catch (e) {
+      console.warn(`[digest] send fail ${chatId}:`, e.message);
+    }
+  }
+  console.log(`[digest] market digest sent to ${sent}/${chats.length} users`);
 }
 
 async function sendClimaxAlerts(env) {
