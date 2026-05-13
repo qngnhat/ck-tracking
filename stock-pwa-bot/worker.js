@@ -397,12 +397,26 @@ function calcRsi(closes, period = 14) {
   return 100 - 100 / (1 + avgG / avgL);
 }
 
+// Turnover filter: backtest test trên universe ≥ 3 tỷ/ngày (Large+Mid).
+// Universe bot 58 mã CORE_VN30+EXTENDED đều Large+Mid, nhưng vẫn áp filter
+// để bảo vệ nếu mở rộng universe sau này hoặc mã đột nhiên kẹt hàng.
+const CLIMAX_TURNOVER_MIN = 3e9;
+
 function detectVolClimaxBounce(data) {
   const closes = data.closes;
   const opens = data.opens;
   const volumes = data.volumes;
   const n = closes?.length || 0;
   if (n < 25) return null;
+
+  // Turnover filter median 20 phiên >= 3 tỷ/ngày
+  const turnovers = [];
+  for (let i = n - 21; i < n - 1; i++) {
+    turnovers.push(closes[i] * volumes[i] * 1000);
+  }
+  turnovers.sort((a, b) => a - b);
+  const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+  if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
 
   const cur = closes[n - 1];
   const curOpen = opens[n - 1];
@@ -424,6 +438,7 @@ function detectVolClimaxBounce(data) {
   return {
     ret3d, volRatio, rsi,
     currentPrice: cur,
+    medianTurnover,
     // Bounce strength score = vol × |drop%| (lực bounce indicator)
     bounceStrength: volRatio * Math.abs(ret3d),
   };

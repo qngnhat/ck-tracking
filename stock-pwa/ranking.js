@@ -293,17 +293,34 @@ window.__SSI_RANKING__ = (function () {
 
   // ── Vol Climax Bounce detector (separate strategy from Strong Leaders) ──
   // Pattern: 3 phiên giảm > 7% + volume hôm nay > 2× TB20 + nến xanh + RSI < 35
-  // Hold 3 phiên (T+3.5). Cross-validated 8.5 năm:
+  // Hold 3 phiên (T+3.5). Cross-validated 8.5 năm trên 199 mã Large+Mid:
   //   - 316 trades, win 58.9%, avg +1.07% NET, sharpe 0.92
   //   - Robust qua COVID/BULL/BEAR/sideways (2022 BEAR: avg +4.42%, sharpe 3.08)
   // Logic: panic-selling capitulation + reversal candle + oversold → bounce
   // Source: backtest/run_climax_crossvalidate.py
+  //
+  // ⚠️ TURNOVER FILTER: backtest test trên universe ≥ 3 tỷ/ngày (Large+Mid).
+  // Áp dụng filter này để match backtest universe, tránh small/penny không cover.
+  const CLIMAX_TURNOVER_MIN = 3e9; // 3 tỷ VND/ngày (median 20 phiên)
+
   function detectVolClimaxBounce(ohlcv) {
     const closes = ohlcv.closes;
     const opens = ohlcv.opens;
     const volumes = ohlcv.volumes;
     const n = closes.length;
     if (n < 30) return null;
+
+    // ── Turnover filter: median 20 phiên >= 3 tỷ/ngày (Large+Mid universe) ──
+    const turnovers = [];
+    for (let i = n - 21; i < n - 1; i++) {
+      turnovers.push(closes[i] * volumes[i] * 1000); // VND (giá VN k-VND)
+    }
+    turnovers.sort((a, b) => a - b);
+    const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+    if (medianTurnover < CLIMAX_TURNOVER_MIN) {
+      // Quá illiquid — không match backtest universe, skip
+      return { matched: false, reason: "illiquid", medianTurnover };
+    }
 
     const cur = closes[n - 1];
     const curOpen = opens[n - 1];
@@ -323,12 +340,13 @@ window.__SSI_RANKING__ = (function () {
 
     return {
       matched,
-      ret3d, volRatio, rsi,
+      ret3d, volRatio, rsi, medianTurnover,
       reasons: matched ? [
         `3 phiên giảm ${ret3d.toFixed(1)}% — capitulation`,
         `Volume ${volRatio.toFixed(1)}× TB20 — lực mua xác nhận`,
         `Nến xanh (close ${cur.toFixed(2)} > open ${curOpen.toFixed(2)})`,
         `RSI ${rsi.toFixed(0)} (oversold < 35)`,
+        `Thanh khoản ${(medianTurnover / 1e9).toFixed(1)} tỷ/ngày (Large+Mid)`,
       ] : [],
     };
   }
