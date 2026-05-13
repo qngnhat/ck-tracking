@@ -2261,6 +2261,24 @@ body.is-offline {
   border-radius: 10px;
   color: #ff9800;
 }
+.climax-tier-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 6px;
+  border: 1px solid;
+}
+.climax-tier-badge.tier-A {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+.climax-tier-badge.tier-B {
+  background: rgba(33, 150, 243, 0.15);
+  border-color: rgba(33, 150, 243, 0.5);
+  color: #64b5f6;
+}
 .climax-subtitle {
   font-size: 13px;
   color: #aaa;

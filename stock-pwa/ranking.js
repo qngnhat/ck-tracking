@@ -330,6 +330,10 @@ window.__SSI_RANKING__ = (function () {
   // Áp dụng filter này để match backtest universe, tránh small/penny không cover.
   const CLIMAX_TURNOVER_MIN = 3e9; // 3 tỷ VND/ngày (median 20 phiên)
 
+  // 2-tier system (backtest 8.5y cross-validated):
+  // - Tier A "Edge cao": drop<-7% + vol>2× + RSI<35 → 38/năm, win 58.9%, sharpe 0.92
+  // - Tier B "Edge vừa": drop<-5% + vol>2× + RSI<50 → 57/năm, win 57.7%, sharpe 1.01
+  // Tier A là subset của Tier B. Mã match A sẽ ưu tiên gán tier "A".
   function detectVolClimaxBounce(ohlcv) {
     const closes = ohlcv.closes;
     const opens = ohlcv.opens;
@@ -337,16 +341,15 @@ window.__SSI_RANKING__ = (function () {
     const n = closes.length;
     if (n < 30) return null;
 
-    // ── Turnover filter: median 20 phiên >= 3 tỷ/ngày (Large+Mid universe) ──
+    // Turnover filter: median 20 phiên >= 3 tỷ/ngày (Large+Mid universe)
     const turnovers = [];
     for (let i = n - 21; i < n - 1; i++) {
-      turnovers.push(closes[i] * volumes[i] * 1000); // VND (giá VN k-VND)
+      turnovers.push(closes[i] * volumes[i] * 1000);
     }
     turnovers.sort((a, b) => a - b);
     const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
     if (medianTurnover < CLIMAX_TURNOVER_MIN) {
-      // Quá illiquid — không match backtest universe, skip
-      return { matched: false, reason: "illiquid", medianTurnover };
+      return { matched: false, tier: null, reason: "illiquid", medianTurnover };
     }
 
     const cur = closes[n - 1];
@@ -363,18 +366,30 @@ window.__SSI_RANKING__ = (function () {
 
     if (rsi == null) return null;
 
-    const matched = ret3d < -7 && volRatio > 2.0 && dayGreen && rsi < 35;
+    // Common requirements: day green + vol > 2× + sufficient drop
+    const baseConditions = dayGreen && volRatio > 2.0;
+    const matchedA = baseConditions && ret3d < -7 && rsi < 35;
+    const matchedB = baseConditions && ret3d < -5 && rsi < 50;
 
+    const tier = matchedA ? "A" : matchedB ? "B" : null;
+    const matched = tier !== null;
+
+    if (!matched) {
+      return { matched: false, tier: null, ret3d, volRatio, rsi, medianTurnover };
+    }
+
+    const tierLabel = tier === "A" ? "Edge cao" : "Edge vừa";
     return {
-      matched,
+      matched, tier, tierLabel,
       ret3d, volRatio, rsi, medianTurnover,
-      reasons: matched ? [
+      reasons: [
+        `${tier === "A" ? "Tier A " : "Tier B "} · ${tierLabel}`,
         `3 phiên giảm ${ret3d.toFixed(1)}% — capitulation`,
         `Volume ${volRatio.toFixed(1)}× TB20 — lực mua xác nhận`,
         `Nến xanh (close ${cur.toFixed(2)} > open ${curOpen.toFixed(2)})`,
-        `RSI ${rsi.toFixed(0)} (oversold < 35)`,
-        `Thanh khoản ${(medianTurnover / 1e9).toFixed(1)} tỷ/ngày (Large+Mid)`,
-      ] : [],
+        `RSI ${rsi.toFixed(0)} (${rsi < 35 ? "oversold" : "neutral"})`,
+        `Thanh khoản ${(medianTurnover / 1e9).toFixed(1)} tỷ/ngày`,
+      ],
     };
   }
 
@@ -1371,28 +1386,35 @@ window.__SSI_RANKING__ = (function () {
       factors: s.tplusFactors,
     }));
 
-    // Vol Climax Bounce picks (T+3 bắt đáy strategy) — separate list
-    // Sort by bounce strength = volRatio × abs(drop %) (lực bounce indicator)
+    // Vol Climax Bounce — 2 tiers (A strict + B relax)
     const climaxMatches = stocks
       .filter((s) => s.volClimax?.matched && !coolDownSymbols.has(s.symbol))
       .map((s) => ({
         symbol: s.symbol,
         sector: s.sector,
+        tier: s.volClimax.tier,
+        tierLabel: s.volClimax.tierLabel,
         ret3d: s.volClimax.ret3d,
         volRatio: s.volClimax.volRatio,
         rsi: s.volClimax.rsi,
         reasons: s.volClimax.reasons,
-        // Bounce strength: vol mạnh + drop sâu → bounce mạnh hơn
         bounceStrength: s.volClimax.volRatio * Math.abs(s.volClimax.ret3d),
       }))
       .sort((a, b) => b.bounceStrength - a.bounceStrength);
 
+    const climaxTierA = climaxMatches.filter((m) => m.tier === "A");
+    const climaxTierB = climaxMatches.filter((m) => m.tier === "B");
+
     const result = {
       picks,
       climaxPicks: climaxMatches.slice(0, 10),
+      climaxTierA: climaxTierA.slice(0, 8),
+      climaxTierB: climaxTierB.slice(0, 8),
       allCount: stocks.length,
       eligibleCount: valid.length,
       climaxCount: climaxMatches.length,
+      climaxCountA: climaxTierA.length,
+      climaxCountB: climaxTierB.length,
       regime,
       minScore,
       timestamp: Date.now(),

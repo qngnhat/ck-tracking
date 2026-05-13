@@ -5544,15 +5544,22 @@
     return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, t4, t5, sizeQty, sizeValue, nav };
   }
 
-  function renderClimaxBounceSection(picks, totalCount) {
+  function renderClimaxBounceSection(picks, totalCount, opts = {}) {
+    const tierLabel = opts.tier === "A" ? "Edge cao" : opts.tier === "B" ? "Edge vừa" : null;
+    const tierBadge = opts.tier
+      ? `<span class="climax-tier-badge tier-${opts.tier}">${opts.tier} · ${tierLabel}</span>`
+      : "";
+    const subtitle = opts.tier === "A"
+      ? "Strict: drop >7% + vol >2× + RSI <35 — Win 59%, Sharpe 0.92"
+      : opts.tier === "B"
+      ? "Relax: drop >5% + vol >2× + RSI <50 — Win 58%, Sharpe 1.01"
+      : "Mã vừa rơi mạnh có lực mua xác nhận — hold 3 phiên (T+3.5)";
+
     let html = `
       <div class="climax-section">
         <div class="climax-header">
-          <h3 class="climax-title">🔻 Bắt đáy T+ <span class="climax-badge">${totalCount} mã match</span></h3>
-          <div class="climax-subtitle">Mã vừa rơi mạnh có lực mua xác nhận — hold 3 phiên (T+3.5)</div>
-          <div class="climax-strategy-info">
-            <small>📊 Cross-validated 8.5 năm: Win 59%, Avg +1.07%/lệnh, ~38 lệnh/năm. KHÁC chiến lược trên (đây là <b>mean-reversion</b>, không phải momentum).</small>
-          </div>
+          <h3 class="climax-title">🔻 Bắt đáy T+ ${tierBadge} <span class="climax-badge">${totalCount} mã</span></h3>
+          <div class="climax-subtitle">${subtitle}</div>
         </div>
         <div class="climax-list">
     `;
@@ -5652,45 +5659,47 @@
   function renderRanking() {
     const content = $("ranking-content");
     const s = curState();
-    const climaxPicks = s.lastResult?.climaxPicks || [];
-    const climaxCount = s.lastResult?.climaxCount || 0;
+    const tierA = s.lastResult?.climaxTierA || [];
+    const tierB = s.lastResult?.climaxTierB || [];
+    const countA = s.lastResult?.climaxCountA || 0;
+    const countB = s.lastResult?.climaxCountB || 0;
+    const totalCount = countA + countB;
 
     // ── Stats + expectation banner cho phong cách T+3 (Vol Climax Bounce) ──
     const statsHtml = `
       <div class="tplus-stats">
         <span class="tplus-stats-line">
-          🔻 <b>${climaxCount}</b> mã match pattern Bắt đáy T+ hôm nay
+          🔻 <b>${countA}</b> Tier A (Edge cao) · <b>${countB}</b> Tier B (Edge vừa) — tổng <b>${totalCount}</b> mã
         </span>
       </div>
       <div class="tplus-expectation-banner">
-        <div class="tplus-exp-title">📈 Bắt đáy T+ (Vol Climax Bounce) · Cross-validated 8.5 năm</div>
+        <div class="tplus-exp-title">📈 Bắt đáy T+ (Vol Climax Bounce) · 2-tier system</div>
         <div class="tplus-exp-body">
-          Win <b>~59%</b> · Avg <b>+1.07%/lệnh</b> · Sharpe <b>0.92</b> · Hold <b>3 phiên (T+3.5)</b>
+          <b>Tier A</b>: drop >7% + vol >2× + RSI <35 → Win 59%, Sharpe 0.92, ~38/năm<br>
+          <b>Tier B</b>: drop >5% + vol >2× + RSI <50 → Win 58%, Sharpe 1.01, ~57/năm
         </div>
         <div class="tplus-exp-warning">
-          ⚠️ Pattern hiếm <b>~38 lệnh/năm</b> — nhiều ngày sẽ không có signal (bình thường, đừng FOMO).
-          Size <b>15% NAV/lệnh</b>, max <b>2-3 lệnh</b> đồng thời. Kỷ luật stop loss -4%.
+          ⚠️ Hold T+3 → T+5 ATC (target +3%, force T+5). Size <b>15% NAV/lệnh</b> Tier A, <b>10%</b> Tier B. Max <b>2-3 lệnh</b> đồng thời.
         </div>
       </div>
     `;
 
-    // ── Empty state khi không có signal ──
-    if (climaxPicks.length === 0) {
+    // Empty state khi cả 2 tier đều rỗng
+    if (totalCount === 0) {
       content.innerHTML = statsHtml + `
         <div class="empty-state ranking-intro">
           <div class="empty-icon">💤</div>
-          <p><b>Không có mã match Bắt đáy T+ hôm nay.</b></p>
-          <p>Đây là pattern hiếm — chỉ ~38 lệnh/năm. Nhiều ngày sẽ empty là chuyện bình thường.
-             Đừng ép vào lệnh khi không có signal rõ.</p>
+          <p><b>Không có mã match Bắt đáy T+ hôm nay (cả Tier A + B).</b></p>
+          <p>Pattern hiếm — Tier A ~38/năm, Tier B ~57/năm. Nhiều ngày sẽ empty là chuyện bình thường.</p>
           <p><small>App vẫn auto check lại mỗi 14:50 EOD và gửi Telegram khi có pattern fire.</small></p>
         </div>
       `;
       return;
     }
 
-    // Build climax section
     let html = statsHtml;
-    html += renderClimaxBounceSection(climaxPicks, climaxCount);
+    if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
+    if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
 
     content.innerHTML = html;
 

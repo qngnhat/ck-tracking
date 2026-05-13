@@ -432,14 +432,18 @@ function detectVolClimaxBounce(data) {
 
   if (rsi == null) return null;
 
-  const matched = ret3d < -7 && volRatio > 2.0 && dayGreen && rsi < 35;
-  if (!matched) return null;
+  // 2-tier system
+  const base = dayGreen && volRatio > 2.0;
+  const matchedA = base && ret3d < -7 && rsi < 35;
+  const matchedB = base && ret3d < -5 && rsi < 50;
+  const tier = matchedA ? "A" : matchedB ? "B" : null;
+  if (!tier) return null;
 
   return {
+    tier,
     ret3d, volRatio, rsi,
     currentPrice: cur,
     medianTurnover,
-    // Bounce strength score = vol × |drop%| (lực bounce indicator)
     bounceStrength: volRatio * Math.abs(ret3d),
   };
 }
@@ -512,10 +516,16 @@ async function sendClimaxAlerts(env) {
   const t4Label = fmtDM(t4);
   const t5Label = fmtDM(t5);
 
-  let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
-  text += `${matches.length} mã match Vol Climax Bounce\n\n`;
+  // Split tiers
+  const tierA = matches.filter((m) => m.tier === "A");
+  const tierB = matches.filter((m) => m.tier === "B");
 
-  for (const m of matches.slice(0, 3)) {
+  let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
+  text += `*${tierA.length}* Tier A (Edge cao) · *${tierB.length}* Tier B (Edge vừa)\n\n`;
+
+  // Show Tier A first (priority), then Tier B
+  const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)];
+  for (const m of showMatches.slice(0, 5)) {
     const cur = m.currentPrice;
     const entryMax = cur * 1.02;
     const entryMin = cur * 0.99;
@@ -523,8 +533,9 @@ async function sendClimaxAlerts(env) {
     const sl = entryMid * 0.92; // -8% close-based (backtest: -4% intraday destroy edge)
     const target = entryMid * 1.03; // +3% early exit threshold
 
+    const tierTag = m.tier === "A" ? "🟢 Tier A" : "🔵 Tier B";
     text += `━━━━━━━━━━━━━━━\n`;
-    text += `*${m.symbol}*  @ ${cur.toFixed(2)}\n`;
+    text += `${tierTag} · *${m.symbol}*  @ ${cur.toFixed(2)}\n`;
     text += `📉 3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n\n`;
 
     text += `🟢 *MUA ${t1Label}*\n`;
