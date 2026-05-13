@@ -319,21 +319,23 @@ window.__SSI_PORTFOLIO__ = (function () {
     return count;
   }
 
-  // ── Action recommendation per holding (decision-grade, SL-aware) ──
+  // ── Action recommendation per holding (T+ swing-focused, SL-aware) ──
   /**
-   * Suggest action cho 1 holding dựa trên:
+   * Suggest action cho 1 holding dựa trên T+ swing trading logic:
    *  - SL active = max(cost-based SL, trailing SL từ analysis)
    *  - Distance đến SL (co giãn theo ATR%)
-   *  - Setup score + P&L
-   *  - Có trong DCA top picks không
+   *  - Setup score + P&L + RS + breakout flags
+   *  - Hold horizon (T+ ~5-15 phiên, sau đó stale)
+   *  - Strong leader / breakout fresh flags từ Strong Leaders scoring
    * Returns: {priority, icon, text, color, slActive}
    */
-  function recommendAction(holding, analysis, inDcaTop) {
+  function recommendAction(holding, analysis, inTplusTop = false) {
     const pnlPct = holding.cost_basis > 0
       ? ((analysis.current * holding.qty - holding.cost_basis) / holding.cost_basis) * 100
       : 0;
     const score = analysis?.score ?? 0;
     const cur = analysis?.current ?? 0;
+    const flags = analysis?.flags || {};
 
     // ── Active SL = max(cost-based -8%, trailing SL từ analysis) ──
     // Cả 2 luôn < current cho long; pick "tighter" (closer to current = max).
@@ -383,32 +385,54 @@ window.__SSI_PORTFOLIO__ = (function () {
       };
     }
 
-    // ── Tier 4: Take profit signals ──
-    if (pnlPct > 20 && score < 2) {
+    // ── T+ TP targets: TP1 +5%, TP2 +12% (per backtest spec) ──
+    // ── Tier 4a: TP2 hit (lãi mạnh) — exit full hoặc trail tight ──
+    if (pnlPct >= 12) {
       return {
-        priority: 2, icon: "💰", color: "#FF9800",
-        text: `Lãi ${pnlPct.toFixed(1)}% + Setup không còn tích cực — cân nhắc TP một phần`,
+        priority: 2, icon: "🎯🎯", color: "#4CAF50",
+        text: `Lãi ${pnlPct.toFixed(1)}% — chạm TP2 (+12%). Đề xuất chốt full hoặc trailing SL sát.`,
         slActive,
       };
     }
-    if (pnlPct > 30) {
+    // ── Tier 4b: TP1 hit (+5%) — partial TP ──
+    if (pnlPct >= 5) {
       return {
-        priority: 2, icon: "💰", color: "#FF9800",
-        text: `Lãi ${pnlPct.toFixed(1)}% — cân nhắc TP 1/3`,
+        priority: 2, icon: "🎯", color: "#4CAF50",
+        text: `Lãi ${pnlPct.toFixed(1)}% — chạm TP1 (+5%). Đề xuất TP 1/3 hoặc 1/2, giữ phần còn lại chạy.`,
         slActive,
       };
     }
 
-    // ── Tier 5: Add signals ──
-    if (score >= 4 && inDcaTop) {
+    // ── Tier 5: T+ exit signals (stale / lost momentum) ──
+    // Hold horizon T+ ~5-15 phiên. Sau đó hết edge mean-reversion / momentum.
+    if (holding.first_buy_date) {
+      const daysHeld = Math.floor((Date.now() - new Date(holding.first_buy_date).getTime()) / 86400000);
+      if (daysHeld > 15 && pnlPct < 3 && score < 4) {
+        return {
+          priority: 3, icon: "⏰", color: "#FF9800",
+          text: `Hold ${daysHeld}d > 15 phiên + chưa lãi rõ + setup yếu — T+ stale, đề xuất exit.`,
+          slActive,
+        };
+      }
+    }
+
+    // ── Tier 6: Add signals — Strong leader / breakout fresh ──
+    if (score >= 5 && (flags.strongLeader || flags.breakoutFresh) && pnlPct < 5) {
+      return {
+        priority: 3, icon: "🚀", color: "#4CAF50",
+        text: `Score ${score.toFixed(1)} + ${flags.strongLeader ? "Strong leader" : "Fresh breakout"} — có thể tilt buy. SL ${slActive.toFixed(2)}.`,
+        slActive,
+      };
+    }
+    if (score >= 4 && inTplusTop && pnlPct < 5) {
       return {
         priority: 3, icon: "📈", color: "#4CAF50",
-        text: `Setup tốt + còn trong DCA top — có thể tilt buy. SL ${slActive.toFixed(2)}.`,
+        text: `Vẫn trong T+ top picks + setup tốt — có thể tilt buy. SL ${slActive.toFixed(2)}.`,
         slActive,
       };
     }
 
-    // ── Tier 6: Score yếu + đang lỗ → "Yếu" thay vì "Trung tính" ──
+    // ── Tier 7: Score yếu + đang lỗ → cảnh báo ──
     if (score < 2 && pnlPct < 0) {
       return {
         priority: 4, icon: "👀", color: "#FF9800",
@@ -417,7 +441,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       };
     }
 
-    // ── Tier 7: Caution (score thấp, P&L positive) ──
+    // ── Tier 8: Caution (score thấp, P&L positive) ──
     if (score >= -3 && score < 0) {
       return {
         priority: 4, icon: "👀", color: "#FF9800",
@@ -426,19 +450,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       };
     }
 
-    // ── Tier 8: Removed from DCA top (sau 30 phiên) ──
-    if (!inDcaTop && holding.first_buy_date) {
-      const daysHeld = (Date.now() - new Date(holding.first_buy_date).getTime()) / 86400000;
-      if (daysHeld > 30) {
-        return {
-          priority: 4, icon: "🔄", color: "#FF9800",
-          text: "Không còn trong DCA top — cân nhắc thay thế khi rebalance",
-          slActive,
-        };
-      }
-    }
-
-    // ── Tier 9 default: hold (P&L hint) ──
+    // ── Tier 9 default: hold ──
     return {
       priority: 5, icon: "✓", color: "#4CAF50",
       text: pnlPct > 0

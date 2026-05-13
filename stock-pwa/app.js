@@ -901,7 +901,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v90"; // sync với sw.js CACHE name suffix
+    const appVersion = "v91"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -2365,7 +2365,7 @@
     if (r.score >= 4) {
       const tpHint = tp1 ? `Canh chốt 1/3 quanh <b>${fp(tp1)}</b>. ` : "";
       holdAction = `Có thể tilt buy 30-50% (KHÔNG all-in). ${sl}${tpHint}`;
-      warning = "ĐỪNG bỏ DCA định kỳ vì 1 setup. Edge ~3-5%/cơ hội — không chắc thắng.";
+      warning = "Edge T+ ~3-5%/cơ hội — không chắc thắng. Tuân thủ SL kỷ luật.";
     } else if (r.score >= 2) {
       holdAction = `Giữ, KHÔNG bán panic. ${sl}Theo dõi xem có lên ≥4 không.`;
       warning = "Setup khá phổ biến — đừng over-trade tín hiệu yếu.";
@@ -3651,7 +3651,7 @@
     if (regime === "BEAR" || regime === "BEAR_WEAK") {
       parts.push("📉 Market <b>BEAR</b> — hạn chế bắt đáy. T+ cần threshold cao + Confirmed entry.");
     } else if (regime === "BULL" || regime === "BULL_WEAK") {
-      parts.push("📈 Market <b>BULL</b> — môi trường thuận lợi cho cả T+ pullback lẫn DCA.");
+      parts.push("📈 Market <b>BULL</b> — môi trường thuận lợi cho T+ swing trading.");
     } else if (regime === "RANGE") {
       parts.push("⚡ Market <b>Đi ngang</b> — môi trường lý tưởng cho T+ mean-reversion.");
     }
@@ -5656,7 +5656,8 @@
   let editingTxId = null;
   // Cache analysis results per symbol khi render holdings
   const portfolioAnalysisCache = {};
-  let dcaTopSymbols = new Set();
+  // Track current T+ top picks symbols (consumed by portfolio recommendAction)
+  let tplusTopSymbols = new Set();
 
   function fmtMoney(vnd) {
     if (vnd === null || vnd === undefined || isNaN(vnd)) return "0đ";
@@ -5745,8 +5746,8 @@
       return;
     }
 
-    // DCA preview: nếu mua mã đã có holding → tính avg cost mới
-    let dcaHtml = "";
+    // Avg cost preview: nếu mua thêm mã đã có holding → tính avg cost mới
+    let avgCostHtml = "";
     if (side === "buy" && symbol && qty > 0 && price > 0) {
       const existing = PORTFOLIO.currentHoldings().find((h) => h.symbol === symbol);
       if (existing && existing.qty > 0) {
@@ -5755,7 +5756,7 @@
         const oldAvg = existing.avg_cost;
         const direction = newAvgCost < oldAvg ? "↓" : "↑";
         const dirColor = newAvgCost < oldAvg ? "#4CAF50" : "#FF9800";
-        dcaHtml = `<br><span style="color:${dirColor}">DCA: avg cost ${oldAvg.toFixed(2)} ${direction} <b>${newAvgCost.toFixed(2)}</b> (KL mới ${newQty.toLocaleString("vi-VN")})</span>`;
+        avgCostHtml = `<br><span style="color:${dirColor}">Avg cost: ${oldAvg.toFixed(2)} ${direction} <b>${newAvgCost.toFixed(2)}</b> (KL mới ${newQty.toLocaleString("vi-VN")})</span>`;
       }
     }
 
@@ -5791,7 +5792,7 @@
     if (side === "buy") {
       const total = gross + feeVnd;
       const newCash = PORTFOLIO.loadCash() - total;
-      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>${dcaHtml}${sizingHtml}`;
+      summary.innerHTML = `Tổng: <b>${fmtMoney(total)}</b> · Cash sau khi mua: <b>${fmtMoney(newCash)}</b>${avgCostHtml}${sizingHtml}`;
     } else {
       const proceeds = gross - feeVnd;
       const newCash = PORTFOLIO.loadCash() + proceeds;
@@ -5981,12 +5982,13 @@
   }
 
   // Build action plan with concrete numbers (TP zones, stop loss, sizing)
-  function buildHoldingActionPlan(holding, ana, inDcaTop) {
+  function buildHoldingActionPlan(holding, ana, inTplusTop = false) {
     const cur = ana.current;
     const avg = holding.avg_cost;
     const qty = holding.qty;
     const pnlPct = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
     const score = ana.score ?? 0;
+    const flags = ana.flags || {};
     const items = [];
 
     // 1. Cut-loss level: max(2*ATR below current, -8% from avg cost)
@@ -5996,18 +5998,18 @@
     const stopLoss = stopCandidates.length ? Math.max(...stopCandidates.filter((x) => x < cur)) : slFromAvg;
     const stopPct = avg > 0 ? ((stopLoss - avg) / avg) * 100 : 0;
 
-    // 2. Take-profit zones (if profitable)
-    if (pnlPct > 0) {
-      const tp1 = avg * 1.10; // +10%
-      const tp2 = avg * 1.20; // +20%
-      const tp3 = ana.resistance && ana.resistance > cur ? ana.resistance : avg * 1.30;
+    // 2. T+ Take-profit zones: TP1 +5%, TP2 +12% (per Strong Leaders spec)
+    if (pnlPct > -3) {
+      const tp1 = avg * 1.05; // +5%
+      const tp2 = avg * 1.12; // +12%
+      const tp3 = ana.resistance && ana.resistance > cur && ana.resistance < avg * 1.25 ? ana.resistance : avg * 1.20;
       items.push({
         kind: "tp",
-        title: "🎯 Vùng chốt lời",
+        title: "🎯 Vùng chốt lời (T+ swing)",
         rows: [
-          [`TP1 (+10%)`, fp(tp1), cur >= tp1 ? "Đã chạm — cân nhắc bán 1/3" : `Còn ${(((tp1 - cur) / cur) * 100).toFixed(1)}%`],
-          [`TP2 (+20%)`, fp(tp2), cur >= tp2 ? "Đã chạm — cân nhắc bán 1/3" : `Còn ${(((tp2 - cur) / cur) * 100).toFixed(1)}%`],
-          [`TP3 (kháng cự)`, fp(tp3), cur >= tp3 ? "Đã chạm — cân nhắc bán phần còn lại" : `Còn ${(((tp3 - cur) / cur) * 100).toFixed(1)}%`],
+          [`TP1 (+5%)`, fp(tp1), cur >= tp1 ? "Đã chạm — TP 1/3 đến 1/2" : `Còn ${(((tp1 - cur) / cur) * 100).toFixed(1)}%`],
+          [`TP2 (+12%)`, fp(tp2), cur >= tp2 ? "Đã chạm — TP 1/3 phần còn lại" : `Còn ${(((tp2 - cur) / cur) * 100).toFixed(1)}%`],
+          [`TP3 (kháng cự)`, fp(tp3), cur >= tp3 ? "Đã chạm — exit full" : `Còn ${(((tp3 - cur) / cur) * 100).toFixed(1)}%`],
         ],
       });
     }
@@ -6022,16 +6024,42 @@
       ],
     });
 
-    // 4. Add zone (only if score good + in DCA top + not too profitable)
-    if (score >= 4 && inDcaTop && pnlPct < 15) {
+    // 4. Hold horizon hint cho T+ — sau 10-15 phiên hết edge
+    if (holding.first_buy_date) {
+      const daysHeld = Math.floor((Date.now() - new Date(holding.first_buy_date).getTime()) / 86400000);
+      let hint;
+      if (daysHeld <= 10) hint = `${daysHeld}d / 10-15d expected — vẫn trong horizon T+`;
+      else if (daysHeld <= 15) hint = `${daysHeld}d — gần cuối horizon T+, chuẩn bị exit nếu chưa lãi rõ`;
+      else hint = `${daysHeld}d > 15 — T+ stale, đề xuất exit nếu setup yếu`;
+      items.push({
+        kind: "hold",
+        title: "⏰ Hold horizon",
+        rows: [[`Đã hold`, `${daysHeld} phiên`, hint]],
+      });
+    }
+
+    // 5. Add zone — chỉ nếu Strong Leader/breakout + chưa lãi quá
+    if (score >= 5 && (flags.strongLeader || flags.breakoutFresh) && pnlPct < 5) {
       const buyZoneLow = ana.buyZoneLow ?? cur * 0.97;
-      const buyZoneHigh = ana.buyZoneHigh ?? cur * 1.01;
+      const buyZoneHigh = ana.buyZoneHigh ?? cur * 1.02;
+      const reason = flags.strongLeader ? "Strong leader (RS vs VNI)" : "Fresh breakout";
       items.push({
         kind: "add",
-        title: "📈 Vùng mua thêm (nếu muốn tăng tỷ trọng)",
+        title: "🚀 Vùng tilt buy (T+ momentum)",
         rows: [
           [`Vùng giá`, `${fp(buyZoneLow)} – ${fp(buyZoneHigh)}`, ""],
-          [`Lý do`, `Setup score ${score}, còn trong DCA top`, ""],
+          [`Lý do`, `Score ${score.toFixed(1)} + ${reason}`, ""],
+        ],
+      });
+    } else if (score >= 4 && inTplusTop && pnlPct < 5) {
+      const buyZoneLow = ana.buyZoneLow ?? cur * 0.97;
+      const buyZoneHigh = ana.buyZoneHigh ?? cur * 1.02;
+      items.push({
+        kind: "add",
+        title: "📈 Vùng tilt buy",
+        rows: [
+          [`Vùng giá`, `${fp(buyZoneLow)} – ${fp(buyZoneHigh)}`, ""],
+          [`Lý do`, `Vẫn trong T+ top picks, score ${score.toFixed(1)}`, ""],
         ],
       });
     }
@@ -6064,9 +6092,9 @@
     const pnlSign = pnl >= 0 ? "+" : "";
     const realized = (holding?.realized_pnl ?? 0) * 1000;
 
-    const inDcaTop = dcaTopSymbols.has(symbol);
-    const action = ana && holding ? PORTFOLIO.recommendAction(holding, ana, inDcaTop) : null;
-    const plan = ana && holding && qty > 0 ? buildHoldingActionPlan(holding, ana, inDcaTop) : null;
+    const inTplusTop = tplusTopSymbols.has(symbol);
+    const action = ana && holding ? PORTFOLIO.recommendAction(holding, ana, inTplusTop) : null;
+    const plan = ana && holding && qty > 0 ? buildHoldingActionPlan(holding, ana, inTplusTop) : null;
 
     const meta = getStockMeta(symbol) || {};
     const companyParts = [meta.name, sectorLabel(meta.sector), meta.floor].filter(Boolean);
@@ -6538,11 +6566,11 @@
       };
     }
 
-    // Load DCA top picks (cached) for "in-top" check
+    // Load T+ top picks (cached) for "in-top" check
     try {
-      const cached = JSON.parse(localStorage.getItem("dca_top_picks_v1") || "null");
+      const cached = JSON.parse(localStorage.getItem("tplus_top_picks_v1") || "null");
       if (cached?.data?.picks) {
-        dcaTopSymbols = new Set(cached.data.picks.map((p) => p.symbol));
+        tplusTopSymbols = new Set(cached.data.picks.map((p) => p.symbol));
       }
     } catch {}
 
@@ -6653,8 +6681,8 @@
         const dayCls = dayChange >= 0 ? "up" : "down";
         const daySign = dayChange >= 0 ? "+" : "";
 
-        const inDcaTop = dcaTopSymbols.has(h.symbol);
-        const action = ana ? PORTFOLIO.recommendAction(h, ana, inDcaTop) : null;
+        const inTplusTop = tplusTopSymbols.has(h.symbol);
+        const action = ana ? PORTFOLIO.recommendAction(h, ana, inTplusTop) : null;
         const setupLabel = ana?.recommendation || "--";
         const setupColor = ana?.recColor || "#888";
 
