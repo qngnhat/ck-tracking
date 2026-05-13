@@ -141,9 +141,9 @@ def _compute_strong_leaders_per_symbol(g: pd.DataFrame, vni: pd.DataFrame) -> pd
 
     # ── E. ADX + DI ──
     # Reuse adx columns nếu có; else skip
-    if "adx14" in g.columns and "plusDI14" in g.columns and "minusDI14" in g.columns:
-        adx_strong_up = (g["adx14"] > 25) & (g["plusDI14"] > g["minusDI14"])
-        adx_strong_down = (g["adx14"] > 25) & (g["minusDI14"] > g["plusDI14"])
+    if "adx14" in g.columns and "plus_di" in g.columns and "minus_di" in g.columns:
+        adx_strong_up = (g["adx14"] > 25) & (g["plus_di"] > g["minus_di"])
+        adx_strong_down = (g["adx14"] > 25) & (g["minus_di"] > g["plus_di"])
         score = score + adx_strong_up.astype(float) * 1.5
         score = score - adx_strong_down.astype(float) * 1.5
 

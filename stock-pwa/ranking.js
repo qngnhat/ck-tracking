@@ -315,25 +315,30 @@ window.__SSI_RANKING__ = (function () {
     const reasons = [];
     let score = 0;
 
-    // ── A. Relative Strength vs VN-Index (PRIMARY SIGNAL) ──
+    // ── A. Relative Strength vs VN-Index ──
+    // ⚠️ Per backtest 2024+ ablation: trên 58 mã curated, RS signal HURT
+    // Sharpe (0.171 → 0.192 khi drop RS). Suspect: thresholds quá tight (5%/8%)
+    // và mã curated đã similar to VNI. Reduce weight 50% — keep as informational
+    // signal nhưng giảm influence. Revisit khi có full HOSE data.
+    let rs5 = null, rs20 = null;
     if (vnindexCloses && vnindexCloses.length >= 25) {
-      // 5d và 20d return của mã vs VNI
       const stock5d = (currentClose / closes[n - 6] - 1) * 100;
       const stock20d = (currentClose / closes[n - 21] - 1) * 100;
       const vniLast = vnindexCloses[vnindexCloses.length - 1];
       const vni5d = (vniLast / vnindexCloses[vnindexCloses.length - 6] - 1) * 100;
       const vni20d = (vniLast / vnindexCloses[vnindexCloses.length - 21] - 1) * 100;
-      const rs5 = stock5d - vni5d;
-      const rs20 = stock20d - vni20d;
+      rs5 = stock5d - vni5d;
+      rs20 = stock20d - vni20d;
 
+      // Weights reduced 50% (3→1.5, 1.5→0.75, -2→-1)
       if (rs5 > 5 && rs20 > 8) {
-        score += 3;
+        score += 1.5;
         reasons.push(`Strong leader · RS 5d +${rs5.toFixed(1)}% / 20d +${rs20.toFixed(1)}% vs VNI`);
       } else if (rs5 > 2 && rs20 > 3) {
-        score += 1.5;
+        score += 0.75;
         reasons.push(`Outperform VNI · RS 5d +${rs5.toFixed(1)}%`);
       } else if (rs5 < -3 && rs20 < -5) {
-        score -= 2;
+        score -= 1;
         reasons.push(`Laggard · RS 5d ${rs5.toFixed(1)}% / 20d ${rs20.toFixed(1)}% vs VNI`);
       }
     }
@@ -507,13 +512,8 @@ window.__SSI_RANKING__ = (function () {
       strongLeader: false, // set below
       breakoutFresh: false,
     };
-    // Set positive flags
-    if (vnindexCloses && vnindexCloses.length >= 25) {
-      const stock20d = (currentClose / closes[n - 21] - 1) * 100;
-      const vniLast = vnindexCloses[vnindexCloses.length - 1];
-      const vni20d = (vniLast / vnindexCloses[vnindexCloses.length - 21] - 1) * 100;
-      if (stock20d - vni20d > 8) flags.strongLeader = true;
-    }
+    // Set positive flags (reuse rs20 đã compute trên)
+    if (rs20 != null && rs20 > 8) flags.strongLeader = true;
     if (recentBreakout) flags.breakoutFresh = true;
 
     return {
