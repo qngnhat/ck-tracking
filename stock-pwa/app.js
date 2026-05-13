@@ -202,7 +202,8 @@
         vnindexCloses: vnindex?.closes || null,
       });
       renderAnalysis(r);
-      renderChart();
+      // Defer renderChart 1 frame để DOM layout xong → container.clientWidth ≠ 0
+      requestAnimationFrame(() => renderChart());
       updateStatus();
       saveHistory(symbol);
       bindForwardStatsPoolBtn();
@@ -212,6 +213,43 @@
     } catch (err) {
       showError(`Lỗi tải dữ liệu: ${err.message}`, () => analyzeSymbol(symbol));
     }
+  }
+
+  // Aggregate daily OHLCV → weekly bars (Monday-Friday grouped by ISO week)
+  function aggregateToWeekly(daily) {
+    if (!daily?.times?.length) return daily;
+    const { times, opens, highs, lows, closes, volumes } = daily;
+    const bars = [];
+    let cur = null;
+    for (let i = 0; i < times.length; i++) {
+      const ts = times[i]; // unix seconds
+      const d = new Date(ts * 1000);
+      // Week start = Monday in local time
+      const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon
+      const monday = new Date(d);
+      monday.setHours(0, 0, 0, 0);
+      monday.setDate(monday.getDate() - dayOfWeek);
+      const weekKey = Math.floor(monday.getTime() / 1000);
+      if (!cur || cur.time !== weekKey) {
+        if (cur) bars.push(cur);
+        cur = { time: weekKey, open: opens[i], high: highs[i], low: lows[i], close: closes[i], volume: volumes[i] || 0 };
+      } else {
+        cur.high = Math.max(cur.high, highs[i]);
+        cur.low = Math.min(cur.low, lows[i]);
+        cur.close = closes[i];
+        cur.volume += volumes[i] || 0;
+      }
+    }
+    if (cur) bars.push(cur);
+    return {
+      times: bars.map((b) => b.time),
+      opens: bars.map((b) => b.open),
+      highs: bars.map((b) => b.high),
+      lows: bars.map((b) => b.low),
+      closes: bars.map((b) => b.close),
+      volumes: bars.map((b) => b.volume),
+      resolution: "W",
+    };
   }
 
   // ── Change chart resolution ──
@@ -233,7 +271,13 @@
     `;
 
     try {
-      chartData = await ANALYSIS.fetchHistory(currentSymbol, resolution, RESOLUTIONS[resolution].days);
+      if (resolution === "W") {
+        // VND dchart-api không support resolution=W. Fetch daily rồi aggregate.
+        const daily = await ANALYSIS.fetchHistory(currentSymbol, "D", RESOLUTIONS["W"].days);
+        chartData = aggregateToWeekly(daily);
+      } else {
+        chartData = await ANALYSIS.fetchHistory(currentSymbol, resolution, RESOLUTIONS[resolution].days);
+      }
       renderChart();
       lastUpdated = new Date();
       updateStatus();
@@ -363,8 +407,10 @@
     // Intraday resolutions need time-visible
     const isIntraday = resolution === "1" || resolution === "5" || resolution === "15" || resolution === "30" || resolution === "60";
 
+    // Fallback width nếu container chưa measured (clientWidth=0)
+    const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
     chartInstance = window.LightweightCharts.createChart(container, {
-      width: container.clientWidth,
+      width: chartWidth,
       height: 320,
       layout: {
         background: { color: "#0f0f1e" },
@@ -855,7 +901,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v87"; // sync với sw.js CACHE name suffix
+    const appVersion = "v88"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -4319,6 +4365,19 @@
         </ul>
       </div>
 
+      <!-- VN-Index chart -->
+      <div class="home-card vnindex-card">
+        <div class="home-card-title">
+          📈 VN-Index
+          <div class="vnindex-range" id="vnindex-range">
+            <button class="vni-range-btn" data-days="60">3M</button>
+            <button class="vni-range-btn active" data-days="120">6M</button>
+            <button class="vni-range-btn" data-days="250">1Y</button>
+          </div>
+        </div>
+        <div id="vnindex-chart-container" class="vnindex-chart"></div>
+      </div>
+
       ${outlookHtml}
 
       ${snapshotHtml}
@@ -4372,20 +4431,28 @@
       `;
     }
 
-    // Tracker summary (T+ only)
+    // Tracker summary (T+ only) — show recent snapshot picks preview
     const tracker = RANKING.loadTracker();
     const tplusSnaps = tracker.tplus?.length || 0;
     if (tplusSnaps > 0) {
+      const lastSnap = tracker.tplus[tracker.tplus.length - 1];
+      const lastDate = new Date(lastSnap.date);
+      const daysAgo = Math.floor((Date.now() - lastDate.getTime()) / (24 * 3600 * 1000));
+      const daysAgoLabel = daysAgo === 0 ? "hôm nay" : daysAgo === 1 ? "hôm qua" : `${daysAgo}d trước`;
+      const lastDateStr = lastDate.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+      const picksPreview = (lastSnap.picks || []).slice(0, 5).map((p) =>
+        `<span class="tracker-pick-pill">${p.symbol}<small>+${p.score?.toFixed(1) ?? "?"}</small></span>`
+      ).join("");
+      const morePicks = (lastSnap.picks?.length || 0) > 5 ? `<span class="tracker-pick-pill tracker-pick-more">+${lastSnap.picks.length - 5}</span>` : "";
+
       html += `
         <div class="home-card home-card-clickable" data-target-tab="ranking" data-target-tracker="1">
-          <div class="home-card-title">📊 Lịch sử khuyến nghị T+</div>
-          <div class="home-tracker-row">
-            <div class="home-tracker-item">
-              <div class="home-tracker-num">${tplusSnaps}</div>
-              <div class="home-tracker-label">T+ snapshots</div>
-            </div>
+          <div class="home-card-title">📊 Lịch sử khuyến nghị T+ <small>(${tplusSnaps} snapshots)</small></div>
+          <div class="tracker-last-row">
+            <span class="tracker-last-date">📅 ${lastDateStr} (${daysAgoLabel}) · ${lastSnap.picks?.length || 0} mã</span>
           </div>
-          <div class="home-card-cta">Xem performance →</div>
+          <div class="tracker-picks-preview">${picksPreview}${morePicks}</div>
+          <div class="home-card-cta">Xem performance đầy đủ →</div>
         </div>
       `;
     }
@@ -4420,21 +4487,38 @@
       });
     });
 
-    // Watchlist refresh button + auto load if cache fresh
+    // Watchlist: auto load nếu watchlist không empty, dùng cache nếu fresh,
+    // fallback fetch fresh nếu chưa có cache.
     const wlRefresh = document.getElementById("watchlist-refresh-home");
     if (wlRefresh) {
       wlRefresh.addEventListener("click", (e) => {
         e.stopPropagation();
         loadWatchlistInHome(true);
       });
-      // Auto load if cache exists
+    }
+    if (watchlistCount > 0) {
+      let usedCache = false;
       try {
         const cached = JSON.parse(localStorage.getItem("watchlist_data_v1") || "null");
         if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
           renderWatchlistInHome(cached.data);
+          usedCache = true;
         }
       } catch {}
+      // Fetch fresh nếu không có cache (auto, không cần tap)
+      if (!usedCache) loadWatchlistInHome(false);
     }
+
+    // VN-Index chart: render với 6M default + bind range buttons
+    renderVnindexChart(120);
+    document.querySelectorAll("#vnindex-range .vni-range-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        document.querySelectorAll("#vnindex-range .vni-range-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderVnindexChart(parseInt(btn.dataset.days, 10));
+      });
+    });
 
     // Market snapshot scan button — always full universe now
     const snapBtn = document.getElementById("snap-load-btn");
@@ -4482,6 +4566,98 @@
         openSectorDetail(sec, snapshot);
       });
     });
+  }
+
+  // ── VN-Index chart on home ──
+  // Cache VNINDEX history 30 phút (less stale risk vì chart hiển thị nhiều tháng).
+  let vnindexChartInstance = null;
+  let vnindexCachedData = null; // full history 250 phiên — slice trên đó
+  async function renderVnindexChart(days) {
+    const container = document.getElementById("vnindex-chart-container");
+    if (!container) return;
+    if (!window.LightweightCharts) {
+      container.innerHTML = `<div class="chart-loading"><span>Chart library chưa load...</span></div>`;
+      return;
+    }
+    container.innerHTML = `<div class="chart-loading"><div class="spinner spinner-sm"></div><span>Tải VN-Index...</span></div>`;
+    try {
+      if (!vnindexCachedData) {
+        const cached = JSON.parse(localStorage.getItem("vnindex_chart_v1") || "null");
+        if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
+          vnindexCachedData = cached.data;
+        }
+      }
+      if (!vnindexCachedData) {
+        vnindexCachedData = await ANALYSIS.fetchHistory("VNINDEX", "D", 250);
+        try {
+          localStorage.setItem("vnindex_chart_v1", JSON.stringify({
+            timestamp: Date.now(), data: vnindexCachedData,
+          }));
+        } catch {}
+      }
+      const d = vnindexCachedData;
+      const slice = Math.min(days, d.times.length);
+      const startIdx = d.times.length - slice;
+      const candles = [];
+      for (let i = startIdx; i < d.times.length; i++) {
+        candles.push({
+          time: d.times[i],
+          open: d.opens[i],
+          high: d.highs[i],
+          low: d.lows[i],
+          close: d.closes[i],
+        });
+      }
+
+      container.innerHTML = "";
+      if (vnindexChartInstance) {
+        try { vnindexChartInstance.remove(); } catch {}
+        vnindexChartInstance = null;
+      }
+      const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
+      vnindexChartInstance = window.LightweightCharts.createChart(container, {
+        width: chartWidth,
+        height: 220,
+        layout: { background: { color: "transparent" }, textColor: "#a0a0b0", fontSize: 10 },
+        grid: {
+          vertLines: { color: "rgba(255,255,255,0.04)" },
+          horzLines: { color: "rgba(255,255,255,0.04)" },
+        },
+        rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
+        timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: false },
+        crosshair: { mode: 0 },
+      });
+      const series = vnindexChartInstance.addCandlestickSeries({
+        upColor: "#4CAF50", downColor: "#ff5722",
+        borderUpColor: "#4CAF50", borderDownColor: "#ff5722",
+        wickUpColor: "#4CAF50", wickDownColor: "#ff5722",
+      });
+      series.setData(candles);
+      vnindexChartInstance.timeScale().fitContent();
+
+      // Resize on window resize
+      const resizeFn = () => {
+        if (!vnindexChartInstance) return;
+        try {
+          vnindexChartInstance.applyOptions({ width: container.clientWidth });
+        } catch {}
+      };
+      window.removeEventListener("resize", window.__vniResizeFn);
+      window.__vniResizeFn = resizeFn;
+      window.addEventListener("resize", resizeFn);
+    } catch (e) {
+      container.innerHTML = `
+        <div class="chart-loading chart-error">
+          ⚠️ Lỗi VN-Index: ${e.message}
+          <button class="link-btn vni-retry-btn">Thử lại</button>
+        </div>
+      `;
+      const retry = container.querySelector(".vni-retry-btn");
+      if (retry) retry.addEventListener("click", () => {
+        vnindexCachedData = null;
+        renderVnindexChart(days);
+      });
+    }
   }
 
   async function loadWatchlistInHome(forceFresh = false) {

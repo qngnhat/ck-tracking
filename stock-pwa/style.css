@@ -843,6 +843,89 @@ button {
   }
 }
 
+/* ── VN-Index chart card (home) ── */
+.vnindex-card .home-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vnindex-range {
+  display: flex;
+  gap: 4px;
+  background: #0f0f1e;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.vni-range-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 28px;
+  transition: all 0.15s;
+}
+
+.vni-range-btn.active {
+  background: rgba(0, 210, 255, 0.18);
+  color: #00d2ff;
+}
+
+.vnindex-chart {
+  height: 220px;
+  margin-top: 8px;
+}
+
+/* ── Tracker pick pills (home preview) ── */
+.tracker-last-row {
+  margin: 8px 0 6px;
+  font-size: 11px;
+  color: #aab;
+}
+
+.tracker-last-date {
+  font-weight: 500;
+}
+
+.tracker-picks-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.tracker-pick-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 210, 255, 0.1);
+  border: 1px solid rgba(0, 210, 255, 0.25);
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.tracker-pick-pill small {
+  color: #4CAF50;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.tracker-pick-pill.tracker-pick-more {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #aab;
+}
+
 /* ── Stock Personality Profile card ── */
 .stock-profile-card {
   background: linear-gradient(135deg, rgba(0, 210, 255, 0.04), rgba(76, 175, 80, 0.03));
