@@ -5479,6 +5479,60 @@
   // Render tracker section on init (show/hide based on whether snapshots exist)
   renderTrackerSection();
 
+  // ── Vol Climax Bounce section render ──
+  // Cross-validated 8.5 năm: win 58.9%, avg +1.07%/trade, sharpe 0.92.
+  // Pattern hiếm (~38 lệnh/năm) — không phải ngày nào cũng có signal.
+  function renderClimaxBounceSection(picks, totalCount) {
+    let html = `
+      <div class="climax-section">
+        <div class="climax-header">
+          <h3 class="climax-title">🔻 Bắt đáy T+ <span class="climax-badge">${totalCount} mã match</span></h3>
+          <div class="climax-subtitle">Mã vừa rơi mạnh có lực mua xác nhận — hold 3 phiên (T+3.5)</div>
+          <div class="climax-strategy-info">
+            <small>📊 Cross-validated 8.5 năm: Win 59%, Avg +1.07%/lệnh, ~38 lệnh/năm. KHÁC chiến lược trên (đây là <b>mean-reversion</b>, không phải momentum).</small>
+          </div>
+        </div>
+        <div class="climax-list">
+    `;
+    picks.forEach((p, i) => {
+      const isWatched = RANKING.isInWatchlist(p.symbol);
+      const tagsHtml = (p.reasons || []).map((r) =>
+        `<span class="factor-tag tag-climax">${r}</span>`
+      ).join("");
+      html += `
+        <div class="pick-card climax-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
+          <div class="pick-rank">#${i + 1}</div>
+          <div class="pick-main">
+            <div class="pick-row1">
+              <span class="pick-symbol">${p.symbol}</span>
+              <span class="pick-sector">${sectorLabel(p.sector)}</span>
+              <span class="climax-bounce-strength" title="Lực bounce = vol × |drop%|">⚡ ${p.bounceStrength.toFixed(1)}</span>
+            </div>
+            <div class="pick-row2">
+              <span class="climax-stat down">3p: ${p.ret3d.toFixed(1)}%</span>
+              <span class="climax-stat">Vol ${p.volRatio.toFixed(1)}×</span>
+              <span class="climax-stat">RSI ${p.rsi.toFixed(0)}</span>
+            </div>
+            <div class="pick-tags">${tagsHtml}</div>
+          </div>
+          <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
+            ${isWatched ? '★' : '☆'}
+          </button>
+          <div class="pick-cta">›</div>
+        </div>
+      `;
+    });
+    html += `
+        </div>
+        <div class="climax-plan-hint">
+          📍 <b>Plan trade T+3.5</b>: Mua ATO/ATC sáng phiên sau · Stop loss -4% từ entry · Bán close phiên T+3
+          <br><small>⚠️ Pattern hiếm, năm 2023 fail. KHÔNG all-in. Size 10-15% NAV/lệnh, max 2-3 lệnh đồng thời.</small>
+        </div>
+      </div>
+    `;
+    return html;
+  }
+
   function renderRanking() {
     const content = $("ranking-content");
     const s = curState();
@@ -5571,6 +5625,12 @@
       </div>
     `;
 
+    // ── Vol Climax Bounce section (bắt đáy T+3) ──
+    const climaxPicks = s.lastResult?.climaxPicks || [];
+    if (climaxPicks.length > 0) {
+      html += renderClimaxBounceSection(climaxPicks, s.lastResult?.climaxCount || 0);
+    }
+
     content.innerHTML = html;
 
     content.querySelectorAll(".pick-card").forEach((card) => {
@@ -5579,10 +5639,18 @@
         if (e.target.closest(".pick-watchlist")) return;
         const sym = card.dataset.symbol;
         const rank = parseInt(card.dataset.rank, 10);
+        // Strong Leaders picks: từ s.picks; climax picks: không có context
         const pick = picks.find((p) => p.symbol === sym);
-        analyzeContext = "tplus";
-        analyzeContextPick = pick;
-        analyzeContextRank = rank;
+        if (pick) {
+          analyzeContext = "tplus";
+          analyzeContextPick = pick;
+          analyzeContextRank = rank;
+        } else {
+          // Climax pick — chỉ open analyze, không set tplus context
+          analyzeContext = null;
+          analyzeContextPick = null;
+          analyzeContextRank = null;
+        }
         switchTab("analyze");
         const input = document.getElementById("symbol-input");
         if (input) input.value = sym;

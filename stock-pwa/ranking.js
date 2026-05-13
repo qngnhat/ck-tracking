@@ -291,6 +291,48 @@ window.__SSI_RANKING__ = (function () {
     return { macd: m, signal: sig, hist: m - sig };
   }
 
+  // ── Vol Climax Bounce detector (separate strategy from Strong Leaders) ──
+  // Pattern: 3 phiên giảm > 7% + volume hôm nay > 2× TB20 + nến xanh + RSI < 35
+  // Hold 3 phiên (T+3.5). Cross-validated 8.5 năm:
+  //   - 316 trades, win 58.9%, avg +1.07% NET, sharpe 0.92
+  //   - Robust qua COVID/BULL/BEAR/sideways (2022 BEAR: avg +4.42%, sharpe 3.08)
+  // Logic: panic-selling capitulation + reversal candle + oversold → bounce
+  // Source: backtest/run_climax_crossvalidate.py
+  function detectVolClimaxBounce(ohlcv) {
+    const closes = ohlcv.closes;
+    const opens = ohlcv.opens;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 30) return null;
+
+    const cur = closes[n - 1];
+    const curOpen = opens[n - 1];
+    const curVol = volumes[n - 1];
+    const prev3 = closes[n - 4];
+
+    const ret3d = (cur - prev3) / prev3 * 100;
+    const volSlice = volumes.slice(n - 21, n - 1);
+    const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+    const dayGreen = cur > curOpen;
+    const rsi = calcRsi(closes, 14);
+
+    if (rsi == null) return null;
+
+    const matched = ret3d < -7 && volRatio > 2.0 && dayGreen && rsi < 35;
+
+    return {
+      matched,
+      ret3d, volRatio, rsi,
+      reasons: matched ? [
+        `3 phiên giảm ${ret3d.toFixed(1)}% — capitulation`,
+        `Volume ${volRatio.toFixed(1)}× TB20 — lực mua xác nhận`,
+        `Nến xanh (close ${cur.toFixed(2)} > open ${curOpen.toFixed(2)})`,
+        `RSI ${rsi.toFixed(0)} (oversold < 35)`,
+      ] : [],
+    };
+  }
+
   // ── T+ Score (Strong Leaders — momentum/RS/breakout/accumulation) ──
   // VN narrow-leadership regime: chỉ 1 vài mã mạnh tăng, mean-reversion fail.
   // Focus: relative strength vs market, breakout patterns, volume accumulation,
@@ -316,10 +358,9 @@ window.__SSI_RANKING__ = (function () {
     let score = 0;
 
     // ── A. Relative Strength vs VN-Index ──
-    // ⚠️ Per backtest 2024+ ablation: trên 58 mã curated, RS signal HURT
-    // Sharpe (0.171 → 0.192 khi drop RS). Suspect: thresholds quá tight (5%/8%)
-    // và mã curated đã similar to VNI. Reduce weight 50% — keep as informational
-    // signal nhưng giảm influence. Revisit khi có full HOSE data.
+    // V7 backtest (199 mã Large+Mid, 2024+): RS signal KEEP — drop nó hurts Sharpe
+    // -0.020. Full weight restored sau khi full-universe + Large+Mid test confirm
+    // formula gốc work tốt trên universe thực tế (vs 58 mã curated overfit).
     let rs5 = null, rs20 = null;
     if (vnindexCloses && vnindexCloses.length >= 25) {
       const stock5d = (currentClose / closes[n - 6] - 1) * 100;
@@ -330,48 +371,45 @@ window.__SSI_RANKING__ = (function () {
       rs5 = stock5d - vni5d;
       rs20 = stock20d - vni20d;
 
-      // Weights reduced 50% (3→1.5, 1.5→0.75, -2→-1)
       if (rs5 > 5 && rs20 > 8) {
-        score += 1.5;
+        score += 3;
         reasons.push(`Strong leader · RS 5d +${rs5.toFixed(1)}% / 20d +${rs20.toFixed(1)}% vs VNI`);
       } else if (rs5 > 2 && rs20 > 3) {
-        score += 0.75;
+        score += 1.5;
         reasons.push(`Outperform VNI · RS 5d +${rs5.toFixed(1)}%`);
       } else if (rs5 < -3 && rs20 < -5) {
-        score -= 1;
+        score -= 2;
         reasons.push(`Laggard · RS 5d ${rs5.toFixed(1)}% / 20d ${rs20.toFixed(1)}% vs VNI`);
       }
     }
 
-    // ── B. Breakout signals (new highs) ──
-    // w20 high break
+    // ── B. Breakout signals (new highs) — INFORMATIONAL ONLY (scoring disabled) ──
+    // V7 backtest (199 mã Large+Mid + 655 mã full universe): drop Breakout group
+    // → Sharpe +0.030 / +0.022 consistently. Likely vì fake breakouts hurt nhiều
+    // hơn real breakouts khi mở rộng pool. Giữ detection cho reasons (user transparency)
+    // nhưng KHÔNG cộng điểm.
     const w20H = Math.max(...closes.slice(n - 21, n - 1));
     const recentBreakout = closes.slice(n - 5).some((c) => c > w20H * 1.005);
     if (recentBreakout) {
-      score += 2 * wBreakout;
-      reasons.push(`Break w20-high gần đây${wBreakout !== 1 ? ` (reliability ×${wBreakout.toFixed(1)})` : ""}`);
+      reasons.push(`Break w20-high gần đây (info — không tính điểm)`);
     }
-    // w52 high break (rare, strong)
     if (n >= 252) {
       const w52H = Math.max(...closes.slice(n - 252, n - 1));
       if (currentClose > w52H * 0.99) {
-        score += 3 * wBreakout;
-        reasons.push(`Gần đỉnh 52w (mới breakout)${wBreakout !== 1 ? ` ×${wBreakout.toFixed(1)}` : ""}`);
+        reasons.push(`Gần đỉnh 52w (info — không tính điểm)`);
       }
     }
-    // Ceiling streak (tăng trần liên tục)
+    // Ceiling streak (tăng trần liên tục) — informational only
     let ceilingStreak = 0;
     for (let i = n - 1; i >= Math.max(0, n - 5); i--) {
       const pct = i >= 1 ? (closes[i] - closes[i - 1]) / closes[i - 1] * 100 : 0;
-      if (pct >= 6.5) ceilingStreak++; // VN HOSE ceiling ~7%
+      if (pct >= 6.5) ceilingStreak++;
       else break;
     }
     if (ceilingStreak >= 2) {
-      score += 2 * wBreakout;
-      reasons.push(`Tăng trần ${ceilingStreak} phiên liên tiếp`);
+      reasons.push(`Tăng trần ${ceilingStreak} phiên liên tiếp (info)`);
     } else if (ceilingStreak === 1) {
-      score += 1;
-      reasons.push(`Tăng trần phiên hôm nay`);
+      reasons.push(`Tăng trần phiên hôm nay (info)`);
     }
 
     // ── C. Volume accumulation (Wyckoff-style) ──
@@ -1242,6 +1280,8 @@ window.__SSI_RANKING__ = (function () {
               vnindexCloses,
               stockProfile,
             });
+            // Vol Climax Bounce detection (separate strategy — bắt đáy T+3)
+            stock.volClimax = detectVolClimaxBounce(ohlcv);
           } catch (e) {
             stock.error = e.message;
             stock.tplusFactors = null;
@@ -1285,10 +1325,28 @@ window.__SSI_RANKING__ = (function () {
       factors: s.tplusFactors,
     }));
 
+    // Vol Climax Bounce picks (T+3 bắt đáy strategy) — separate list
+    // Sort by bounce strength = volRatio × abs(drop %) (lực bounce indicator)
+    const climaxMatches = stocks
+      .filter((s) => s.volClimax?.matched && !coolDownSymbols.has(s.symbol))
+      .map((s) => ({
+        symbol: s.symbol,
+        sector: s.sector,
+        ret3d: s.volClimax.ret3d,
+        volRatio: s.volClimax.volRatio,
+        rsi: s.volClimax.rsi,
+        reasons: s.volClimax.reasons,
+        // Bounce strength: vol mạnh + drop sâu → bounce mạnh hơn
+        bounceStrength: s.volClimax.volRatio * Math.abs(s.volClimax.ret3d),
+      }))
+      .sort((a, b) => b.bounceStrength - a.bounceStrength);
+
     const result = {
       picks,
+      climaxPicks: climaxMatches.slice(0, 10),
       allCount: stocks.length,
       eligibleCount: valid.length,
+      climaxCount: climaxMatches.length,
       regime,
       minScore,
       timestamp: Date.now(),

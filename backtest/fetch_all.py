@@ -24,8 +24,8 @@ DATA_DIR.mkdir(exist_ok=True)
 START_DATE = "2018-01-01"
 
 
-def read_universe() -> list[str]:
-    with open(BASE_DIR / "universe.txt") as f:
+def read_universe(filename: str = "universe.txt") -> list[str]:
+    with open(BASE_DIR / filename) as f:
         return [
             line.strip()
             for line in f
@@ -125,10 +125,11 @@ def fetch_all_foreign(universe: list[str]) -> pd.DataFrame:
 
 
 def main() -> None:
-    universe = read_universe()
-    print(f"Universe: {len(universe)} symbols")
-
+    # Usage: python fetch_all.py [ohlcv|fundamentals|foreign|all] [universe_file]
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
+    uni_file = sys.argv[2] if len(sys.argv) > 2 else "universe.txt"
+    universe = read_universe(uni_file)
+    print(f"Universe: {len(universe)} symbols from {uni_file}")
 
     if what in ("all", "ohlcv"):
         fetch_all_ohlcv(universe)

@@ -2234,6 +2234,92 @@ body.is-offline {
 }
 
 /* ════════════════════════════════════════
+   VOL CLIMAX BOUNCE — "Bắt đáy T+" section
+   ════════════════════════════════════════ */
+.climax-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 2px dashed rgba(255, 152, 0, 0.4);
+}
+.climax-header {
+  margin-bottom: 12px;
+}
+.climax-title {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  color: #ff9800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.climax-badge {
+  font-size: 11px;
+  font-weight: normal;
+  padding: 2px 8px;
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 10px;
+  color: #ff9800;
+}
+.climax-subtitle {
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 8px;
+}
+.climax-strategy-info {
+  font-size: 11px;
+  color: #888;
+  padding: 8px 10px;
+  background: rgba(255, 152, 0, 0.04);
+  border-left: 2px solid rgba(255, 152, 0, 0.3);
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+.climax-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.climax-card {
+  border-color: rgba(255, 152, 0, 0.25) !important;
+}
+.climax-card .pick-rank {
+  color: #ff9800;
+}
+.climax-bounce-strength {
+  font-size: 12px;
+  color: #ff9800;
+  font-weight: 600;
+}
+.climax-stat {
+  font-size: 12px;
+  color: #ccc;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.climax-stat.down {
+  color: #ff5252;
+  background: rgba(255, 82, 82, 0.08);
+}
+.factor-tag.tag-climax {
+  background: rgba(255, 152, 0, 0.1);
+  border-color: rgba(255, 152, 0, 0.35);
+  color: #ffb74d;
+}
+.climax-plan-hint {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 152, 0, 0.07);
+  border: 1px solid rgba(255, 152, 0, 0.25);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #ffb74d;
+  line-height: 1.5;
+}
+
+/* ════════════════════════════════════════
    CONTEXT CARDS (DCA/T+ pick explanation)
    ════════════════════════════════════════ */
 .context-card {

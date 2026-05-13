@@ -87,8 +87,8 @@ def main():
     regime = classify_regime(vni)
     print(f"  Regime distribution: {regime.value_counts().to_dict()}")
 
-    # Drop A (RS vs VNI) per ablation findings
-    enabled = {"A": False, "B": True, "C": True, "D": True, "E": True, "F": True, "G": True}
+    # Full-universe ablation (655 mã): drop B (Breakout) — RS giờ neutral, Breakout hurts
+    enabled = {"A": True, "B": False, "C": True, "D": True, "E": True, "F": True, "G": True}
     scored = add_scores_modular(universe, vni, enabled)
     test_df = scored[scored["date"] >= TEST_START]
 
