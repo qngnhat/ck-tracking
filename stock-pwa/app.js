@@ -5683,50 +5683,114 @@
       const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
       const dayChangeSign = f.dayChange >= 0 ? "+" : "";
 
-      // T+ reasons display
-      const tagsHtml = (p.reasons || []).map((r) =>
-        `<span class="factor-tag tag-strong">${r}</span>`
-      ).join("");
-
-      // Rank priority sub-label (T+ only)
-      let priorityLabel = "";
-      if (i === 0 && p.score >= 5) priorityLabel = `<div class="pick-rank-tag pick-rank-priority">Ưu tiên cao</div>`;
-      else if (i <= 1) priorityLabel = `<div class="pick-rank-tag pick-rank-backup">Backup</div>`;
-
       const isWatched = RANKING.isInWatchlist(p.symbol);
+      const flags = p.flags || f.flags || {};
 
-      // Bayesian P(win) chip — show realistic expectation per pick
-      const bayes = computeBayesianWinProb(p.score, p.flags || f.flags || {});
+      // ── Bayesian P(win) — realistic expectation ──
+      const bayes = computeBayesianWinProb(p.score, flags);
       const winProb = bayes?.prob ?? null;
-      let winChipHtml = "";
-      if (winProb != null) {
-        const pct = (winProb * 100).toFixed(0);
-        let cls = "win-chip-neutral";
-        if (winProb >= 0.55) cls = "win-chip-good";
-        else if (winProb < 0.50) cls = "win-chip-warn";
-        winChipHtml = `<span class="pick-win-chip ${cls}" title="Bayesian P(win) sau khi adjust theo risk flags">~${pct}% win</span>`;
+      const winPct = winProb != null ? (winProb * 100).toFixed(0) : null;
+
+      // ── Action decision: MUA / CHỜ / KHÔNG MUA ──
+      const verdict = getVerdict(p.score, flags, f.atrPct, winProb);
+      let action, actionClass, actionDesc;
+      if (!verdict || verdict.tag === "Avoid") {
+        action = "🔴 KHÔNG MUA";
+        actionClass = "pick-action-no";
+        actionDesc = "Score thấp hoặc risk cao. Chờ tín hiệu đảo chiều rõ.";
+      } else if (verdict.tag === "Watchlist") {
+        action = "🟡 CHỜ XÁC NHẬN";
+        actionClass = "pick-action-wait";
+        actionDesc = "Setup có risk flag hoặc score chưa đủ confluence. Chờ trigger rõ.";
+      } else if (verdict.tag === "Spec Buy (borderline)") {
+        action = "🟡 CHỜ XÁC NHẬN";
+        actionClass = "pick-action-wait";
+        actionDesc = winPct ? `Edge mỏng (P(win) ~${winPct}%). Ưu tiên Confirmed entry, size cực nhỏ.` : "Edge mỏng. Ưu tiên Confirmed entry.";
+      } else {
+        action = "🟢 MUA";
+        actionClass = "pick-action-buy";
+        actionDesc = winPct ? `Setup confluence rõ, ~${winPct}% win. Vào theo plan dưới.` : "Setup confluence rõ. Vào theo plan dưới.";
       }
 
+      // ── Lý do top 3 (1 dòng) ──
+      const top3Reasons = (p.reasons || []).slice(0, 3).join(" · ");
+
+      // ── Size hint (qty CP + % NAV) ──
+      const cur = f.currentPrice;
+      let sizeStr = "15% NAV/lệnh (cập nhật cash trong Portfolio để có số CP cụ thể)";
+      try {
+        const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+        const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+        let totalMarket = 0;
+        for (const h of holdings) {
+          const a = portfolioAnalysisCache?.[h.symbol];
+          if (a?.current) totalMarket += h.qty * a.current * 1000;
+        }
+        const nav = totalMarket + cash;
+        const sizePct = actionClass === "pick-action-buy" ? 0.15
+                      : actionClass === "pick-action-wait" ? 0.10 : 0;
+        if (nav > 0 && cur > 0 && sizePct > 0) {
+          const target = nav * sizePct;
+          const qty = Math.floor(target / (cur * 1000));
+          if (qty > 0) {
+            const value = qty * cur * 1000;
+            sizeStr = `<b>${qty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(value)}, ${(sizePct * 100).toFixed(0)}% NAV)`;
+          }
+        } else if (sizePct === 0) {
+          sizeStr = `<b>Không vào lệnh</b>`;
+        }
+      } catch {}
+
+      // ── Stop loss (-8% từ giá hiện tại) ──
+      const slPrice = cur * 0.92;
+
+      // ── Reasons + risk chips (details collapse) ──
+      const allReasonsHtml = (p.reasons || []).map((r) =>
+        `<span class="factor-tag tag-strong">${r}</span>`
+      ).join("");
+      const chipsBlock = renderRiskChips(flags);
+
       html += `
-        <div class="pick-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
-          <div class="pick-rank">#${i + 1}${priorityLabel}</div>
-          <div class="pick-main">
-            <div class="pick-row1">
-              <span class="pick-symbol">${p.symbol}</span>
-              <span class="pick-sector">${sectorLabel(p.sector)}</span>
-              <span class="pick-score" title="Score chỉ là quality indicator — không phải dự đoán % thắng">${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</span>
-              ${winChipHtml}
-            </div>
-            <div class="pick-row2">
-              <span class="pick-price">${fp(f.currentPrice)}</span>
-              <span class="pct ${dayChangeClass}">${dayChangeSign}${(f.dayChange * 100).toFixed(2)}%</span>
-            </div>
-            <div class="pick-tags">${tagsHtml}</div>
+        <div class="pick-card-v2 ${actionClass}" data-symbol="${p.symbol}" data-rank="${i + 1}">
+          <div class="pick-v2-header">
+            <span class="pick-v2-rank">#${i + 1}</span>
+            <span class="pick-v2-symbol">${p.symbol}</span>
+            <span class="pick-v2-sector">${sectorLabel(p.sector)}</span>
+            <span class="pick-v2-price">${fp(cur)}</span>
+            <span class="pct ${dayChangeClass}">${dayChangeSign}${(f.dayChange * 100).toFixed(2)}%</span>
+            <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ' : 'Thêm watchlist'}">
+              ${isWatched ? '★' : '☆'}
+            </button>
           </div>
-          <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
-            ${isWatched ? '★' : '☆'}
-          </button>
-          <div class="pick-cta">›</div>
+
+          <div class="pick-v2-action">
+            <div class="pick-v2-action-label">${action}</div>
+            <div class="pick-v2-action-desc">${actionDesc}</div>
+          </div>
+
+          ${top3Reasons ? `<div class="pick-v2-reason">💡 ${top3Reasons}</div>` : ""}
+
+          <div class="pick-v2-plan">
+            <div class="pick-v2-plan-row">
+              <span class="pick-v2-plan-label">💰 Size:</span>
+              <span class="pick-v2-plan-val">${sizeStr}</span>
+            </div>
+            <div class="pick-v2-plan-row">
+              <span class="pick-v2-plan-label">🔴 Stop loss:</span>
+              <span class="pick-v2-plan-val">${fp(slPrice)} (-8%)</span>
+            </div>
+            <div class="pick-v2-plan-row">
+              <span class="pick-v2-plan-label">⏱ Hold:</span>
+              <span class="pick-v2-plan-val">15-20 phiên (sau 10p không hồi → cắt)</span>
+            </div>
+          </div>
+
+          <details class="pick-v2-details">
+            <summary>▼ Chi tiết phân tích (score ${p.score.toFixed(2)}${winPct ? ` · ~${winPct}% win` : ""})</summary>
+            ${allReasonsHtml ? `<div class="pick-v2-tags">${allReasonsHtml}</div>` : ""}
+            ${chipsBlock}
+            <div class="pick-v2-analyze-cta">Bấm vào symbol ↑ để xem chart + phân tích đầy đủ ›</div>
+          </details>
         </div>
       `;
     });
@@ -5747,12 +5811,13 @@
 
     content.innerHTML = html;
 
-    content.querySelectorAll(".pick-card").forEach((card) => {
-      card.addEventListener("click", (e) => {
-        // Skip if clicked watchlist button (handled separately)
+    // Strong Leaders pick-card-v2 — click symbol/header to analyze, không click vào details
+    content.querySelectorAll(".pick-card-v2 .pick-v2-header").forEach((header) => {
+      header.addEventListener("click", (e) => {
         if (e.target.closest(".pick-watchlist")) return;
-        const sym = card.dataset.symbol;
-        const rank = parseInt(card.dataset.rank, 10);
+        const card = header.closest(".pick-card-v2");
+        const sym = card?.dataset.symbol;
+        const rank = parseInt(card?.dataset.rank || "0", 10);
         const pick = picks.find((p) => p.symbol === sym);
         if (pick) {
           analyzeContext = "tplus";

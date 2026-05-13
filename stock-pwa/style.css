@@ -5665,6 +5665,180 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #ff8a65;
 }
 
+/* ── Strong Leaders pick-card V2: BIG MUA/CHỜ/KHÔNG action ── */
+.pick-card-v2 {
+  background: #14142a;
+  border: 1px solid #2a2a3e;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-left-width: 4px;
+}
+.pick-card-v2.pick-action-buy {
+  border-left-color: #4CAF50;
+}
+.pick-card-v2.pick-action-wait {
+  border-left-color: #FF9800;
+}
+.pick-card-v2.pick-action-no {
+  border-left-color: #f44336;
+  opacity: 0.7;
+}
+
+.pick-v2-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.pick-v2-header:hover {
+  opacity: 0.9;
+}
+.pick-v2-rank {
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pick-v2-symbol {
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
+}
+.pick-v2-sector {
+  font-size: 11px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.pick-v2-price {
+  margin-left: auto;
+  font-size: 16px;
+  color: #00d2ff;
+  font-weight: 600;
+}
+.pick-v2-header .pct {
+  font-size: 13px;
+}
+.pick-v2-header .pick-watchlist {
+  margin-left: 6px;
+}
+
+/* BIG action banner */
+.pick-v2-action {
+  padding: 12px 14px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  border: 1px solid;
+}
+.pick-action-buy .pick-v2-action {
+  background: rgba(76, 175, 80, 0.10);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+.pick-action-wait .pick-v2-action {
+  background: rgba(255, 152, 0, 0.10);
+  border-color: rgba(255, 152, 0, 0.4);
+}
+.pick-action-no .pick-v2-action {
+  background: rgba(244, 67, 54, 0.10);
+  border-color: rgba(244, 67, 54, 0.4);
+}
+.pick-v2-action-label {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.pick-action-buy .pick-v2-action-label {
+  color: #81c784;
+}
+.pick-action-wait .pick-v2-action-label {
+  color: #ffb74d;
+}
+.pick-action-no .pick-v2-action-label {
+  color: #ef5350;
+}
+.pick-v2-action-desc {
+  font-size: 13px;
+  color: #ddd;
+  line-height: 1.5;
+}
+
+/* Lý do 1 dòng */
+.pick-v2-reason {
+  padding: 8px 10px;
+  background: rgba(0, 210, 255, 0.04);
+  border-left: 2px solid rgba(0, 210, 255, 0.3);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ccc;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+/* Plan rows: Size / SL / Hold */
+.pick-v2-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.pick-v2-plan-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.pick-v2-plan-label {
+  color: #888;
+  min-width: 90px;
+}
+.pick-v2-plan-val {
+  color: #fff;
+  flex: 1;
+}
+.pick-v2-plan-val b {
+  color: #00d2ff;
+}
+
+/* Collapse details */
+.pick-v2-details {
+  margin-top: 4px;
+}
+.pick-v2-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #888;
+  padding: 6px 0;
+  list-style: none;
+}
+.pick-v2-details summary::-webkit-details-marker {
+  display: none;
+}
+.pick-v2-details summary:hover {
+  color: #aaa;
+}
+.pick-v2-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+.pick-v2-analyze-cta {
+  font-size: 11px;
+  color: #666;
+  margin-top: 8px;
+  font-style: italic;
+}
+
 /* Per-pick win probability chip */
 .pick-win-chip {
   display: inline-block;
