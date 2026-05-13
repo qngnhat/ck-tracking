@@ -5015,7 +5015,8 @@
       day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
     });
     const cacheTxt = result.fromCache ? " (từ cache)" : "";
-    meta.textContent = `Cập nhật ${time}${cacheTxt} · ${result.eligibleCount}/${result.allCount} mã đủ điều kiện`;
+    const climaxCount = result.climaxCount || 0;
+    meta.textContent = `Cập nhật ${time}${cacheTxt} · Đã quét ${result.allCount} mã · ${climaxCount} match Bắt đáy T+`;
   }
 
   // ════════════════════════════════════════════════════
@@ -5634,212 +5635,49 @@
   function renderRanking() {
     const content = $("ranking-content");
     const s = curState();
-    const picks = s.picks.slice(0, s.topN);
+    const climaxPicks = s.lastResult?.climaxPicks || [];
+    const climaxCount = s.lastResult?.climaxCount || 0;
 
-    if (picks.length === 0) {
-      content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">💤</div><p>Không có setup T+ nào đủ chất lượng hôm nay. Đó là chuyện bình thường — đừng ép vào lệnh khi không có cơ hội rõ. Quay lại sau hoặc thử ngày khác.</p></div>`;
-      return;
-    }
-
-    // T+ distribution stats: Spec Buy / Watchlist breakdown + flag activation
-    const allPicks = s.picks; // before topN slice
-    let specBuy = 0, watchlist = 0;
-    const flagCounts = { bearTrap: 0, lowSessionLiq: 0, sellPressure: 0, lowVol: 0, deepDowntrend: 0, volCritical: 0 };
-    for (const p of allPicks) {
-      const f = p.flags || {};
-      const v = getVerdict(p.score, f, null);
-      if (v?.tag === "Spec Buy") specBuy++;
-      else if (v?.tag === "Watchlist") watchlist++;
-      for (const k of Object.keys(flagCounts)) {
-        if (f[k]) flagCounts[k]++;
-      }
-    }
-    const flagsActive = Object.entries(flagCounts)
-      .filter(([_, c]) => c > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
-      .map(([k, c]) => {
-        const labels = {
-          bearTrap: "Bắt dao rơi", lowSessionLiq: "Kẹt hàng", sellPressure: "Lực bán",
-          lowVol: "Vol thấp", deepDowntrend: "Downtrend", volCritical: "Vol cực thấp",
-        };
-        return `${labels[k]} ${c}`;
-      })
-      .join(" · ");
+    // ── Stats + expectation banner cho phong cách T+3 (Vol Climax Bounce) ──
     const statsHtml = `
       <div class="tplus-stats">
         <span class="tplus-stats-line">
-          📊 <b>${allPicks.length}</b> picks: 🟢 ${specBuy} Spec Buy · 🟡 ${watchlist} Watchlist
-          ${flagsActive ? `<br><span class="tplus-stats-flags">⚠️ Risk flags: ${flagsActive}</span>` : ""}
+          🔻 <b>${climaxCount}</b> mã match pattern Bắt đáy T+ hôm nay
         </span>
       </div>
       <div class="tplus-expectation-banner">
-        <div class="tplus-exp-title">📈 Kỳ vọng theo backtest 2024+ (Sharpe 0.24)</div>
+        <div class="tplus-exp-title">📈 Bắt đáy T+ (Vol Climax Bounce) · Cross-validated 8.5 năm</div>
         <div class="tplus-exp-body">
-          Score 4+ → <b>~56% lệnh thắng</b> · Avg <b>+3.81%/lệnh</b> · Hold 15-20 phiên
+          Win <b>~59%</b> · Avg <b>+1.07%/lệnh</b> · Sharpe <b>0.92</b> · Hold <b>3 phiên (T+3.5)</b>
         </div>
         <div class="tplus-exp-warning">
-          ⚠️ <b>Score cao KHÔNG phải lệnh chắc thắng</b> — 4/10 lệnh vẫn thua (max DD per trade ~-8%).
-          Size <b>15-20% NAV/lệnh</b>, kỷ luật <b>stop loss -8%</b>, KHÔNG average down.
+          ⚠️ Pattern hiếm <b>~38 lệnh/năm</b> — nhiều ngày sẽ không có signal (bình thường, đừng FOMO).
+          Size <b>15% NAV/lệnh</b>, max <b>2-3 lệnh</b> đồng thời. Kỷ luật stop loss -4%.
         </div>
       </div>
     `;
 
-    let html = statsHtml + '<div class="picks-list">';
-    picks.forEach((p, i) => {
-      const f = p.factors;
-      const dayChangeClass = f.dayChange >= 0 ? "up" : "down";
-      const dayChangeSign = f.dayChange >= 0 ? "+" : "";
-
-      const isWatched = RANKING.isInWatchlist(p.symbol);
-      const flags = p.flags || f.flags || {};
-
-      // ── Bayesian P(win) — realistic expectation ──
-      const bayes = computeBayesianWinProb(p.score, flags);
-      const winProb = bayes?.prob ?? null;
-      const winPct = winProb != null ? (winProb * 100).toFixed(0) : null;
-
-      // ── Action decision: MUA / CHỜ / KHÔNG MUA ──
-      const verdict = getVerdict(p.score, flags, f.atrPct, winProb);
-      let action, actionClass, actionDesc;
-      if (!verdict || verdict.tag === "Avoid") {
-        action = "🔴 KHÔNG MUA";
-        actionClass = "pick-action-no";
-        actionDesc = "Score thấp hoặc risk cao. Chờ tín hiệu đảo chiều rõ.";
-      } else if (verdict.tag === "Watchlist") {
-        action = "🟡 CHỜ XÁC NHẬN";
-        actionClass = "pick-action-wait";
-        actionDesc = "Setup có risk flag hoặc score chưa đủ confluence. Chờ trigger rõ.";
-      } else if (verdict.tag === "Spec Buy (borderline)") {
-        action = "🟡 CHỜ XÁC NHẬN";
-        actionClass = "pick-action-wait";
-        actionDesc = winPct ? `Edge mỏng (P(win) ~${winPct}%). Ưu tiên Confirmed entry, size cực nhỏ.` : "Edge mỏng. Ưu tiên Confirmed entry.";
-      } else {
-        action = "🟢 MUA";
-        actionClass = "pick-action-buy";
-        actionDesc = winPct ? `Setup confluence rõ, ~${winPct}% win. Vào theo plan dưới.` : "Setup confluence rõ. Vào theo plan dưới.";
-      }
-
-      // ── Lý do top 3 (1 dòng) ──
-      const top3Reasons = (p.reasons || []).slice(0, 3).join(" · ");
-
-      // ── Size hint (qty CP + % NAV) ──
-      const cur = f.currentPrice;
-      let sizeStr = "15% NAV/lệnh (cập nhật cash trong Portfolio để có số CP cụ thể)";
-      try {
-        const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
-        const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
-        let totalMarket = 0;
-        for (const h of holdings) {
-          const a = portfolioAnalysisCache?.[h.symbol];
-          if (a?.current) totalMarket += h.qty * a.current * 1000;
-        }
-        const nav = totalMarket + cash;
-        const sizePct = actionClass === "pick-action-buy" ? 0.15
-                      : actionClass === "pick-action-wait" ? 0.10 : 0;
-        if (nav > 0 && cur > 0 && sizePct > 0) {
-          const target = nav * sizePct;
-          const qty = Math.floor(target / (cur * 1000));
-          if (qty > 0) {
-            const value = qty * cur * 1000;
-            sizeStr = `<b>${qty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(value)}, ${(sizePct * 100).toFixed(0)}% NAV)`;
-          }
-        } else if (sizePct === 0) {
-          sizeStr = `<b>Không vào lệnh</b>`;
-        }
-      } catch {}
-
-      // ── Stop loss (-8% từ giá hiện tại) ──
-      const slPrice = cur * 0.92;
-
-      // ── Reasons + risk chips (details collapse) ──
-      const allReasonsHtml = (p.reasons || []).map((r) =>
-        `<span class="factor-tag tag-strong">${r}</span>`
-      ).join("");
-      const chipsBlock = renderRiskChips(flags);
-
-      html += `
-        <div class="pick-card-v2 ${actionClass}" data-symbol="${p.symbol}" data-rank="${i + 1}">
-          <div class="pick-v2-header">
-            <span class="pick-v2-rank">#${i + 1}</span>
-            <span class="pick-v2-symbol">${p.symbol}</span>
-            <span class="pick-v2-sector">${sectorLabel(p.sector)}</span>
-            <span class="pick-v2-price">${fp(cur)}</span>
-            <span class="pct ${dayChangeClass}">${dayChangeSign}${(f.dayChange * 100).toFixed(2)}%</span>
-            <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ' : 'Thêm watchlist'}">
-              ${isWatched ? '★' : '☆'}
-            </button>
-          </div>
-
-          <div class="pick-v2-action">
-            <div class="pick-v2-action-label">${action}</div>
-            <div class="pick-v2-action-desc">${actionDesc}</div>
-          </div>
-
-          ${top3Reasons ? `<div class="pick-v2-reason">💡 ${top3Reasons}</div>` : ""}
-
-          <div class="pick-v2-plan">
-            <div class="pick-v2-plan-row">
-              <span class="pick-v2-plan-label">💰 Size:</span>
-              <span class="pick-v2-plan-val">${sizeStr}</span>
-            </div>
-            <div class="pick-v2-plan-row">
-              <span class="pick-v2-plan-label">🔴 Stop loss:</span>
-              <span class="pick-v2-plan-val">${fp(slPrice)} (-8%)</span>
-            </div>
-            <div class="pick-v2-plan-row">
-              <span class="pick-v2-plan-label">⏱ Hold:</span>
-              <span class="pick-v2-plan-val">15-20 phiên (sau 10p không hồi → cắt)</span>
-            </div>
-          </div>
-
-          <details class="pick-v2-details">
-            <summary>▼ Chi tiết phân tích (score ${p.score.toFixed(2)}${winPct ? ` · ~${winPct}% win` : ""})</summary>
-            ${allReasonsHtml ? `<div class="pick-v2-tags">${allReasonsHtml}</div>` : ""}
-            ${chipsBlock}
-            <div class="pick-v2-analyze-cta">Bấm vào symbol ↑ để xem chart + phân tích đầy đủ ›</div>
-          </details>
+    // ── Empty state khi không có signal ──
+    if (climaxPicks.length === 0) {
+      content.innerHTML = statsHtml + `
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">💤</div>
+          <p><b>Không có mã match Bắt đáy T+ hôm nay.</b></p>
+          <p>Đây là pattern hiếm — chỉ ~38 lệnh/năm. Nhiều ngày sẽ empty là chuyện bình thường.
+             Đừng ép vào lệnh khi không có signal rõ.</p>
+          <p><small>App vẫn auto check lại mỗi 14:50 EOD và gửi Telegram khi có pattern fire.</small></p>
         </div>
       `;
-    });
-    html += "</div>";
-
-    // T+ allocation hint
-    html += `
-      <div class="allocation-hint">
-        ⚡ Hold ~5-15 phiên (sau 10 phiên không hồi → cắt). Stop loss <b>-8%</b> hoặc 2× ATR. Exit khi RSI hồi &gt;50 hoặc đạt mục tiêu kháng cự.
-      </div>
-    `;
-
-    // ── Vol Climax Bounce section (bắt đáy T+3) ──
-    const climaxPicks = s.lastResult?.climaxPicks || [];
-    if (climaxPicks.length > 0) {
-      html += renderClimaxBounceSection(climaxPicks, s.lastResult?.climaxCount || 0);
+      return;
     }
+
+    // Build climax section
+    let html = statsHtml;
+    html += renderClimaxBounceSection(climaxPicks, climaxCount);
 
     content.innerHTML = html;
 
-    // Strong Leaders pick-card-v2 — click symbol/header to analyze, không click vào details
-    content.querySelectorAll(".pick-card-v2 .pick-v2-header").forEach((header) => {
-      header.addEventListener("click", (e) => {
-        if (e.target.closest(".pick-watchlist")) return;
-        const card = header.closest(".pick-card-v2");
-        const sym = card?.dataset.symbol;
-        const rank = parseInt(card?.dataset.rank || "0", 10);
-        const pick = picks.find((p) => p.symbol === sym);
-        if (pick) {
-          analyzeContext = "tplus";
-          analyzeContextPick = pick;
-          analyzeContextRank = rank;
-        }
-        switchTab("analyze");
-        const input = document.getElementById("symbol-input");
-        if (input) input.value = sym;
-        analyzeSymbol(sym);
-      });
-    });
-
-    // Climax card V2 — click header (symbol) to open analyze for verification
+    // Climax card V2 — click header to open analyze
     content.querySelectorAll(".climax-card-v2 .climax-card-title").forEach((header) => {
       header.addEventListener("click", (e) => {
         if (e.target.closest(".pick-watchlist")) return;
@@ -5856,7 +5694,7 @@
       });
     });
 
-    // Bind quick-add watchlist buttons
+    // Watchlist buttons binding
     content.querySelectorAll(".pick-watchlist").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
