@@ -1207,53 +1207,61 @@
     return { prob: Math.max(0, Math.min(1, prob)), breakdown };
   }
 
-  // ── Verdict + Risk chips (decision layer) ──
-  // Penalty (flags) ảnh hưởng VERDICT, không chỉ chip hiển thị.
-  // Hard flags (1 cái đủ giết kèo): bearTrap (ADX>45 -DI mạnh), lowSessionLiq.
-  // Soft flags (≥2 mới downgrade): lowVol, deepDowntrend.
-  // Size hint embed luôn vào verdict desc theo flag count + ATR.
+  // ── Verdict (decision layer) — DATA-DRIVEN theo Bayesian P(win) ──
+  // Rewrite: trust Bayesian backtest data, KHÔNG dùng intuition "hard flag = risk".
+  // Backtest cho thấy: bearTrap/sellPressure/deepDowntrend thực tế TĂNG P(win)
+  // (contrarian setup, panic capitulation). lowSessionLiq + lowVol thật sự HẠI.
+  // Bayesian đã capture impact của tất cả flag → verdict chỉ cần xét P(win).
   function getVerdict(score, flags, atrPct, bayesProb = null) {
     if (score === null || score === undefined || isNaN(score)) return null;
+
+    // Score < 2 = không có signal nào, không vào
     if (score < 2) return { tag: "Avoid", color: "#ff4444", icon: "🔴",
-      desc: "Không vào. Chờ tín hiệu đảo chiều rõ." };
+      desc: "Score thấp, không có confluence. Không vào lệnh." };
 
-    const hardFlags = [flags?.bearTrap, flags?.lowSessionLiq, flags?.sellPressure].filter(Boolean).length;
-    const softFlags = [flags?.lowVol, flags?.deepDowntrend, flags?.weeklyDowntrend].filter(Boolean).length;
+    // Score 2-4 = chưa đủ confluence, chờ
+    if (score < 4) return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
+      desc: "Score chưa đủ confluence (cần ≥ 4). Theo dõi thêm." };
 
-    // Score ≥4 nhưng có hard flag HOẶC ≥2 soft flag → downgrade về Watchlist
-    const downgradeBuy = score >= 4 && (hardFlags >= 1 || softFlags >= 2);
-    if (downgradeBuy) {
+    // Score >= 4: dựa Bayesian P(win) để quyết định
+    // Auto-compute Bayesian nếu chưa pass vào
+    if (bayesProb == null) {
+      const b = computeBayesianWinProb(score, flags);
+      bayesProb = b?.prob ?? null;
+    }
+
+    // Special case: lowSessionLiq là TRUE killer (Bayesian × 0.638 — n=6 small sample)
+    if (flags?.lowSessionLiq) {
       return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
-        desc: "Setup chất lượng nhưng risk cao. Nếu thử bắt đáy: <b>10-20% vốn</b>, chờ xác nhận." };
+        desc: "Thanh khoản cực thấp (vào dễ ra khó). Tránh hoặc size cực nhỏ." };
     }
 
-    // ── Bayesian data integration: nếu P(win) < baseline, KHÔNG cho Spec Buy ──
-    // Backtest baseline P(win) = 52%. Below 50% = không có edge → demote.
-    if (score >= 4 && bayesProb != null && bayesProb < 0.50) {
-      return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
-        desc: `Score ${score.toFixed(1)} OK nhưng <b>P(win) ${(bayesProb * 100).toFixed(0)}% < baseline 52%</b> — setup yếu hơn lệnh T+ trung bình. Chờ xác nhận hoặc bỏ qua.` };
-    }
-
-    // Borderline: Bayes 50-55% → spec buy nhưng cần confirm
-    if (score >= 4 && bayesProb != null && bayesProb < 0.55) {
-      let sizeHint = softFlags >= 1 ? "1/4 vốn" : "1/3 vốn";
-      return { tag: "Spec Buy (borderline)", color: "#FFC107", icon: "🟡",
-        desc: `Có edge nhẹ (P(win) ${(bayesProb * 100).toFixed(0)}%). <b>${sizeHint}</b>, ưu tiên Confirmed entry để có buffer.` };
-    }
-
-    if (score >= 4) {
-      // Size hint dựa flagCount (chỉ soft) + ATR
-      let sizeHint;
-      if (softFlags >= 1) sizeHint = "1/4 vốn (có 1 risk soft)";
-      else if (atrPct != null && atrPct >= 3) sizeHint = "1/3 vốn (biến động cao)";
-      else sizeHint = "1/3 - 1/2 vốn";
-      const probTxt = bayesProb != null ? ` · P(win) ${(bayesProb * 100).toFixed(0)}%` : "";
+    // No Bayesian data — fallback theo score
+    if (bayesProb == null) {
+      let sizeHint = atrPct != null && atrPct >= 3 ? "1/4 vốn (vol cao)" : "1/3 vốn";
       return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
-        desc: `Có thể vào — <b>${sizeHint}</b>${probTxt}. Cân nhắc chờ xác nhận nếu thận trọng.` };
+        desc: `Score ${score.toFixed(1)} đủ confluence — <b>${sizeHint}</b>. Cân nhắc chờ xác nhận.` };
     }
 
-    return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
-      desc: "Chờ confluence rõ hơn (score ≥ 4) HOẶC trigger đảo chiều." };
+    // P(win) < 50% = không có edge thật → KHÔNG MUA
+    if (bayesProb < 0.50) {
+      return { tag: "Watchlist", color: "#FF9800", icon: "🟡",
+        desc: `<b>P(win) ${(bayesProb * 100).toFixed(0)}% < flip coin</b> — risk flags hại edge. Bỏ qua hoặc chờ xác nhận đảo chiều.` };
+    }
+
+    // P(win) 50-53% = edge mỏng, borderline
+    if (bayesProb < 0.53) {
+      return { tag: "Spec Buy (borderline)", color: "#FFC107", icon: "🟡",
+        desc: `Edge mỏng (P(win) ${(bayesProb * 100).toFixed(0)}%). Nếu vào: <b>1/4 vốn</b>, ưu tiên Confirmed entry.` };
+    }
+
+    // P(win) >= 53% = MUA
+    let sizeHint;
+    if (atrPct != null && atrPct >= 3) sizeHint = "1/4 vốn (biến động cao)";
+    else if (bayesProb >= 0.58) sizeHint = "1/3 - 1/2 vốn (edge mạnh)";
+    else sizeHint = "1/3 vốn";
+    return { tag: "Spec Buy", color: "#4CAF50", icon: "🟢",
+      desc: `Có thể vào — <b>${sizeHint}</b>, P(win) ${(bayesProb * 100).toFixed(0)}%.` };
   }
 
   // Volatility label từ ATR% — chỉ là proxy biến động, KHÔNG phải "risk cao = setup xấu"
