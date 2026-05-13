@@ -378,31 +378,16 @@ async function checkAllWatches(env) {
 // Cross-validated 8.5 năm (2018-2026): Win 58.9%, Avg +1.07%/lệnh, Sharpe 0.92.
 // Pattern hiếm (~38 lệnh/năm) → user dễ miss nếu không nhận notification EOD.
 
-// Universe: 199 mã Large+Mid (median turnover ≥ 3 tỷ/ngày trên 2024+ data)
-// Match đúng backtest cross-validation universe (run_climax_crossvalidate.py).
-// Last reviewed: 2026-05-13. Review quarterly nếu mã mới lên top turnover.
-// Scan time: 199 × ~0.5s ÷ 10 parallel ≈ 10-15s (fit Cloudflare cron budget).
+// Universe: Top 35 mã liquid (Cloudflare Worker free tier limit ~50 subrequests
+// /invocation → 199 mã exceed limit). Top 35 covers VN30 + 5 mid-cap, đủ catch
+// hầu hết signal Bắt đáy T+ trong realistic scenarios.
+// App PWA scan full 199 mã (browser không có limit).
+// Upgrade Workers Paid ($5/mo, 1000 subrequests) → có thể expand 199 mã.
 const VOL_CLIMAX_UNIVERSE = [
   "HPG", "FPT", "SSI", "MWG", "STB", "VHM", "SHB", "VIX", "MSN", "VPB",
   "MBB", "TCB", "VND", "DIG", "VNM", "SHS", "CTG", "ACB", "DGC", "GEX",
   "HCM", "DXG", "VRE", "VCI", "GEL", "PDR", "HDB", "NVL", "EIB", "DBC",
-  "TPB", "CEO", "KBC", "CII", "PVS", "VCB", "VCG", "VIC", "TCH", "PVD",
-  "HAG", "DCM", "BID", "NKG", "GVR", "VIB", "KDH", "HAH", "GMD", "HSG",
-  "TCX", "VCK", "VJC", "VPI", "POW", "VSC", "NLG", "EVF", "BAF", "BSR",
-  "LPB", "HDG", "MBS", "FTS", "HHV", "MSB", "DGW", "CTD", "IDC", "FRT",
-  "DPM", "HDC", "GAS", "PLX", "VTP", "VHC", "PVT", "TCM", "PNJ", "SZC",
-  "CTR", "ORS", "VGC", "REE", "VPL", "HVN", "SAB", "SSB", "CTS", "CSV",
-  "VPX", "BCM", "KHG", "PAN", "HUT", "TNG", "KSB", "DPG", "ANV", "KDC",
-  "BSI", "BCG", "CMG", "BVH", "OCB", "VDS", "IJC", "VOS", "HHS", "PET",
-  "NTL", "SIP", "LCG", "DPR", "SBT", "VTZ", "VGS", "BMP", "YEG", "GEE",
-  "PHR", "AAA", "BVS", "BFC", "VFS", "NAB", "AGR", "TIG", "SCR", "DXS",
-  "SCS", "FCN", "ELC", "KOS", "LAS", "MCH", "NTP", "HQC", "PVC", "DTD",
-  "CTI", "DCL", "DRC", "MST", "NHA", "GEG", "QCG", "HAX", "EVG", "DSE",
-  "GIL", "AGG", "DHC", "TLG", "BWE", "HPX", "PLC", "NAF", "IDI", "VCS",
-  "PTB", "MSH", "ASM", "CTF", "SMC", "CSM", "PVB", "SHI", "TTA", "LDG",
-  "TNH", "IDJ", "HTN", "LHG", "PAC", "VAB", "VPG", "PVP", "MIG", "VTO",
-  "TDC", "ITC", "TRC", "DBD", "HPA", "BMI", "KSV", "TDP", "SGR", "CDC",
-  "APH", "APG", "FIT", "PPC", "NAG", "NRC", "APS", "DLG", "AAV",
+  "TPB", "CEO", "KBC", "CII", "PVS",
 ];
 
 function calcRsi(closes, period = 14) {
