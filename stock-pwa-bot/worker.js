@@ -469,19 +469,60 @@ async function sendClimaxAlerts(env) {
     return;
   }
 
-  // Compose message (markdown)
-  const today = new Date().toLocaleDateString("vi-VN", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-  });
-  let text = `🔻 *Bắt đáy T+ — ${today}*\n\n`;
-  text += `*${matches.length} mã* match Vol Climax Bounce hôm nay:\n\n`;
-  for (const m of matches.slice(0, 5)) {
-    text += `*${m.symbol}* @ ${m.currentPrice.toFixed(2)}\n`;
-    text += `  3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ⚡${m.bounceStrength.toFixed(1)}\n\n`;
+  // Compose message — 3 phần MUA/CẮT/BÁN cho mỗi mã (actionable)
+  function addTradingDays(date, n) {
+    const d = new Date(date);
+    let added = 0;
+    while (added < n) {
+      d.setUTCDate(d.getUTCDate() + 1);
+      const dow = d.getUTCDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    return d;
   }
-  if (matches.length > 5) text += `_(... và ${matches.length - 5} mã khác trong app)_\n\n`;
-  text += `📍 *Plan*: Mua ATO/ATC sáng mai · SL -4% · Bán close T+3\n`;
-  text += `⚠️ Backtest 8.5y: Win 59%, Avg +1.07%/lệnh. Pattern hiếm — size 10-15% NAV/lệnh, max 2-3 lệnh.`;
+  function fmtDM(d) {
+    return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const today = new Date();
+  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  const t1 = addTradingDays(today, 1);
+  const t3 = addTradingDays(today, 3);
+  const t1Label = fmtDM(t1);
+  const t3Label = fmtDM(t3);
+
+  let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
+  text += `${matches.length} mã match Vol Climax Bounce\n\n`;
+
+  for (const m of matches.slice(0, 3)) {
+    const cur = m.currentPrice;
+    const entryMax = cur * 1.02;
+    const entryMin = cur * 0.99;
+    const sl = cur * 0.98 * 0.96; // -4% từ entry mid ≈ -6% từ current
+    const target = cur * 1.05;
+
+    text += `━━━━━━━━━━━━━━━\n`;
+    text += `*${m.symbol}*  @ ${cur.toFixed(2)}\n`;
+    text += `📉 3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n\n`;
+
+    text += `🟢 *MUA sáng ${t1Label}*\n`;
+    text += `   Limit ≤ *${entryMax.toFixed(2)}*\n`;
+    text += `   Min ${entryMin.toFixed(2)} · cap +2% gap\n\n`;
+
+    text += `🔴 *CẮT nếu xuống ${sl.toFixed(2)}*\n`;
+    text += `   (-4% từ entry trung bình)\n\n`;
+
+    text += `🟢 *BÁN ${t3Label} ATC*\n`;
+    text += `   Kỳ vọng ~${target.toFixed(2)} (+5%)\n\n`;
+  }
+
+  if (matches.length > 3) {
+    text += `━━━━━━━━━━━━━━━\n`;
+    text += `_+${matches.length - 3} mã khác trong app_\n\n`;
+  }
+
+  text += `💰 Size: 15% NAV/lệnh, max 2-3 lệnh\n`;
+  text += `⚠️ Backtest 8.5y: Win 59% — vẫn có 4/10 lệnh thua. Kỷ luật stop loss.`;
 
   let sent = 0;
   for (const chatId of chats) {

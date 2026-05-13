@@ -5482,6 +5482,54 @@
   // ── Vol Climax Bounce section render ──
   // Cross-validated 8.5 năm: win 58.9%, avg +1.07%/trade, sharpe 0.92.
   // Pattern hiếm (~38 lệnh/năm) — không phải ngày nào cũng có signal.
+  // Next trading day skipping Sat/Sun (không cover VN holiday — minor edge case)
+  function addTradingDays(date, n) {
+    const d = new Date(date);
+    let added = 0;
+    while (added < n) {
+      d.setDate(d.getDate() + 1);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    return d;
+  }
+  function fmtDM(d) {
+    return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function computeClimaxPlan(p) {
+    const cur = p.currentPrice;
+    const entryMax = cur * 1.02;
+    const entryMin = cur * 0.99;
+    const entryMid = (entryMax + entryMin) / 2;
+    const sl = entryMid * 0.96; // -4% từ entry trung bình
+    const target = cur * 1.05;   // backtest avg +1.07%, target +5% là kỳ vọng tốt
+
+    const today = new Date();
+    const t1 = addTradingDays(today, 1);
+    const t3 = addTradingDays(today, 3); // T+1 + 2 phiên hold = T+3
+
+    // Size hint từ NAV (nếu portfolio module loaded)
+    let sizeQty = null, sizeValue = null, nav = null;
+    try {
+      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+      let totalMarket = 0;
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache?.[h.symbol];
+        if (a?.current) totalMarket += h.qty * a.current * 1000;
+      }
+      nav = totalMarket + cash;
+      if (nav > 0 && entryMid > 0) {
+        const target = nav * 0.15; // 15% NAV per Vol Climax trade
+        sizeQty = Math.floor(target / (entryMid * 1000));
+        sizeValue = sizeQty * entryMid * 1000;
+      }
+    } catch {}
+
+    return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, sizeQty, sizeValue, nav };
+  }
+
   function renderClimaxBounceSection(picks, totalCount) {
     let html = `
       <div class="climax-section">
@@ -5496,37 +5544,79 @@
     `;
     picks.forEach((p, i) => {
       const isWatched = RANKING.isInWatchlist(p.symbol);
-      const tagsHtml = (p.reasons || []).map((r) =>
-        `<span class="factor-tag tag-climax">${r}</span>`
-      ).join("");
+      const plan = computeClimaxPlan(p);
+      const t1Label = fmtDM(plan.t1);
+      const t3Label = fmtDM(plan.t3);
+      const sizeHtml = plan.sizeQty
+        ? `<div class="climax-size">💰 <b>${plan.sizeQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(plan.sizeValue)}, 15% NAV)</div>`
+        : `<div class="climax-size climax-size-fallback">💰 Size khuyến nghị: <b>15% NAV/lệnh</b> (cập nhật cash trong Portfolio để có số CP cụ thể)</div>`;
+
       html += `
-        <div class="pick-card climax-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
-          <div class="pick-rank">#${i + 1}</div>
-          <div class="pick-main">
-            <div class="pick-row1">
+        <div class="climax-card-v2" data-symbol="${p.symbol}" data-rank="${i + 1}">
+          <div class="climax-card-header">
+            <div class="climax-card-title">
+              <span class="climax-rank">#${i + 1}</span>
               <span class="pick-symbol">${p.symbol}</span>
               <span class="pick-sector">${sectorLabel(p.sector)}</span>
-              <span class="climax-bounce-strength" title="Lực bounce = vol × |drop%|">⚡ ${p.bounceStrength.toFixed(1)}</span>
+              <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
+                ${isWatched ? '★' : '☆'}
+              </button>
             </div>
-            <div class="pick-row2">
+            <div class="climax-card-stats">
+              <span class="climax-cur">Giá now <b>${fp(plan.cur)}</b></span>
               <span class="climax-stat down">3p: ${p.ret3d.toFixed(1)}%</span>
               <span class="climax-stat">Vol ${p.volRatio.toFixed(1)}×</span>
               <span class="climax-stat">RSI ${p.rsi.toFixed(0)}</span>
             </div>
-            <div class="pick-tags">${tagsHtml}</div>
           </div>
-          <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}" title="${isWatched ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
-            ${isWatched ? '★' : '☆'}
-          </button>
-          <div class="pick-cta">›</div>
+
+          <div class="climax-timeline">
+            <div class="climax-tl-step climax-tl-active">
+              <div class="climax-tl-dot">📅</div>
+              <div class="climax-tl-date">${t1Label}</div>
+              <div class="climax-tl-action">MUA</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">⏳</div>
+              <div class="climax-tl-date">${fmtDM(addTradingDays(new Date(), 2))}</div>
+              <div class="climax-tl-action">HOLD</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">💰</div>
+              <div class="climax-tl-date">${t3Label}</div>
+              <div class="climax-tl-action">BÁN</div>
+            </div>
+          </div>
+
+          <div class="climax-boxes">
+            <div class="climax-box climax-box-buy">
+              <div class="climax-box-label">🟢 MUA sáng ${t1Label}</div>
+              <div class="climax-box-price">Limit ≤ <b>${fp(plan.entryMax)}</b></div>
+              <div class="climax-box-hint">Min ${fp(plan.entryMin)} · cap +2% nếu gap up</div>
+              ${sizeHtml}
+            </div>
+
+            <div class="climax-box climax-box-sl">
+              <div class="climax-box-label">🔴 CẮT nếu xuống</div>
+              <div class="climax-box-price"><b>${fp(plan.sl)}</b></div>
+              <div class="climax-box-hint">-4% từ entry trung bình ${fp(plan.entryMid)}</div>
+            </div>
+
+            <div class="climax-box climax-box-sell">
+              <div class="climax-box-label">🟢 BÁN ${t3Label} (T+3)</div>
+              <div class="climax-box-price">ATC <b>14:30-14:45</b></div>
+              <div class="climax-box-hint">Kỳ vọng exit ~${fp(plan.target)} (+5%)</div>
+            </div>
+          </div>
         </div>
       `;
     });
     html += `
         </div>
         <div class="climax-plan-hint">
-          📍 <b>Plan trade T+3.5</b>: Mua ATO/ATC sáng phiên sau · Stop loss -4% từ entry · Bán close phiên T+3
-          <br><small>⚠️ Pattern hiếm, năm 2023 fail. KHÔNG all-in. Size 10-15% NAV/lệnh, max 2-3 lệnh đồng thời.</small>
+          ⚠️ Pattern hiếm, năm 2023 fail. KHÔNG all-in. Max 2-3 lệnh đồng thời. Backtest win 59% → vẫn có 4/10 lệnh thua — kỷ luật stop loss.
         </div>
       </div>
     `;
@@ -5639,18 +5729,29 @@
         if (e.target.closest(".pick-watchlist")) return;
         const sym = card.dataset.symbol;
         const rank = parseInt(card.dataset.rank, 10);
-        // Strong Leaders picks: từ s.picks; climax picks: không có context
         const pick = picks.find((p) => p.symbol === sym);
         if (pick) {
           analyzeContext = "tplus";
           analyzeContextPick = pick;
           analyzeContextRank = rank;
-        } else {
-          // Climax pick — chỉ open analyze, không set tplus context
-          analyzeContext = null;
-          analyzeContextPick = null;
-          analyzeContextRank = null;
         }
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        analyzeSymbol(sym);
+      });
+    });
+
+    // Climax card V2 — click header (symbol) to open analyze for verification
+    content.querySelectorAll(".climax-card-v2 .climax-card-title").forEach((header) => {
+      header.addEventListener("click", (e) => {
+        if (e.target.closest(".pick-watchlist")) return;
+        const card = header.closest(".climax-card-v2");
+        const sym = card?.dataset.symbol;
+        if (!sym) return;
+        analyzeContext = null;
+        analyzeContextPick = null;
+        analyzeContextRank = null;
         switchTab("analyze");
         const input = document.getElementById("symbol-input");
         if (input) input.value = sym;

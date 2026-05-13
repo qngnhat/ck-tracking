@@ -2319,6 +2319,187 @@ body.is-offline {
   line-height: 1.5;
 }
 
+/* ── Climax card V2: 3 box MUA/CẮT/BÁN với timeline ── */
+.climax-card-v2 {
+  background: rgba(255, 152, 0, 0.05);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.climax-card-header {
+  margin-bottom: 12px;
+}
+.climax-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.climax-card-title:hover {
+  opacity: 0.85;
+}
+.climax-rank {
+  color: #ff9800;
+  font-weight: bold;
+  font-size: 14px;
+}
+.climax-card-title .pick-symbol {
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
+}
+.climax-card-title .pick-sector {
+  font-size: 12px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.climax-card-title .pick-watchlist {
+  margin-left: auto;
+}
+.climax-card-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12px;
+  color: #ccc;
+  margin-top: 6px;
+}
+.climax-cur {
+  color: #fff;
+}
+.climax-cur b {
+  color: #ff9800;
+  font-size: 14px;
+}
+
+/* Timeline: MUA → HOLD → BÁN */
+.climax-timeline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 4px;
+  margin-bottom: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+.climax-tl-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+  text-align: center;
+  opacity: 0.6;
+}
+.climax-tl-step.climax-tl-active {
+  opacity: 1;
+}
+.climax-tl-dot {
+  font-size: 20px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.climax-tl-date {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 2px;
+}
+.climax-tl-action {
+  font-size: 13px;
+  font-weight: bold;
+  color: #ff9800;
+  letter-spacing: 0.5px;
+}
+.climax-tl-line {
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(to right, rgba(255, 152, 0, 0.3), rgba(255, 152, 0, 0.15));
+  margin: 0 4px;
+  margin-top: -16px;
+}
+
+/* 3 box: MUA / CẮT / BÁN */
+.climax-boxes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 600px) {
+  .climax-boxes {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+.climax-box {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+.climax-box-buy {
+  background: rgba(76, 175, 80, 0.08);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+.climax-box-sl {
+  background: rgba(244, 67, 54, 0.08);
+  border-color: rgba(244, 67, 54, 0.4);
+}
+.climax-box-sell {
+  background: rgba(76, 175, 80, 0.08);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+.climax-box-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ccc;
+  margin-bottom: 6px;
+}
+.climax-box-buy .climax-box-label,
+.climax-box-sell .climax-box-label {
+  color: #81c784;
+}
+.climax-box-sl .climax-box-label {
+  color: #ef5350;
+}
+.climax-box-price {
+  font-size: 18px;
+  color: #fff;
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+.climax-box-price b {
+  font-size: 22px;
+  color: #fff;
+}
+.climax-box-buy .climax-box-price b,
+.climax-box-sell .climax-box-price b {
+  color: #81c784;
+}
+.climax-box-sl .climax-box-price b {
+  color: #ef5350;
+}
+.climax-box-hint {
+  font-size: 11px;
+  color: #888;
+  line-height: 1.4;
+}
+.climax-size {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: #ffb74d;
+}
+.climax-size b {
+  color: #fff;
+}
+.climax-size-fallback {
+  font-size: 11px;
+  color: #999;
+}
+
 /* ════════════════════════════════════════
    CONTEXT CARDS (DCA/T+ pick explanation)
    ════════════════════════════════════════ */
