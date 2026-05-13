@@ -901,7 +901,7 @@
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
     // App version (SW cache name)
-    const appVersion = "v89"; // sync với sw.js CACHE name suffix
+    const appVersion = "v90"; // sync với sw.js CACHE name suffix
 
     return `
       <section class="settings-section">
@@ -3218,6 +3218,9 @@
       triggers,
       notified: false,
       notifiedAt: null,
+      metCount: 0,
+      lastNotifiedCount: 0,
+      dismissedByUser: false,
     };
     if (idx >= 0) watches[idx] = watch;
     else watches.push(watch);
@@ -3232,6 +3235,9 @@
           triggers,
           notified: false,
           notified_at: null,
+          met_count: 0,
+          last_notified_count: 0,
+          dismissed_by_user: false,
         }, { onConflict: "user_id,symbol" });
       } catch (e) {
         console.warn("[tplus_watch] sync DB add failed:", e);
@@ -3239,20 +3245,32 @@
     }
   }
 
+  // Manual unsubscribe: set dismissed_by_user=true (keep row for history).
+  // Local: cũng đánh dấu dismissed thay vì xóa, để render đúng trong UI.
   async function removeTplusWatch(symbol) {
-    saveTplusWatches(loadTplusWatches().filter((w) => w.symbol !== symbol));
+    const watches = loadTplusWatches();
+    const idx = watches.findIndex((w) => w.symbol === symbol);
+    if (idx >= 0) {
+      // Filter out (local) — UI logic check via isTplusWatched only
+      saveTplusWatches(watches.filter((w) => w.symbol !== symbol));
+    }
     const auth = window.__SSI_AUTH__;
     if (auth && auth.isLoggedIn()) {
       try {
-        await auth.dbDelete("tplus_watches", { eq: { symbol } });
+        // SET dismissed_by_user=true thay vì DELETE — keep history cho EOD digest + analytics
+        await auth.dbUpdate("tplus_watches",
+          { dismissed_by_user: true },
+          { eq: { symbol } }
+        );
       } catch (e) {
-        console.warn("[tplus_watch] sync DB remove failed:", e);
+        console.warn("[tplus_watch] sync DB dismiss failed:", e);
       }
     }
   }
 
   function isTplusWatched(symbol) {
-    return loadTplusWatches().some((w) => w.symbol === symbol);
+    const watches = loadTplusWatches();
+    return watches.some((w) => w.symbol === symbol && !w.dismissedByUser);
   }
 
   // Run on home/T+ refresh — check triggers met → notify
@@ -3367,10 +3385,62 @@
   // ════════════════════════════════════════════════════
   // ── HOME DASHBOARD ──
   // ════════════════════════════════════════════════════
+  // ── VN trading session + holidays (shared logic) ──
+  // Format YYYY-MM-DD. Cập nhật theo lịch nghỉ chính thức + ngày bù.
+  // KEEP IN SYNC với stock-pwa-bot/worker.js (worker dùng duplicate cho cron skip).
+  const VN_HOLIDAYS = new Set([
+    // 2025
+    "2025-01-01",
+    "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-03", // Tết AL 2025
+    "2025-04-07", // Giỗ Tổ
+    "2025-04-30", "2025-05-01",
+    "2025-09-02",
+    // 2026
+    "2026-01-01",
+    "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", // Tết AL (Mùng 1=17/2)
+    "2026-04-27", // Giỗ Tổ
+    "2026-04-30", "2026-05-01",
+    "2026-09-02",
+    // 2027
+    "2027-01-01",
+    "2027-02-08", "2027-02-09", "2027-02-10", "2027-02-11", "2027-02-12", // Tết AL (Mùng 1=6/2/27)
+    "2027-04-15", // Giỗ Tổ approx
+    "2027-04-30", "2027-05-01",
+    "2027-09-02",
+  ]);
+
+  function vnDateString(d = new Date()) {
+    const vn = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+    const y = vn.getFullYear();
+    const m = String(vn.getMonth() + 1).padStart(2, "0");
+    const dd = String(vn.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  function isVnHoliday(d = new Date()) {
+    return VN_HOLIDAYS.has(vnDateString(d));
+  }
+
+  function nextVnHoliday(maxDays = 5) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ms = 24 * 3600 * 1000;
+    let nearest = null;
+    for (const h of VN_HOLIDAYS) {
+      const d = new Date(h + "T00:00:00");
+      const diff = Math.round((d - today) / ms);
+      if (diff >= 0 && diff <= maxDays && (!nearest || diff < nearest.daysAway)) {
+        nearest = { date: h, daysAway: diff };
+      }
+    }
+    return nearest;
+  }
+
   function isMarketOpenNow() {
     const vn = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
     const day = vn.getDay();
     if (day === 0 || day === 6) return false;
+    if (isVnHoliday(vn)) return false;
     const min = vn.getHours() * 60 + vn.getMinutes();
     if (min >= 540 && min <= 690) return true;
     if (min >= 780 && min <= 885) return true;
@@ -3378,13 +3448,16 @@
   }
 
   // Session state với countdown — phục vụ Today Briefing
-  // VN trading: 9:00-11:30 (sáng) + 13:00-14:45 (chiều), Mon-Fri
+  // VN trading: 9:00-11:30 (sáng) + 13:00-14:45 (chiều), Mon-Fri (skip holiday)
   function getSessionInfo() {
     const vn = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
     const day = vn.getDay();
     const min = vn.getHours() * 60 + vn.getMinutes();
     if (day === 0 || day === 6) {
       return { state: "weekend", label: "Cuối tuần", icon: "🌴", color: "#888", countdown: null };
+    }
+    if (isVnHoliday(vn)) {
+      return { state: "holiday", label: "Nghỉ lễ — TT đóng cửa", icon: "🎉", color: "#FF9800", countdown: null };
     }
     if (min < 540) {
       return {
@@ -4441,6 +4514,37 @@
       `;
     }
 
+    // Active watches list (sub mới hoặc đã notified, chưa dismissed)
+    const activeWatches = loadTplusWatches().filter((w) => !w.dismissedByUser);
+    if (activeWatches.length > 0) {
+      const rows = activeWatches.map((w) => {
+        const subscribedAgo = w.addedAt
+          ? Math.max(0, Math.floor((Date.now() - w.addedAt) / (24 * 3600 * 1000)))
+          : null;
+        const subStr = subscribedAgo === 0 ? "hôm nay" : subscribedAgo === 1 ? "hôm qua" : `${subscribedAgo}d trước`;
+        const metCount = w.metCount || 0;
+        const statusBadge = w.notified
+          ? `<span class="watch-row-status watch-status-met">🎯 ${metCount}/3 met</span>`
+          : `<span class="watch-row-status watch-status-pending">⏳ chờ</span>`;
+        return `
+          <div class="watch-row" data-symbol="${w.symbol}">
+            <div class="watch-row-info">
+              <span class="watch-row-sym">${w.symbol}</span>
+              <span class="watch-row-sub">${subStr}</span>
+              ${statusBadge}
+            </div>
+            <button class="watch-row-dismiss" data-dismiss-symbol="${w.symbol}" title="Bỏ theo dõi">✕</button>
+          </div>
+        `;
+      }).join("");
+      html += `
+        <div class="home-card">
+          <div class="home-card-title">🔔 Đang theo dõi T+ (${activeWatches.length})</div>
+          <div class="watch-list">${rows}</div>
+        </div>
+      `;
+    }
+
     // Tracker summary (T+ only) — show recent snapshot picks preview
     const tracker = RANKING.loadTracker();
     const tplusSnaps = tracker.tplus?.length || 0;
@@ -4493,6 +4597,30 @@
             const input = document.getElementById("symbol-input");
             if (input) input.focus();
           }, 100);
+        }
+      });
+    });
+
+    // Active watches list — click row → analyze, click ✕ → dismiss
+    container.querySelectorAll(".watch-row").forEach((row) => {
+      row.addEventListener("click", async (e) => {
+        const dismissBtn = e.target.closest(".watch-row-dismiss");
+        if (dismissBtn) {
+          e.stopPropagation();
+          const sym = dismissBtn.dataset.dismissSymbol;
+          if (sym && confirm(`Bỏ theo dõi ${sym}?`)) {
+            await removeTplusWatch(sym);
+            renderHome();
+          }
+          return;
+        }
+        const sym = row.dataset.symbol;
+        if (sym) {
+          switchTab("analyze");
+          const input = document.getElementById("symbol-input");
+          if (input) input.value = sym;
+          clearAnalyzeContext();
+          analyzeSymbol(sym);
         }
       });
     });
@@ -4759,31 +4887,6 @@
 
   function curState() {
     return rankingState.tplus;
-  }
-
-  // ── Holiday banner: cảnh báo nghỉ lễ VN cho T+ ──
-  // Format YYYY-MM-DD, ngày đầu của cluster nghỉ
-  const VN_HOLIDAYS = [
-    "2026-04-30", // 30/4
-    "2026-05-01", // 1/5 (cluster 30/4-1/5, có thể kéo dài qua weekend)
-    "2026-09-02", // Quốc khánh
-    "2027-01-01", // Tết DL
-    "2027-02-15", // Tết ÂL (mùng 1, dự kiến)
-  ];
-
-  function nextVnHoliday(maxDays = 5) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const ms = 24 * 3600 * 1000;
-    let nearest = null;
-    for (const h of VN_HOLIDAYS) {
-      const d = new Date(h + "T00:00:00");
-      const diff = Math.round((d - today) / ms);
-      if (diff >= 0 && diff <= maxDays && (!nearest || diff < nearest.daysAway)) {
-        nearest = { date: h, daysAway: diff };
-      }
-    }
-    return nearest;
   }
 
   // Market regime hint cho T+ tab (mapping regime → đề xuất hành động)

@@ -2,20 +2,24 @@ name = "stock-pwa-bot"
 main = "worker.js"
 compatibility_date = "2024-09-01"
 
-# Cron triggers — every 15 min during VN market hours (M-F 9:00-14:45 UTC+7)
+# Cron triggers — every 3 min during VN market hours (M-F 9:00-14:45 UTC+7)
 # UTC equivalent: 02:00-07:45 (UTC+7 - 7h)
 # Cron syntax: minute hour dom month dow
 [triggers]
 crons = [
-  # Mỗi 15 phút từ 02:00 → 07:45 UTC, weekdays (~ 9:00-14:45 VN time)
-  "0,15,30,45 2-7 * * 1-5"
+  # Mỗi 3 phút từ 02:00 → 07:57 UTC, weekdays (~ 9:00-14:57 VN time)
+  # Worker scheduled() tự skip nếu ngoài phiên (lunch break, weekend, holiday)
+  "*/3 2-7 * * 1-5",
+  # EOD digest 14:50 VN (7:50 UTC) — gửi summary cuối phiên (Phase 4)
+  "50 7 * * 1-5"
 ]
 
 # Notes:
 # - VN trading hours: 9:00-11:30, 13:00-14:45 weekdays (UTC+7)
 # - UTC equivalent: 02:00-04:30, 06:00-07:45
-# - Cron above runs every 15 min from 02:00 to 07:45 UTC = covers full session + lunch break
-# - Cost: ~24 invocations × 22 trading days = ~530/month, free tier OK
+# - Cron mỗi 3 min × ~5 giờ active = ~100 invocations/day × 22 trading days = ~2200/month
+# - Cloudflare free tier: 100K invocations/day — well within limit
+# - Worker scheduled() check isVnTradingNow() để skip lunch/holiday/weekend
 
 # Secrets to set via `wrangler secret put`:
 #   - BOT_TOKEN (Telegram bot token from @BotFather)

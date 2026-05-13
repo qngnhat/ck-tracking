@@ -883,6 +883,90 @@ button {
   margin-top: 8px;
 }
 
+/* ── Active T+ watches list (home) ── */
+.watch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.watch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.watch-row:hover, .watch-row:active {
+  background: rgba(0, 210, 255, 0.06);
+}
+
+.watch-row-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.watch-row-sym {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.watch-row-sub {
+  font-size: 10px;
+  color: #888;
+}
+
+.watch-row-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.watch-status-met {
+  background: rgba(76, 175, 80, 0.18);
+  color: #4CAF50;
+}
+
+.watch-status-pending {
+  background: rgba(255, 152, 0, 0.12);
+  color: #FF9800;
+}
+
+.watch-row-dismiss {
+  background: none;
+  border: 1px solid rgba(255, 68, 68, 0.3);
+  color: #ff7777;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.watch-row-dismiss:hover {
+  background: rgba(255, 68, 68, 0.1);
+  color: #ff4444;
+}
+
 /* ── Tracker pick pills (home preview) ── */
 .tracker-last-row {
   margin: 8px 0 6px;
