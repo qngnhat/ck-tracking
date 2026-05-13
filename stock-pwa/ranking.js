@@ -91,6 +91,33 @@ window.__SSI_RANKING__ = (function () {
     return SECTOR_MAP[code] || "other";
   }
 
+  // ── Large+Mid universe (199 mã, median turnover ≥ 3 tỷ/ngày trên 2024 data) ──
+  // Match backtest cross-val universe (run_climax_crossvalidate.py).
+  // Pre-filter này tránh scan 656 mã full HOSE+HNX (~10 phút) khi chỉ cần 199 mã liquid.
+  // Last reviewed: 2026-05-13. Review quarterly nếu VN30 rebalance hoặc mã mới lên top turnover.
+  const LARGE_MID_UNIVERSE = [
+    "HPG", "FPT", "SSI", "MWG", "STB", "VHM", "SHB", "VIX", "MSN", "VPB",
+    "MBB", "TCB", "VND", "DIG", "VNM", "SHS", "CTG", "ACB", "DGC", "GEX",
+    "HCM", "DXG", "VRE", "VCI", "GEL", "PDR", "HDB", "NVL", "EIB", "DBC",
+    "TPB", "CEO", "KBC", "CII", "PVS", "VCB", "VCG", "VIC", "TCH", "PVD",
+    "HAG", "DCM", "BID", "NKG", "GVR", "VIB", "KDH", "HAH", "GMD", "HSG",
+    "TCX", "VCK", "VJC", "VPI", "POW", "VSC", "NLG", "EVF", "BAF", "BSR",
+    "LPB", "HDG", "MBS", "FTS", "HHV", "MSB", "DGW", "CTD", "IDC", "FRT",
+    "DPM", "HDC", "GAS", "PLX", "VTP", "VHC", "PVT", "TCM", "PNJ", "SZC",
+    "CTR", "ORS", "VGC", "REE", "VPL", "HVN", "SAB", "SSB", "CTS", "CSV",
+    "VPX", "BCM", "KHG", "PAN", "HUT", "TNG", "KSB", "DPG", "ANV", "KDC",
+    "BSI", "BCG", "CMG", "BVH", "OCB", "VDS", "IJC", "VOS", "HHS", "PET",
+    "NTL", "SIP", "LCG", "DPR", "SBT", "VTZ", "VGS", "BMP", "YEG", "GEE",
+    "PHR", "AAA", "BVS", "BFC", "VFS", "NAB", "AGR", "TIG", "SCR", "DXS",
+    "SCS", "FCN", "ELC", "KOS", "LAS", "MCH", "NTP", "HQC", "PVC", "DTD",
+    "CTI", "DCL", "DRC", "MST", "NHA", "GEG", "QCG", "HAX", "EVG", "DSE",
+    "GIL", "AGG", "DHC", "TLG", "BWE", "HPX", "PLC", "NAF", "IDI", "VCS",
+    "PTB", "MSH", "ASM", "CTF", "SMC", "CSM", "PVB", "SHI", "TTA", "LDG",
+    "TNH", "IDJ", "HTN", "LHG", "PAC", "VAB", "VPG", "PVP", "MIG", "VTO",
+    "TDC", "ITC", "TRC", "DBD", "HPA", "BMI", "KSV", "TDP", "SGR", "CDC",
+    "APH", "APG", "FIT", "PPC", "NAG", "NRC", "APS", "DLG", "AAV",
+  ];
+
   // ── Full T+ Universe (HOSE + HNX listed STOCK) ─────
   // T+ quét toàn bộ HOSE + HNX (skip UPCOM penny). ~700 mã.
   // Hard filters trong T+ score (illiquid < 5 tỷ/ngày, crash > 50%/6m)
@@ -1264,12 +1291,13 @@ window.__SSI_RANKING__ = (function () {
     }
 
     const startTime = Date.now();
-    // T+ quét full HOSE + HNX (~700 mã). Fallback về curated universe nếu API fail.
-    let universeList = await fetchFullUniverse();
-    if (!universeList || universeList.length < 100) {
-      universeList = UNIVERSE;
-    }
-    const stocks = universeList.map((u) => ({ symbol: u.code, sector: u.sector }));
+    // T+ quét 199 mã Large+Mid (median turnover ≥ 3 tỷ/ngày) — match backtest
+    // universe của Vol Climax Bounce. Hardcoded để pre-filter, tránh scan
+    // 656 mã full HOSE+HNX (waste vì sẽ bị turnover filter loại sau).
+    const stocks = LARGE_MID_UNIVERSE.map((code) => ({
+      symbol: code,
+      sector: getSector(code),
+    }));
 
     // Fetch VN-Index history 1 lần cho RS computation
     let vnindexCloses = null;
