@@ -4948,12 +4948,12 @@
     const content = $("ranking-content");
     content.innerHTML = `
       <div class="empty-state ranking-intro">
-        <div class="empty-icon">⚡</div>
-        <h2>Lướt sóng T+</h2>
-        <p>Quét universe tìm setup confluence: RSI&lt;25 + BB lower + MFI&lt;20 + volume catalyst đồng thời. Hold 5-15 phiên.</p>
-        <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Backtest validated:</b> setup chất lượng (score≥4) có win rate 61%, avg +3.3%/lệnh trên test set 2023-2026.</p>
-        <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> setup T+ chất lượng rất hiếm — có thể 0 mã nhiều ngày liên tiếp. Đó là tính năng, không phải bug — kỷ luật không trade khi không có cơ hội rõ.</p>
-        <button class="btn-primary" id="ranking-load-btn">Quét cơ hội T+</button>
+        <div class="empty-icon">🔻</div>
+        <h2>Bắt đáy T+</h2>
+        <p>Quét mã Large+Mid cap match pattern <b>Vol Climax Bounce</b>: 3 phiên giảm > 7% + volume > 2× TB20 + nến xanh + RSI &lt; 35. Hold <b>3 phiên (T+3.5)</b>.</p>
+        <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Cross-validated 8.5 năm:</b> Win 59%, Avg +1.07%/lệnh, Sharpe 0.92 (316 trades 2018-2026).</p>
+        <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> pattern hiếm ~38 lệnh/năm — nhiều ngày empty là chuyện bình thường. Kỷ luật không FOMO, không vào lệnh khi không có signal rõ.</p>
+        <button class="btn-primary" id="ranking-load-btn">Quét pattern hôm nay</button>
       </div>
     `;
     document.getElementById("ranking-load-btn").addEventListener("click", () => {
