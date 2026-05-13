@@ -5511,14 +5511,19 @@
     const entryMax = cur * 1.02;
     const entryMin = cur * 0.99;
     const entryMid = (entryMax + entryMin) / 2;
-    const sl = entryMid * 0.96; // -4% từ entry trung bình
-    const target = cur * 1.05;   // backtest avg +1.07%, target +5% là kỳ vọng tốt
+    // SL close-based -8% (backtest cho thấy SL intraday -4% destroy edge —
+    // mã vừa rơi 7%+ thường retest đáy → false trigger). Close-only -8% safe.
+    const sl = entryMid * 0.92;
+    const target = entryMid * 1.03; // target +3% từ entry (early exit threshold)
 
     const today = new Date();
-    const t1 = addTradingDays(today, 1);
-    const t3 = addTradingDays(today, 3); // T+1 + 2 phiên hold = T+3
+    // T+ convention VN: T+0 = entry day (mua ATO/ATC), T+h = h phiên sau
+    const t1 = addTradingDays(today, 1); // entry day
+    const t3 = addTradingDays(today, 4); // T+0 + 3 phiên = entry day + 3 = T+3
+    const t4 = addTradingDays(today, 5);
+    const t5 = addTradingDays(today, 6); // force exit
 
-    // Size hint từ NAV (nếu portfolio module loaded)
+    // Size hint từ NAV
     let sizeQty = null, sizeValue = null, nav = null;
     try {
       const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
@@ -5530,13 +5535,13 @@
       }
       nav = totalMarket + cash;
       if (nav > 0 && entryMid > 0) {
-        const target = nav * 0.15; // 15% NAV per Vol Climax trade
-        sizeQty = Math.floor(target / (entryMid * 1000));
+        const targetVnd = nav * 0.15;
+        sizeQty = Math.floor(targetVnd / (entryMid * 1000));
         sizeValue = sizeQty * entryMid * 1000;
       }
     } catch {}
 
-    return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, sizeQty, sizeValue, nav };
+    return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, t4, t5, sizeQty, sizeValue, nav };
   }
 
   function renderClimaxBounceSection(picks, totalCount) {
@@ -5556,6 +5561,8 @@
       const plan = computeClimaxPlan(p);
       const t1Label = fmtDM(plan.t1);
       const t3Label = fmtDM(plan.t3);
+      const t4Label = fmtDM(plan.t4);
+      const t5Label = fmtDM(plan.t5);
       const sizeHtml = plan.sizeQty
         ? `<div class="climax-size">💰 <b>${plan.sizeQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(plan.sizeValue)}, 15% NAV)</div>`
         : `<div class="climax-size climax-size-fallback">💰 Size khuyến nghị: <b>15% NAV/lệnh</b> (cập nhật cash trong Portfolio để có số CP cụ thể)</div>`;
@@ -5587,36 +5594,46 @@
             </div>
             <div class="climax-tl-line"></div>
             <div class="climax-tl-step">
-              <div class="climax-tl-dot">⏳</div>
-              <div class="climax-tl-date">${fmtDM(addTradingDays(new Date(), 2))}</div>
-              <div class="climax-tl-action">HOLD</div>
+              <div class="climax-tl-dot">💰</div>
+              <div class="climax-tl-date">${t3Label}</div>
+              <div class="climax-tl-action">BÁN nếu +3%</div>
             </div>
             <div class="climax-tl-line"></div>
             <div class="climax-tl-step">
-              <div class="climax-tl-dot">💰</div>
-              <div class="climax-tl-date">${t3Label}</div>
-              <div class="climax-tl-action">BÁN</div>
+              <div class="climax-tl-dot">⏳</div>
+              <div class="climax-tl-date">${t4Label}</div>
+              <div class="climax-tl-action">EXTENSION</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">🏁</div>
+              <div class="climax-tl-date">${t5Label}</div>
+              <div class="climax-tl-action">BÁN FORCE</div>
             </div>
           </div>
 
           <div class="climax-boxes">
             <div class="climax-box climax-box-buy">
-              <div class="climax-box-label">🟢 MUA sáng ${t1Label}</div>
+              <div class="climax-box-label">🟢 MUA ${t1Label}</div>
               <div class="climax-box-price">Limit ≤ <b>${fp(plan.entryMax)}</b></div>
               <div class="climax-box-hint">Min ${fp(plan.entryMin)} · cap +2% nếu gap up</div>
               ${sizeHtml}
             </div>
 
             <div class="climax-box climax-box-sl">
-              <div class="climax-box-label">🔴 CẮT nếu xuống</div>
+              <div class="climax-box-label">🔴 CẮT nếu close dưới</div>
               <div class="climax-box-price"><b>${fp(plan.sl)}</b></div>
-              <div class="climax-box-hint">-4% từ entry trung bình ${fp(plan.entryMid)}</div>
+              <div class="climax-box-hint">-8% từ entry · KHÔNG cắt intraday (chỉ check ATC)</div>
             </div>
 
             <div class="climax-box climax-box-sell">
-              <div class="climax-box-label">🟢 BÁN ${t3Label} (T+3)</div>
-              <div class="climax-box-price">ATC <b>14:30-14:45</b></div>
-              <div class="climax-box-hint">Kỳ vọng exit ~${fp(plan.target)} (+5%)</div>
+              <div class="climax-box-label">🟢 BÁN T+3 → T+5 ATC</div>
+              <div class="climax-box-price">Target <b>${fp(plan.target)}</b> (+3%)</div>
+              <div class="climax-box-hint">
+                <b>${t3Label}</b>: ATC nếu giá ≥ ${fp(plan.target)} · else hold<br>
+                <b>${t4Label}</b>: ATC nếu giá ≥ ${fp(plan.target)} · else hold<br>
+                <b>${t5Label}</b>: ATC force (regardless)
+              </div>
             </div>
           </div>
         </div>
@@ -5625,7 +5642,7 @@
     html += `
         </div>
         <div class="climax-plan-hint">
-          ⚠️ Pattern hiếm, năm 2023 fail. KHÔNG all-in. Max 2-3 lệnh đồng thời. Backtest win 59% → vẫn có 4/10 lệnh thua — kỷ luật stop loss.
+          ⚠️ Pattern hiếm, năm 2023 fail. KHÔNG all-in. Max 2-3 lệnh đồng thời. Backtest win 59-63% → vẫn có 3-4/10 lệnh thua — kỷ luật stop loss close-only.
         </div>
       </div>
     `;

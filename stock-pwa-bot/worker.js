@@ -501,10 +501,16 @@ async function sendClimaxAlerts(env) {
 
   const today = new Date();
   const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  // T+ convention VN: T+0 = entry day (mua T+1 sau signal)
+  // T+1 = next trading day = entry day. T+3, T+4, T+5 = 3, 4, 5 phiên sau
   const t1 = addTradingDays(today, 1);
-  const t3 = addTradingDays(today, 3);
+  const t3 = addTradingDays(today, 4); // entry + 3 phiên
+  const t4 = addTradingDays(today, 5);
+  const t5 = addTradingDays(today, 6);
   const t1Label = fmtDM(t1);
   const t3Label = fmtDM(t3);
+  const t4Label = fmtDM(t4);
+  const t5Label = fmtDM(t5);
 
   let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
   text += `${matches.length} mã match Vol Climax Bounce\n\n`;
@@ -513,22 +519,25 @@ async function sendClimaxAlerts(env) {
     const cur = m.currentPrice;
     const entryMax = cur * 1.02;
     const entryMin = cur * 0.99;
-    const sl = cur * 0.98 * 0.96; // -4% từ entry mid ≈ -6% từ current
-    const target = cur * 1.05;
+    const entryMid = (entryMax + entryMin) / 2;
+    const sl = entryMid * 0.92; // -8% close-based (backtest: -4% intraday destroy edge)
+    const target = entryMid * 1.03; // +3% early exit threshold
 
     text += `━━━━━━━━━━━━━━━\n`;
     text += `*${m.symbol}*  @ ${cur.toFixed(2)}\n`;
     text += `📉 3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n\n`;
 
-    text += `🟢 *MUA sáng ${t1Label}*\n`;
-    text += `   Limit ≤ *${entryMax.toFixed(2)}*\n`;
-    text += `   Min ${entryMin.toFixed(2)} · cap +2% gap\n\n`;
+    text += `🟢 *MUA ${t1Label}*\n`;
+    text += `   Limit ≤ *${entryMax.toFixed(2)}* (cap +2% gap)\n\n`;
 
-    text += `🔴 *CẮT nếu xuống ${sl.toFixed(2)}*\n`;
-    text += `   (-4% từ entry trung bình)\n\n`;
+    text += `🔴 *CẮT nếu close < ${sl.toFixed(2)}*\n`;
+    text += `   (-8% close-only, KHÔNG cắt intraday)\n\n`;
 
-    text += `🟢 *BÁN ${t3Label} ATC*\n`;
-    text += `   Kỳ vọng ~${target.toFixed(2)} (+5%)\n\n`;
+    text += `🟢 *BÁN T+3 → T+5 ATC*\n`;
+    text += `   Target *${target.toFixed(2)}* (+3%)\n`;
+    text += `   ${t3Label}: ATC nếu ≥ target\n`;
+    text += `   ${t4Label}: ATC nếu ≥ target\n`;
+    text += `   ${t5Label}: ATC force\n\n`;
   }
 
   if (matches.length > 3) {
@@ -537,7 +546,7 @@ async function sendClimaxAlerts(env) {
   }
 
   text += `💰 Size: 15% NAV/lệnh, max 2-3 lệnh\n`;
-  text += `⚠️ Backtest 8.5y: Win 59% — vẫn có 4/10 lệnh thua. Kỷ luật stop loss.`;
+  text += `⚠️ Backtest 8.5y dynamic exit: Win 60-63%, Avg +1%/lệnh. Vẫn có 3-4/10 thua.`;
 
   let sent = 0;
   for (const chatId of chats) {
