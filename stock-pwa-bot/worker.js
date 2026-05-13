@@ -367,17 +367,31 @@ async function checkAllWatches(env) {
 // Cross-validated 8.5 năm (2018-2026): Win 58.9%, Avg +1.07%/lệnh, Sharpe 0.92.
 // Pattern hiếm (~38 lệnh/năm) → user dễ miss nếu không nhận notification EOD.
 
-// Universe: CORE_VN30 + EXTENDED (~58 mã) — port từ stock-pwa/ranking.js
-// (Large+Mid liquid stocks, đủ scan trong cron budget)
+// Universe: 199 mã Large+Mid (median turnover ≥ 3 tỷ/ngày trên 2024+ data)
+// Match đúng backtest cross-validation universe (run_climax_crossvalidate.py).
+// Last reviewed: 2026-05-13. Review quarterly nếu mã mới lên top turnover.
+// Scan time: 199 × ~0.5s ÷ 10 parallel ≈ 10-15s (fit Cloudflare cron budget).
 const VOL_CLIMAX_UNIVERSE = [
-  // VN30 core
-  "VCB", "BID", "CTG", "TCB", "VPB", "MBB", "ACB", "HDB", "STB", "SHB",
-  "TPB", "LPB", "VIB", "SSB", "VHM", "VIC", "VRE", "MSN", "VNM", "SAB",
-  "VJC", "VPL", "MWG", "HPG", "GVR", "DGC", "GAS", "PLX", "FPT", "SSI",
-  // Extended Large+Mid
-  "EIB", "NVL", "BCM", "KDH", "DXG", "KBC", "DIG", "NLG", "PDR",
-  "PNJ", "DGW", "FRT", "HSG", "NKG", "DCM", "DPM", "PC1", "BSR",
-  "POW", "REE", "NT2", "CMG", "VCI", "VND", "HCM", "DHG", "IMP", "DBD",
+  "HPG", "FPT", "SSI", "MWG", "STB", "VHM", "SHB", "VIX", "MSN", "VPB",
+  "MBB", "TCB", "VND", "DIG", "VNM", "SHS", "CTG", "ACB", "DGC", "GEX",
+  "HCM", "DXG", "VRE", "VCI", "GEL", "PDR", "HDB", "NVL", "EIB", "DBC",
+  "TPB", "CEO", "KBC", "CII", "PVS", "VCB", "VCG", "VIC", "TCH", "PVD",
+  "HAG", "DCM", "BID", "NKG", "GVR", "VIB", "KDH", "HAH", "GMD", "HSG",
+  "TCX", "VCK", "VJC", "VPI", "POW", "VSC", "NLG", "EVF", "BAF", "BSR",
+  "LPB", "HDG", "MBS", "FTS", "HHV", "MSB", "DGW", "CTD", "IDC", "FRT",
+  "DPM", "HDC", "GAS", "PLX", "VTP", "VHC", "PVT", "TCM", "PNJ", "SZC",
+  "CTR", "ORS", "VGC", "REE", "VPL", "HVN", "SAB", "SSB", "CTS", "CSV",
+  "VPX", "BCM", "KHG", "PAN", "HUT", "TNG", "KSB", "DPG", "ANV", "KDC",
+  "BSI", "BCG", "CMG", "BVH", "OCB", "VDS", "IJC", "VOS", "HHS", "PET",
+  "NTL", "SIP", "LCG", "DPR", "SBT", "VTZ", "VGS", "BMP", "YEG", "GEE",
+  "PHR", "AAA", "BVS", "BFC", "VFS", "NAB", "AGR", "TIG", "SCR", "DXS",
+  "SCS", "FCN", "ELC", "KOS", "LAS", "MCH", "NTP", "HQC", "PVC", "DTD",
+  "CTI", "DCL", "DRC", "MST", "NHA", "GEG", "QCG", "HAX", "EVG", "DSE",
+  "GIL", "AGG", "DHC", "TLG", "BWE", "HPX", "PLC", "NAF", "IDI", "VCS",
+  "PTB", "MSH", "ASM", "CTF", "SMC", "CSM", "PVB", "SHI", "TTA", "LDG",
+  "TNH", "IDJ", "HTN", "LHG", "PAC", "VAB", "VPG", "PVP", "MIG", "VTO",
+  "TDC", "ITC", "TRC", "DBD", "HPA", "BMI", "KSV", "TDP", "SGR", "CDC",
+  "APH", "APG", "FIT", "PPC", "NAG", "NRC", "APS", "DLG", "AAV",
 ];
 
 function calcRsi(closes, period = 14) {
@@ -492,11 +506,11 @@ async function sendClimaxAlerts(env) {
     const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
     const emptyText = `🔻 *Bắt đáy T+ — ${todayLabel}*\n\n` +
       `📭 *Không có signal hôm nay* (cả Tier A + Tier B đều rỗng).\n\n` +
-      `Đã scan 58 mã Large+Mid cap. Không mã nào match pattern:\n` +
+      `Đã scan ${VOL_CLIMAX_UNIVERSE.length} mã Large+Mid cap. Không mã nào match pattern:\n` +
       `• Tier A: drop >7% + vol >2× + RSI <35\n` +
       `• Tier B: drop >5% + vol >2× + RSI <50\n\n` +
       `Pattern hiếm ~80-95/năm = ~2 lệnh/tuần avg. Đừng FOMO.\n` +
-      `Tomorrow 14:50 sẽ scan tiếp.`;
+      `Ngày mai 14:50 sẽ scan tiếp.`;
 
     let sent = 0;
     for (const chatId of chats) {
