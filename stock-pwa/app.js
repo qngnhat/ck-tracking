@@ -5665,6 +5665,16 @@
           ${flagsActive ? `<br><span class="tplus-stats-flags">⚠️ Risk flags: ${flagsActive}</span>` : ""}
         </span>
       </div>
+      <div class="tplus-expectation-banner">
+        <div class="tplus-exp-title">📈 Kỳ vọng theo backtest 2024+ (Sharpe 0.24)</div>
+        <div class="tplus-exp-body">
+          Score 4+ → <b>~56% lệnh thắng</b> · Avg <b>+3.81%/lệnh</b> · Hold 15-20 phiên
+        </div>
+        <div class="tplus-exp-warning">
+          ⚠️ <b>Score cao KHÔNG phải lệnh chắc thắng</b> — 4/10 lệnh vẫn thua (max DD per trade ~-8%).
+          Size <b>15-20% NAV/lệnh</b>, kỷ luật <b>stop loss -8%</b>, KHÔNG average down.
+        </div>
+      </div>
     `;
 
     let html = statsHtml + '<div class="picks-list">';
@@ -5684,6 +5694,19 @@
       else if (i <= 1) priorityLabel = `<div class="pick-rank-tag pick-rank-backup">Backup</div>`;
 
       const isWatched = RANKING.isInWatchlist(p.symbol);
+
+      // Bayesian P(win) chip — show realistic expectation per pick
+      const bayes = computeBayesianWinProb(p.score, p.flags || f.flags || {});
+      const winProb = bayes?.prob ?? null;
+      let winChipHtml = "";
+      if (winProb != null) {
+        const pct = (winProb * 100).toFixed(0);
+        let cls = "win-chip-neutral";
+        if (winProb >= 0.55) cls = "win-chip-good";
+        else if (winProb < 0.50) cls = "win-chip-warn";
+        winChipHtml = `<span class="pick-win-chip ${cls}" title="Bayesian P(win) sau khi adjust theo risk flags">~${pct}% win</span>`;
+      }
+
       html += `
         <div class="pick-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
           <div class="pick-rank">#${i + 1}${priorityLabel}</div>
@@ -5691,7 +5714,8 @@
             <div class="pick-row1">
               <span class="pick-symbol">${p.symbol}</span>
               <span class="pick-sector">${sectorLabel(p.sector)}</span>
-              <span class="pick-score">${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</span>
+              <span class="pick-score" title="Score chỉ là quality indicator — không phải dự đoán % thắng">${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)}</span>
+              ${winChipHtml}
             </div>
             <div class="pick-row2">
               <span class="pick-price">${fp(f.currentPrice)}</span>

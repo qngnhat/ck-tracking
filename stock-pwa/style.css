@@ -5631,6 +5631,66 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-size: 11px;
 }
 
+/* Expectation banner — educate user về realistic win rate */
+.tplus-expectation-banner {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.06), rgba(255, 82, 82, 0.04));
+  border: 1px solid rgba(255, 152, 0, 0.25);
+  border-left: 3px solid #ff9800;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tplus-exp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffb74d;
+  margin-bottom: 4px;
+}
+.tplus-exp-body {
+  color: #ddd;
+  margin-bottom: 6px;
+}
+.tplus-exp-body b {
+  color: #fff;
+}
+.tplus-exp-warning {
+  font-size: 11px;
+  color: #ff7043;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 152, 0, 0.2);
+}
+.tplus-exp-warning b {
+  color: #ff8a65;
+}
+
+/* Per-pick win probability chip */
+.pick-win-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  border: 1px solid;
+}
+.pick-win-chip.win-chip-good {
+  background: rgba(76, 175, 80, 0.12);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+.pick-win-chip.win-chip-neutral {
+  background: rgba(255, 152, 0, 0.10);
+  border-color: rgba(255, 152, 0, 0.45);
+  color: #ffb74d;
+}
+.pick-win-chip.win-chip-warn {
+  background: rgba(244, 67, 54, 0.10);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #ef5350;
+}
+
 /* Closed positions section (mã đã đóng vị thế) */
 .port-closed-section {
   margin-top: 14px;
