@@ -475,9 +475,7 @@ async function sendClimaxAlerts(env) {
   const matches = await scanVolClimaxMatches();
   console.log(`[climax] ${matches.length} matches found`);
 
-  if (matches.length === 0) return;
-
-  // Fetch all connected users
+  // Fetch all connected users (luôn gửi EOD tổng kết, kể cả 0 matches)
   const sb = sbClient(env);
   const users = await sbQuery(sb, "user_telegram", {
     select: "chat_id",
@@ -485,6 +483,31 @@ async function sendClimaxAlerts(env) {
   const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
   if (chats.length === 0) {
     console.log("[climax] no connected users");
+    return;
+  }
+
+  // 0 matches → gửi empty digest (user biết app alive + không có signal)
+  if (matches.length === 0) {
+    const today = new Date();
+    const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+    const emptyText = `🔻 *Bắt đáy T+ — ${todayLabel}*\n\n` +
+      `📭 *Không có signal hôm nay* (cả Tier A + Tier B đều rỗng).\n\n` +
+      `Đã scan 58 mã Large+Mid cap. Không mã nào match pattern:\n` +
+      `• Tier A: drop >7% + vol >2× + RSI <35\n` +
+      `• Tier B: drop >5% + vol >2× + RSI <50\n\n` +
+      `Pattern hiếm ~80-95/năm = ~2 lệnh/tuần avg. Đừng FOMO.\n` +
+      `Tomorrow 14:50 sẽ scan tiếp.`;
+
+    let sent = 0;
+    for (const chatId of chats) {
+      try {
+        await tgSendMessage(env.BOT_TOKEN, chatId, emptyText);
+        sent++;
+      } catch (e) {
+        console.warn(`[climax] empty digest fail ${chatId}:`, e.message);
+      }
+    }
+    console.log(`[climax] empty digest sent to ${sent}/${chats.length} users`);
     return;
   }
 
