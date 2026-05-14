@@ -510,6 +510,62 @@ function calcRsi(closes, period = 14) {
 // để bảo vệ nếu mở rộng universe sau này hoặc mã đột nhiên kẹt hàng.
 const CLIMAX_TURNOVER_MIN = 3e9;
 
+// Strength Continuation pattern — Tier Momentum Swing cho bull regime.
+// Backtest 8.5y bull: Win 55%, Avg +3.5%, Sharpe 1.04, PF 2.44.
+function detectStrengthContinuation(data) {
+  const closes = data.closes;
+  const opens = data.opens;
+  const highs = data.highs;
+  const lows = data.lows;
+  const volumes = data.volumes;
+  const n = closes?.length || 0;
+  if (n < 200) return null;
+
+  // Turnover filter
+  const turnovers = [];
+  for (let i = n - 21; i < n - 1; i++) {
+    turnovers.push(closes[i] * volumes[i] * 1000);
+  }
+  turnovers.sort((a, b) => a - b);
+  const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+  if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+  const cur = closes[n - 1];
+  const curOpen = opens[n - 1];
+  const curHigh = highs[n - 1];
+  const curLow = lows[n - 1];
+  const curVol = volumes[n - 1];
+
+  // MA alignment
+  const ma5 = closes.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
+  const ma20 = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+  const ma50 = closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+  const ma200 = closes.slice(n - 200).reduce((a, b) => a + b, 0) / 200;
+  if (!(ma5 > ma20 && ma20 > ma50 && ma50 > ma200)) return null;
+
+  const rangePct = (curHigh - curLow) / cur;
+  if (rangePct >= 0.025) return null;
+
+  const volSlice = volumes.slice(n - 21, n - 1);
+  const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+  const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+  if (volRatio <= 1.5) return null;
+
+  if (cur <= curOpen) return null;
+
+  const rsi = calcRsi(closes, 14);
+  if (rsi == null || rsi <= 50 || rsi >= 70) return null;
+
+  return {
+    pattern: "strength_continuation",
+    currentPrice: cur,
+    ma20, ma50,
+    volRatio, rsi, rangePct,
+    medianTurnover,
+    momentumStrength: volRatio * (rsi - 50),
+  };
+}
+
 function detectVolClimaxBounce(data) {
   const closes = data.closes;
   const opens = data.opens;
@@ -578,10 +634,12 @@ async function scanAllSymbols() {
     const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
     const results = await Promise.all(batch.map(async (sym) => {
       try {
-        const data = await fetchVndHistory(sym, 60);
+        // Need 220 days cho strength continuation (MA200)
+        const data = await fetchVndHistory(sym, 220);
         const climax = detectVolClimaxBounce(data);
+        const momentum = detectStrengthContinuation(data);
         const stats = computeStockStats(data);
-        return { symbol: sym, climax, stats };
+        return { symbol: sym, climax, momentum, stats };
       } catch (e) {
         console.warn(`[scan] ${sym} fetch fail:`, e.message);
         return null;
@@ -607,6 +665,7 @@ async function scanAllSymbols() {
 
   // Climax matches (flag elite if VNI in correction)
   const isEliteRegime = vniRegime === "correction";
+  const isMomentumRegime = vniRegime === "bull" || vniRegime === "neutral";
   const matches = allStocks
     .filter((s) => s.climax)
     .map((s) => ({
@@ -615,6 +674,17 @@ async function scanAllSymbols() {
       isElite: isEliteRegime,
     }))
     .sort((a, b) => b.bounceStrength - a.bounceStrength);
+
+  // Momentum Swing matches (Tier Momentum cho bull/neutral regime)
+  const momentumMatches = isMomentumRegime
+    ? allStocks
+        .filter((s) => s.momentum)
+        .map((s) => ({
+          symbol: s.symbol,
+          ...s.momentum,
+        }))
+        .sort((a, b) => b.momentumStrength - a.momentumStrength)
+    : [];
 
   // Market stats: sort by change %
   const withStats = allStocks.filter((s) => s.stats);
@@ -631,6 +701,7 @@ async function scanAllSymbols() {
 
   return {
     matches,
+    momentumMatches,
     market: { avgChange, upCount, downCount, totalTurnover, totalScanned: withStats.length },
     gainers,
     losers,
@@ -638,6 +709,7 @@ async function scanAllSymbols() {
     vniRegime,
     vniRet20,
     isEliteRegime,
+    isMomentumRegime,
   };
 }
 
@@ -652,6 +724,31 @@ async function scanVolClimaxMatches() {
 const SPIKE_HOLD_DAYS = 7;          // calendar days ~ 5 trading days
 const SPIKE_THRESHOLD_PCT = 3.0;    // alert khi intraday return ≥ +3% từ open
 const SPIKE_COOLDOWN_MIN = 10;      // tối thiểu 10 min giữa 2 alerts cùng mã
+
+// Momentum picks hold ~20-30 phiên với trailing stop. Khác Climax (T+3-5).
+// Dùng cùng table climax_active_picks với tier='Momentum' để portfolio coach
+// detect đúng kế hoạch (target = entry × 1.035, init SL = entry × 0.92).
+const MOMENTUM_HOLD_DAYS = 45;  // 30 phiên ~ 45 calendar days
+const MOMENTUM_AVG_RETURN_PCT = 3.5;  // backtest avg
+
+async function persistMomentumMatches(env, matches) {
+  if (!matches || matches.length === 0) return;
+  const sb = sbClient(env);
+  const expiresAt = new Date(Date.now() + MOMENTUM_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: today,
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * (1 + MOMENTUM_AVG_RETURN_PCT / 100)).toFixed(4),
+    tier: "Momentum",
+    expires_at: expiresAt,
+    above_threshold: false,
+    last_alert_at: null,
+  }));
+  const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
+  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} Momentum saved (expires ${expiresAt.slice(0, 10)})`);
+}
 
 async function persistClimaxMatches(env, matches) {
   const sb = sbClient(env);
@@ -808,6 +905,8 @@ async function sendMarketDigest(env) {
 
   // Persist climax matches → active_picks (used by spike-alert intraday cron)
   await persistClimaxMatches(env, matches);
+  // Persist momentum matches → active_picks với tier='Momentum' (~30 phiên hold)
+  await persistMomentumMatches(env, result.momentumMatches || []);
 
   // Fetch VN-Index để có index data
   let vniInfo = null;
@@ -945,6 +1044,27 @@ async function sendMarketDigest(env) {
     text += isEliteRegime
       ? `Size Elite: 15% NAV. Max 2-3 lệnh đồng thời.\n`
       : `Size: 15% NAV Tier A, 10% Tier B. Max 2-3 lệnh.\n`;
+  }
+
+  // Momentum Swing section (chỉ khi bull/neutral regime + có matches)
+  const momentumMatches = result.momentumMatches || [];
+  if (result.isMomentumRegime && momentumMatches.length > 0) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `🚀 *Momentum Swing (Tier Momentum)*\n`;
+    text += `${momentumMatches.length} mã trend mạnh + consolidation + vol confirm\n`;
+    text += `_Backtest 8.5y bull: Win 55%, Avg +3.5%, Sharpe 1.04, PF 2.44._\n\n`;
+    const showMomentum = momentumMatches.slice(0, 3);
+    for (const m of showMomentum) {
+      const cur = m.currentPrice;
+      const entryMax = cur * 1.02;
+      const initSL = cur * 0.92;
+      const expectedExit = cur * 1.035;
+      text += `⚡ *${m.symbol}* @ ${cur.toFixed(2)} · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
+      text += `  MUA ≤ ${entryMax.toFixed(2)} · init SL ${initSL.toFixed(2)} · trail 7% từ đỉnh\n`;
+      text += `  Hold ~20 phiên · expected ~${expectedExit.toFixed(2)} (+3.5%)\n\n`;
+    }
+    text += `Size: 10% NAV (hold lâu hơn Climax). Max 1-2 lệnh.\n`;
+    text += `⚠️ Khi VNI chuyển correction → cắt sớm Momentum, switch sang Climax Elite.\n`;
   }
 
   text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;

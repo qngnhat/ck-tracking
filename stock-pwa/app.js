@@ -5593,6 +5593,169 @@
     return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, t4, t5, sizeQty, sizeValue, nav };
   }
 
+  function renderMomentumSwingSection(picks, totalCount) {
+    const today = new Date();
+    let html = `
+      <div class="climax-section momentum-section">
+        <div class="climax-header">
+          <h3 class="climax-title">
+            🚀 Momentum Swing
+            <span class="climax-tier-badge tier-Momentum">⚡ Bull regime</span>
+            <span class="climax-badge">${totalCount} mã</span>
+          </h3>
+          <div class="climax-subtitle">
+            Strong uptrend + consolidation + vol confirm — Win 55%, Sharpe 1.04, PF 2.44 (backtest 8.5y bull)
+          </div>
+        </div>
+        <div class="climax-list">
+    `;
+
+    picks.forEach((p, i) => {
+      const isWatched = RANKING.isInWatchlist(p.symbol);
+      const cur = p.cur;
+      // Swing plan: entry T+1 LO ≤ cur × 1.02. Trailing 7% from peak, init SL -8%.
+      // Hold up to T+30 với trail. No fixed target — bám trend.
+      const entryMax = cur * 1.02;
+      const entryMin = cur * 0.98;
+      const initSL = cur * 0.92;
+      const trailFromPeakPct = 7;
+      const expectedReturn = cur * 1.035; // avg +3.5% per backtest
+
+      const t1 = addTradingDays(today, 1);
+      const t10 = addTradingDays(today, 11);
+      const t20 = addTradingDays(today, 21);
+      const t30 = addTradingDays(today, 31);
+
+      html += `
+        <div class="climax-card-v2 momentum-card" data-symbol="${p.symbol}" data-rank="${i + 1}">
+          <div class="climax-card-header">
+            <div class="climax-card-title">
+              <span class="climax-rank">#${i + 1}</span>
+              <span class="pick-symbol">${p.symbol}</span>
+              <span class="pick-sector">${sectorLabel(p.sector)}</span>
+              <button class="pick-watchlist ${isWatched ? 'active' : ''}" data-symbol="${p.symbol}">
+                ${isWatched ? '★' : '☆'}
+              </button>
+            </div>
+            <div class="climax-card-stats">
+              <span class="climax-cur">Giá now <b>${fp(cur)}</b></span>
+              <span class="climax-stat">Vol ${p.volRatio.toFixed(1)}×</span>
+              <span class="climax-stat">RSI ${p.rsi.toFixed(0)}</span>
+              <span class="climax-stat">MA20 ${fp(p.ma20)}</span>
+            </div>
+          </div>
+
+          <div class="momentum-timeline">
+            <div class="climax-tl-step climax-tl-active">
+              <div class="climax-tl-dot">📅</div>
+              <div class="climax-tl-date">${fmtDM(t1)}</div>
+              <div class="climax-tl-action">MUA</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">📈</div>
+              <div class="climax-tl-date">${fmtDM(t10)}</div>
+              <div class="climax-tl-action">TRAIL +5-10%</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">🎯</div>
+              <div class="climax-tl-date">${fmtDM(t20)}</div>
+              <div class="climax-tl-action">Avg exit</div>
+            </div>
+            <div class="climax-tl-line"></div>
+            <div class="climax-tl-step">
+              <div class="climax-tl-dot">🏁</div>
+              <div class="climax-tl-date">${fmtDM(t30)}</div>
+              <div class="climax-tl-action">Max hold</div>
+            </div>
+          </div>
+
+          <div class="climax-boxes">
+            <div class="climax-box climax-box-buy">
+              <div class="climax-box-label">🟢 MUA ${fmtDM(t1)}</div>
+              <div class="climax-box-price">Limit ≤ <b>${fp(entryMax)}</b></div>
+              <div class="climax-box-hint">Min ${fp(entryMin)} · cap +2%</div>
+            </div>
+            <div class="climax-box climax-box-sl">
+              <div class="climax-box-label">🔴 SL ban đầu</div>
+              <div class="climax-box-price"><b>${fp(initSL)}</b></div>
+              <div class="climax-box-hint">-8% từ entry · close-only check daily</div>
+            </div>
+            <div class="climax-box climax-box-momentum-trail">
+              <div class="climax-box-label">🎯 TRAILING -${trailFromPeakPct}%</div>
+              <div class="climax-box-price">Bám đỉnh, exit khi rớt ${trailFromPeakPct}%</div>
+              <div class="climax-box-hint">
+                Hold ~20 phiên · expected exit ~${fp(expectedReturn)} (+3.5%)<br>
+                Force exit T+30 (${fmtDM(t30)}) nếu chưa trigger trail
+              </div>
+            </div>
+          </div>
+
+          <details class="climax-orders">
+            <summary>📋 Checklist đặt lệnh SSI (Momentum Swing — DIFFERENT từ Climax T+)</summary>
+            <div class="climax-orders-body">
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">1</span>
+                  <b>Đặt MUA</b>
+                  <span class="order-when">sáng <b>${fmtDM(t1)}</b> trước <b>8:45</b></span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>SSI iBoard → <b>Lệnh thường</b> → <b>LO</b> mua</li>
+                  <li>Giá: <b>${fp(entryMax)}</b> (limit max, min ${fp(entryMin)})</li>
+                  <li>KL: <b>10% NAV/lệnh</b> (size nhỏ hơn Climax do hold lâu hơn)</li>
+                </ul>
+              </div>
+
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">2</span>
+                  <b>Trailing stop daily</b>
+                  <span class="order-when">mỗi ngày <b>14:25-14:30</b>, từ T+3 trở đi</span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>Mỗi ngày track <b>đỉnh cao nhất</b> kể từ entry (close-based)</li>
+                  <li>Tính trail SL = <b>peak × 0.93</b> (-7% từ đỉnh) HOẶC <b>entry × 0.92</b> (init SL) — lấy cái nào CAO hơn</li>
+                  <li><b>Nếu close ≤ trail SL</b> → đặt <b>Lệnh thường ATC bán toàn bộ</b></li>
+                  <li>Else → hold tiếp</li>
+                  <li>⚠️ KHÔNG dùng SSI Trailing Stop (kích hoạt intraday — rớt qua wick)</li>
+                </ul>
+              </div>
+
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">3</span>
+                  <b>Force exit T+30</b>
+                  <span class="order-when">sáng <b>${fmtDM(t30)}</b> trước <b>14:25</b></span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>Nếu chưa trigger trail stop sau ~30 phiên → bán force ATC</li>
+                  <li>Pattern decay — momentum không còn ý nghĩa sau 30+ phiên</li>
+                </ul>
+              </div>
+
+              <div class="order-note">
+                💡 <b>Khác Climax T+</b>: hold dài hơn (~20 phiên vs T+5), không target cố định, dùng trailing.<br>
+                💡 <b>Size 10% NAV</b> (vs 15% cho Climax) vì variance lớn hơn — max 1-2 lệnh đồng thời.<br>
+                💡 <b>Khi VNI chuyển correction</b> (ret20 < -5%) → cân nhắc cắt sớm Momentum, focus Climax Elite.
+              </div>
+            </div>
+          </details>
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+        <div class="climax-plan-hint">
+          ⚠️ Momentum Swing trade trong bull regime. Khi VNI chuyển correction → strategy này edge yếu (Win 28-35%) — chốt sớm rồi switch sang Climax Elite. Đừng all-in.
+        </div>
+      </div>
+    `;
+    return html;
+  }
+
   function renderClimaxBounceSection(picks, totalCount, opts = {}) {
     const tierLabel = opts.tier === "Elite" ? "Edge cao nhất"
       : opts.tier === "A" ? "Edge cao"
@@ -5915,6 +6078,13 @@
     } else {
       if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
       if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
+    }
+
+    // Tier Momentum Swing — chỉ render khi bull/neutral regime
+    const momentumPicks = s.lastResult?.momentumPicks || [];
+    const momentumCount = s.lastResult?.momentumCount || 0;
+    if (s.lastResult?.isMomentumRegime && momentumCount > 0) {
+      html += renderMomentumSwingSection(momentumPicks, momentumCount);
     }
 
     content.innerHTML = html;

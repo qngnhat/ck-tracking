@@ -393,6 +393,98 @@ window.__SSI_RANKING__ = (function () {
     };
   }
 
+  // ── Strength Continuation pattern (Tier Momentum Swing) ──
+  // Backtest 8.5y bull regime: Win 55%, Avg +3.5%/trade, Sharpe 1.04, PF 2.44.
+  // Hold ~20 phiên với trailing stop 7% từ peak. Khác Vol Climax (T+3-5).
+  function detectStrengthContinuation(ohlcv) {
+    const closes = ohlcv.closes;
+    const opens = ohlcv.opens;
+    const highs = ohlcv.highs;
+    const lows = ohlcv.lows;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 200) return null;
+
+    // Turnover filter same as Climax
+    const turnovers = [];
+    for (let i = n - 21; i < n - 1; i++) {
+      turnovers.push(closes[i] * volumes[i] * 1000);
+    }
+    turnovers.sort((a, b) => a - b);
+    const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+    if (medianTurnover < CLIMAX_TURNOVER_MIN) {
+      return { matched: false, reason: "illiquid", medianTurnover };
+    }
+
+    const cur = closes[n - 1];
+    const curOpen = opens[n - 1];
+    const curHigh = highs[n - 1];
+    const curLow = lows[n - 1];
+    const curVol = volumes[n - 1];
+
+    // MA alignment: MA5 > MA20 > MA50 > MA200 (strong uptrend)
+    const ma5 = closes.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
+    const ma20 = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+    const ma50 = closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+    const ma200 = closes.slice(n - 200).reduce((a, b) => a + b, 0) / 200;
+
+    const uptrendStrong = ma5 > ma20 && ma20 > ma50 && ma50 > ma200;
+    if (!uptrendStrong) {
+      return { matched: false, reason: "no_uptrend", ma5, ma20, ma50, ma200 };
+    }
+
+    // Small range today (consolidation, không phải spike)
+    const rangePct = (curHigh - curLow) / cur;
+    if (rangePct >= 0.025) {
+      return { matched: false, reason: "wide_range", rangePct };
+    }
+
+    // Volume above average (engaged, không phải dry)
+    const volSlice = volumes.slice(n - 21, n - 1);
+    const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+    if (volRatio <= 1.5) {
+      return { matched: false, reason: "low_vol", volRatio };
+    }
+
+    // Day green
+    const dayGreen = cur > curOpen;
+    if (!dayGreen) {
+      return { matched: false, reason: "red_candle" };
+    }
+
+    // RSI 50-70 (momentum without overbought)
+    const rsi = calcRsi(closes, 14);
+    if (rsi == null || rsi <= 50 || rsi >= 70) {
+      return { matched: false, reason: "rsi_out_of_range", rsi };
+    }
+
+    // Compute suggested trailing stop levels for plan
+    const trailPct = 0.07;
+    const initSL = cur * 0.92; // -8% absolute floor
+    const trailFromCurrent = cur * (1 - trailPct);
+
+    return {
+      matched: true,
+      pattern: "strength_continuation",
+      cur, curOpen, curHigh, curLow,
+      ma5, ma20, ma50, ma200,
+      volRatio, rsi, rangePct, medianTurnover,
+      planTrailPct: trailPct,
+      planInitSL: initSL,
+      planTrailFromCurrent: trailFromCurrent,
+      momentumStrength: volRatio * (rsi - 50),
+      reasons: [
+        `Strong uptrend: MA5 > MA20 > MA50 > MA200`,
+        `Range hẹp ${(rangePct * 100).toFixed(1)}% — consolidation`,
+        `Volume ${volRatio.toFixed(1)}× TB20 — engaged`,
+        `Nến xanh (close ${cur.toFixed(2)} > open ${curOpen.toFixed(2)})`,
+        `RSI ${rsi.toFixed(0)} (momentum, chưa overbought)`,
+        `Thanh khoản ${(medianTurnover / 1e9).toFixed(1)} tỷ/ngày`,
+      ],
+    };
+  }
+
   // ── T+ Score (Strong Leaders — momentum/RS/breakout/accumulation) ──
   // VN narrow-leadership regime: chỉ 1 vài mã mạnh tăng, mean-reversion fail.
   // Focus: relative strength vs market, breakout patterns, volume accumulation,
@@ -1354,6 +1446,8 @@ window.__SSI_RANKING__ = (function () {
             });
             // Vol Climax Bounce detection (separate strategy — bắt đáy T+3)
             stock.volClimax = detectVolClimaxBounce(ohlcv);
+            // Strength Continuation (Tier Momentum Swing — bull regime, hold ~20 phiên)
+            stock.strengthCont = detectStrengthContinuation(ohlcv);
           } catch (e) {
             stock.error = e.message;
             stock.tplusFactors = null;
@@ -1422,6 +1516,30 @@ window.__SSI_RANKING__ = (function () {
     const isEliteRegime = vniRegime === "correction";
     const climaxElite = isEliteRegime ? climaxMatches.slice(0, 10) : [];
 
+    // Tier Momentum Swing: Strength Continuation pattern khi VNI bull/neutral.
+    // Backtest 8.5y bull: Win 55%, Avg +3.5%, Sharpe 1.04, PF 2.44 (trailing 7% exit).
+    // Hold ~20 phiên — KHÁC Climax (T+3-5). Complement nhau theo regime.
+    const isMomentumRegime = vniRegime === "bull" || vniRegime === "neutral";
+    const momentumMatches = stocks
+      .filter((s) => s.strengthCont?.matched && !coolDownSymbols.has(s.symbol))
+      .map((s) => ({
+        symbol: s.symbol,
+        sector: s.sector,
+        cur: s.strengthCont.cur,
+        ma20: s.strengthCont.ma20,
+        ma50: s.strengthCont.ma50,
+        volRatio: s.strengthCont.volRatio,
+        rsi: s.strengthCont.rsi,
+        rangePct: s.strengthCont.rangePct,
+        planTrailPct: s.strengthCont.planTrailPct,
+        planInitSL: s.strengthCont.planInitSL,
+        planTrailFromCurrent: s.strengthCont.planTrailFromCurrent,
+        momentumStrength: s.strengthCont.momentumStrength,
+        reasons: s.strengthCont.reasons,
+      }))
+      .sort((a, b) => b.momentumStrength - a.momentumStrength);
+    const momentumPicks = isMomentumRegime ? momentumMatches.slice(0, 8) : [];
+
     const result = {
       picks,
       climaxPicks: climaxMatches.slice(0, 10),
@@ -1429,6 +1547,9 @@ window.__SSI_RANKING__ = (function () {
       climaxTierB: climaxTierB.slice(0, 8),
       climaxElite,
       isEliteRegime,
+      momentumPicks,
+      isMomentumRegime,
+      momentumCount: momentumPicks.length,
       vniRegime,
       vniRet20,
       allCount: stocks.length,

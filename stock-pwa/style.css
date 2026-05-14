@@ -2286,6 +2286,47 @@ body.is-offline {
   font-weight: 700;
   box-shadow: 0 0 8px rgba(255, 152, 0, 0.3);
 }
+.climax-tier-badge.tier-Momentum {
+  background: linear-gradient(135deg, rgba(33, 150, 243, 0.2), rgba(0, 188, 212, 0.2));
+  border-color: #29b6f6;
+  color: #4fc3f7;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(41, 182, 246, 0.25);
+}
+
+/* Momentum Swing section + cards */
+.momentum-section .climax-title {
+  color: #4fc3f7;
+}
+.momentum-card {
+  border-left: 3px solid rgba(79, 195, 247, 0.45) !important;
+}
+.momentum-timeline {
+  display: flex;
+  align-items: center;
+  margin: 12px 0 8px;
+  padding: 0 4px;
+}
+.momentum-timeline .climax-tl-step {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+}
+.momentum-timeline .climax-tl-line {
+  flex: 1;
+  height: 2px;
+  background: rgba(79, 195, 247, 0.25);
+  margin: 0 -4px;
+}
+.momentum-timeline .climax-tl-active .climax-tl-dot {
+  background: #29b6f6;
+}
+.climax-box-momentum-trail {
+  border-left: 3px solid #29b6f6;
+}
+.climax-box-momentum-trail .climax-box-price {
+  color: #4fc3f7;
+}
 
 /* ── VN-Index regime banner ── */
 .vni-regime-banner {
