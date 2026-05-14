@@ -4939,6 +4939,117 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   line-height: 1.4;
 }
 
+/* ── Portfolio Coach: chips + range bar ── */
+.holding-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+.coach-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.coach-chip-tplus {
+  background: rgba(255, 152, 0, 0.12);
+  color: #ffb74d;
+  border-color: rgba(255, 152, 0, 0.35);
+}
+.coach-chip-neutral {
+  background: rgba(79, 195, 247, 0.08);
+  color: #81d4fa;
+  border-color: rgba(79, 195, 247, 0.25);
+}
+.coach-chip-rsi-mild {
+  background: rgba(255, 152, 0, 0.12);
+  color: #ffb74d;
+  border-color: rgba(255, 152, 0, 0.35);
+}
+.coach-chip-rsi-strong {
+  background: rgba(255, 82, 82, 0.15);
+  color: #ff8a80;
+  border-color: rgba(255, 82, 82, 0.4);
+}
+.coach-chip-rsi-low {
+  background: rgba(76, 175, 80, 0.1);
+  color: #a5d6a7;
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.holding-range {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+.holding-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #aaa;
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.range-lbl-sl { color: #ff8a80; }
+.range-lbl-cur { color: #fff; font-weight: 600; }
+.range-lbl-tp { color: #81c784; }
+
+.holding-range-bar {
+  position: relative;
+  height: 6px;
+  background: linear-gradient(90deg,
+    rgba(255, 82, 82, 0.25) 0%,
+    rgba(255, 152, 0, 0.25) 50%,
+    rgba(76, 175, 80, 0.25) 100%);
+  border-radius: 3px;
+  overflow: visible;
+}
+.holding-range-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #ff5722, #ff9800, #4CAF50);
+  border-radius: 3px;
+  opacity: 0.55;
+}
+.holding-range-marker {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 2px solid #1a1a2e;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+  z-index: 1;
+}
+.holding-range-bar.range-broken-sl .holding-range-marker {
+  background: #ff5252;
+  box-shadow: 0 0 8px rgba(255, 82, 82, 0.6);
+}
+.holding-range-bar.range-hit-tp .holding-range-marker {
+  background: #4CAF50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+}
+.holding-range-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.range-stat-sl { color: #ff8a80; }
+.range-stat-tp { color: #81c784; }
+
 /* ── Holding detail modal (per-symbol portfolio analysis) ── */
 @media (min-width: 600px) {
   .hd-modal {

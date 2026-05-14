@@ -6951,6 +6951,56 @@
         const setupLabel = ana?.recommendation || "--";
         const setupColor = ana?.recColor || "#888";
 
+        // Coach UI: T+ chip, RSI chip, range bar SL←now→target
+        const coach = action?.coach;
+        const chipsHtml = coach ? (() => {
+          const chips = [];
+          if (coach.tPlusPosition != null) {
+            const lbl = coach.isTplusPick
+              ? `T+${coach.tPlusPosition} · Climax pick`
+              : `T+${coach.tPlusPosition} · ${coach.daysHeld}d held`;
+            const cls = coach.isTplusPick ? "coach-chip-tplus" : "coach-chip-neutral";
+            chips.push(`<span class="coach-chip ${cls}">${lbl}</span>`);
+          }
+          if (coach.rsiWarn === "strong") {
+            chips.push(`<span class="coach-chip coach-chip-rsi-strong">🚨 RSI ${coach.rsiValue.toFixed(0)} (cực overbought)</span>`);
+          } else if (coach.rsiWarn === "mild") {
+            chips.push(`<span class="coach-chip coach-chip-rsi-mild">⚠️ RSI ${coach.rsiValue.toFixed(0)} (overbought)</span>`);
+          } else if (coach.rsiValue != null && coach.rsiValue <= 30) {
+            chips.push(`<span class="coach-chip coach-chip-rsi-low">RSI ${coach.rsiValue.toFixed(0)} (oversold)</span>`);
+          }
+          return chips.length ? `<div class="holding-chips">${chips.join("")}</div>` : "";
+        })() : "";
+
+        const rangeHtml = coach?.distSL && coach?.distTarget ? (() => {
+          const sl = coach.distSL.price;
+          const tp = coach.distTarget.price;
+          const curPx = coach.currentPrice;
+          const total = tp - sl;
+          let pos = total > 0 ? ((curPx - sl) / total) * 100 : 50;
+          let outClass = "";
+          if (curPx <= sl) { pos = 0; outClass = "range-broken-sl"; }
+          else if (curPx >= tp) { pos = 100; outClass = "range-hit-tp"; }
+          pos = Math.max(0, Math.min(100, pos));
+          return `
+            <div class="holding-range">
+              <div class="holding-range-labels">
+                <span class="range-lbl-sl">SL ${sl.toFixed(2)}</span>
+                <span class="range-lbl-cur">Now ${curPx.toFixed(2)}</span>
+                <span class="range-lbl-tp">Target ${tp.toFixed(2)}</span>
+              </div>
+              <div class="holding-range-bar ${outClass}">
+                <div class="holding-range-fill" style="width:${pos}%"></div>
+                <div class="holding-range-marker" style="left:${pos}%"></div>
+              </div>
+              <div class="holding-range-stats">
+                <span class="range-stat-sl">−${coach.distSL.pct.toFixed(1)}% tới SL</span>
+                <span class="range-stat-tp">+${coach.distTarget.pct.toFixed(1)}% tới target</span>
+              </div>
+            </div>
+          `;
+        })() : "";
+
         return `
           <div class="holding-card" data-symbol="${h.symbol}">
             <div class="holding-row1">
@@ -6972,6 +7022,8 @@
                 <span class="holding-action-text">${action.text}</span>
               </div>
             ` : ""}
+            ${chipsHtml}
+            ${rangeHtml}
             <div class="holding-actions-row">
               <button class="link-btn holding-analyze">Phân tích</button>
               ${action?.priority === 1 && pnl < 0

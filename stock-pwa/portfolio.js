@@ -329,6 +329,48 @@ window.__SSI_PORTFOLIO__ = (function () {
    *  - Strong leader / breakout fresh flags từ Strong Leaders scoring
    * Returns: {priority, icon, text, color, slActive}
    */
+  // Coach fields cho UI portfolio — Vol Climax T+ rules (target +3%, SL -8% from cost).
+  // Tách function riêng để tính 1 lần, share giữa recommendAction và UI render.
+  function computeCoachFields(holding, analysis, inTplusTop) {
+    const cur = analysis?.current ?? 0;
+    const avgCost = holding?.avg_cost ?? 0;
+    const rsi = analysis?.rsi ?? null;
+    const targetPrice = avgCost * 1.03;
+    const slPrice = avgCost * 0.92;
+
+    // Days held từ first_buy_date — for T+ position display
+    let daysHeld = null;
+    let tPlusPosition = null;
+    if (holding?.first_buy_date) {
+      daysHeld = Math.floor((Date.now() - new Date(holding.first_buy_date).getTime()) / 86400000);
+      // T+ convention VN: ngày mua = T+0, hôm sau = T+1, …
+      tPlusPosition = Math.max(0, daysHeld);
+    }
+
+    return {
+      // RSI warning levels
+      rsiWarn: rsi == null ? null : rsi >= 80 ? "strong" : rsi >= 70 ? "mild" : null,
+      rsiValue: rsi,
+      // Position metadata
+      isTplusPick: !!inTplusTop,
+      daysHeld,
+      tPlusPosition,
+      // Distance to T+ target +3% (auto-fire level)
+      distTarget: cur > 0 && avgCost > 0 ? {
+        price: targetPrice,
+        pct: ((targetPrice - cur) / cur) * 100,
+      } : null,
+      // Distance to SL -8% (close-only)
+      distSL: cur > 0 && avgCost > 0 ? {
+        price: slPrice,
+        pct: ((cur - slPrice) / cur) * 100,
+      } : null,
+      // Current price for visual range bar
+      currentPrice: cur,
+      avgCost,
+    };
+  }
+
   function recommendAction(holding, analysis, inTplusTop = false) {
     const pnlPct = holding.cost_basis > 0
       ? ((analysis.current * holding.qty - holding.cost_basis) / holding.cost_basis) * 100
@@ -336,6 +378,7 @@ window.__SSI_PORTFOLIO__ = (function () {
     const score = analysis?.score ?? 0;
     const cur = analysis?.current ?? 0;
     const flags = analysis?.flags || {};
+    const coach = computeCoachFields(holding, analysis, inTplusTop);
 
     // ── Active SL = max(cost-based -8%, trailing SL từ analysis) ──
     // Cả 2 luôn < current cho long; pick "tighter" (closer to current = max).
@@ -357,7 +400,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       const txt = dayChg > 0
         ? `Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật. Có thể chờ nhịp hồi nhẹ để thoát giá tốt hơn.`
         : `Đã thủng SL ${slActive.toFixed(2)} — nên cắt kỷ luật, review thesis nếu giữ.`;
-      return { priority: 1, icon: "🚨", color: "#ff4444", text: txt, slActive };
+      return { priority: 1, icon: "🚨", color: "#ff4444", text: txt, slActive, coach };
     }
 
     // ── Tier 2: Sát SL (< nearPct) ──
@@ -365,7 +408,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 1, icon: "⚠️", color: "#ff5722",
         text: `Sát SL ${slActive.toFixed(2)} (còn ${distPct.toFixed(1)}%) — chuẩn bị action nếu thủng.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -374,14 +417,14 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 1, icon: "🚨", color: "#ff4444",
         text: `Setup xấu (score ${score.toFixed(1)}) — cân nhắc thoát vị thế. SL ${slActive.toFixed(2)}.`,
-        slActive,
+        slActive, coach,
       };
     }
     if (pnlPct < -8 && score < 0) {
       return {
         priority: 1, icon: "⚠️", color: "#ff5722",
         text: `Lỗ ${pnlPct.toFixed(1)}% + Setup yếu — review thesis. SL ${slActive.toFixed(2)}.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -391,7 +434,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 2, icon: "🎯🎯", color: "#4CAF50",
         text: `Lãi ${pnlPct.toFixed(1)}% — chạm TP2 (+12%). Đề xuất chốt full hoặc trailing SL sát.`,
-        slActive,
+        slActive, coach,
       };
     }
     // ── Tier 4b: TP1 hit (+5%) — partial TP ──
@@ -399,7 +442,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 2, icon: "🎯", color: "#4CAF50",
         text: `Lãi ${pnlPct.toFixed(1)}% — chạm TP1 (+5%). Đề xuất TP 1/3 hoặc 1/2, giữ phần còn lại chạy.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -411,7 +454,7 @@ window.__SSI_PORTFOLIO__ = (function () {
         return {
           priority: 3, icon: "⏰", color: "#FF9800",
           text: `Hold ${daysHeld}d > 15 phiên + chưa lãi rõ + setup yếu — T+ stale, đề xuất exit.`,
-          slActive,
+          slActive, coach,
         };
       }
     }
@@ -421,14 +464,14 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 3, icon: "🚀", color: "#4CAF50",
         text: `Score ${score.toFixed(1)} + ${flags.strongLeader ? "Strong leader" : "Fresh breakout"} — có thể tilt buy. SL ${slActive.toFixed(2)}.`,
-        slActive,
+        slActive, coach,
       };
     }
     if (score >= 4 && inTplusTop && pnlPct < 5) {
       return {
         priority: 3, icon: "📈", color: "#4CAF50",
         text: `Vẫn trong T+ top picks + setup tốt — có thể tilt buy. SL ${slActive.toFixed(2)}.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -437,7 +480,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 4, icon: "👀", color: "#FF9800",
         text: `Yếu — chưa có tín hiệu đảo chiều. SL ${slActive.toFixed(2)}, theo dõi vùng hỗ trợ.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -446,7 +489,7 @@ window.__SSI_PORTFOLIO__ = (function () {
       return {
         priority: 4, icon: "👀", color: "#FF9800",
         text: `Setup yếu — theo dõi vùng hỗ trợ. SL ${slActive.toFixed(2)}.`,
-        slActive,
+        slActive, coach,
       };
     }
 
@@ -458,7 +501,7 @@ window.__SSI_PORTFOLIO__ = (function () {
         : pnlPct < 0
         ? `Giữ. Lỗ ${pnlPct.toFixed(1)}%. SL ${slActive.toFixed(2)}.`
         : `Giữ. Trung tính. SL ${slActive.toFixed(2)}.`,
-      slActive,
+      slActive, coach,
     };
   }
 
