@@ -110,6 +110,26 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/active-picks" && request.method === "GET") {
+      // Public read: climax active picks (Bắt đáy T+ holding window).
+      // Used by PWA portfolio tab to detect climax positions per-holding.
+      // Data non-sensitive (same info derivable from VND public data).
+      const sb = sbClient(env);
+      const picks = await sbQuery(sb, "climax_active_picks", {
+        select: "symbol,signal_date,entry_price,target_price,tier,expires_at",
+      });
+      const active = (picks || []).filter((p) =>
+        !p.expires_at || new Date(p.expires_at) > new Date()
+      );
+      return new Response(JSON.stringify({ picks: active, fetched_at: new Date().toISOString() }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=300",  // 5min CDN cache
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
     if (url.pathname === "/spike-test" && request.method === "POST") {
       // Manual trigger spike alert check
       const secret = url.searchParams.get("secret");

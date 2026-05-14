@@ -2727,7 +2727,36 @@
     document.querySelectorAll(".tab-content").forEach((el) => {
       el.classList.toggle("active", el.classList.contains("tab-" + tab));
     });
+    // Portfolio auto-refresh: chỉ chạy khi tab Danh mục active
+    if (tab === "portfolio") startPortfolioAutoRefresh();
+    else stopPortfolioAutoRefresh();
   }
+
+  // Auto-refresh portfolio mỗi 60s khi tab active. Pause khi tab ẩn/đổi tab khác.
+  let portfolioRefreshTimer = null;
+  function startPortfolioAutoRefresh() {
+    stopPortfolioAutoRefresh();
+    portfolioRefreshTimer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (currentTab !== "portfolio") return;
+      // Bust analysis cache so re-fetch giá hiện tại
+      Object.keys(portfolioAnalysisCache).forEach((k) => delete portfolioAnalysisCache[k]);
+      renderPortfolio().catch(() => {});
+    }, 60000);
+  }
+  function stopPortfolioAutoRefresh() {
+    if (portfolioRefreshTimer) {
+      clearInterval(portfolioRefreshTimer);
+      portfolioRefreshTimer = null;
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && currentTab === "portfolio") {
+      startPortfolioAutoRefresh();
+    } else {
+      stopPortfolioAutoRefresh();
+    }
+  });
 
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
@@ -5502,6 +5531,26 @@
     }
     return d;
   }
+
+  // Đếm số phiên (weekday) giữa 2 ngày, EXCLUSIVE both ends.
+  // tradingDaysBetween("2026-05-12", today=2026-05-14) = 1 (chỉ T4 13/05 ở giữa)
+  // Dùng cho T+ position: signal day = T+0, hôm sau = T+1, ...
+  function tradingDaysBetween(fromDateStr, toDate) {
+    const start = new Date(fromDateStr);
+    const end = new Date(toDate);
+    // Strip time
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    if (end <= start) return 0;
+    let count = 0;
+    const d = new Date(start);
+    while (d < end) {
+      d.setDate(d.getDate() + 1);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
   function fmtDM(d) {
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
@@ -5923,6 +5972,32 @@
   const portfolioAnalysisCache = {};
   // Track current T+ top picks symbols (consumed by portfolio recommendAction)
   let tplusTopSymbols = new Set();
+  // Authoritative climax active picks from bot Supabase (signal_date based T+ count)
+  // Map: symbol → { signal_date, entry_price, target_price, tier, expires_at }
+  let activeClimaxPicks = new Map();
+  let activeClimaxPicksFetchedAt = 0;
+
+  async function fetchActiveClimaxPicks(forceRefresh = false) {
+    // Cache 5 phút, server cũng cache 5 phút → tổng worst-case 10 phút lag
+    const TTL_MS = 5 * 60 * 1000;
+    if (!forceRefresh && Date.now() - activeClimaxPicksFetchedAt < TTL_MS && activeClimaxPicks.size > 0) {
+      return;
+    }
+    try {
+      const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/active-picks", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const json = await r.json();
+      const map = new Map();
+      for (const p of json.picks || []) {
+        map.set(p.symbol, p);
+      }
+      activeClimaxPicks = map;
+      activeClimaxPicksFetchedAt = Date.now();
+      console.log(`[portfolio] fetched ${map.size} active climax picks`);
+    } catch (e) {
+      console.warn("[portfolio] active picks fetch failed:", e.message);
+    }
+  }
 
   function fmtMoney(vnd) {
     if (vnd === null || vnd === undefined || isNaN(vnd)) return "0đ";
@@ -6756,6 +6831,9 @@
     bindTxModal();
     bindCashModal();
 
+    // Fetch active climax picks (cache 5min) — không await, render dùng cache hiện tại
+    fetchActiveClimaxPicks().catch(() => {});
+
     const holdings = PORTFOLIO.currentHoldings();
     const cash = PORTFOLIO.loadCash();
     const allTxs = PORTFOLIO.loadTransactions();
@@ -6946,13 +7024,36 @@
         const dayCls = dayChange >= 0 ? "up" : "down";
         const daySign = dayChange >= 0 ? "+" : "";
 
-        const inTplusTop = tplusTopSymbols.has(h.symbol);
+        const climaxPick = activeClimaxPicks.get(h.symbol);
+        const inTplusTop = tplusTopSymbols.has(h.symbol) || !!climaxPick;
         const action = ana ? PORTFOLIO.recommendAction(h, ana, inTplusTop) : null;
         const setupLabel = ana?.recommendation || "--";
         const setupColor = ana?.recColor || "#888";
 
         // Coach UI: T+ chip, RSI chip, range bar SL←now→target
         const coach = action?.coach;
+
+        // Authoritative override: nếu climax pick từ DB → dùng signal_date + entry_price plan
+        if (coach && climaxPick) {
+          coach.isTplusPick = true;
+          coach.climaxTier = climaxPick.tier;
+          coach.climaxSignalDate = climaxPick.signal_date;
+          coach.climaxEntryPrice = climaxPick.entry_price;
+          // Trading days từ signal_date — đếm phiên (loại bỏ T7/CN)
+          coach.tPlusPosition = tradingDaysBetween(climaxPick.signal_date, new Date());
+          coach.daysHeld = coach.tPlusPosition;
+          // Override target = DB target_price (entry × 1.03), SL = entry × 0.92
+          if (cur > 0) {
+            const targetP = climaxPick.target_price;
+            const slP = climaxPick.entry_price * 0.92;
+            coach.distTarget = { price: targetP, pct: ((targetP - cur) / cur) * 100 };
+            coach.distSL = { price: slP, pct: ((cur - slP) / cur) * 100 };
+          }
+        } else if (coach && coach.tPlusPosition != null && coach.daysHeld != null && h.first_buy_date) {
+          // Non-climax: chuyển daysHeld calendar → trading days
+          coach.tPlusPosition = tradingDaysBetween(h.first_buy_date, new Date());
+          coach.daysHeld = coach.tPlusPosition;
+        }
         const chipsHtml = coach ? (() => {
           const chips = [];
           if (coach.tPlusPosition != null) {
@@ -7024,6 +7125,16 @@
             ` : ""}
             ${chipsHtml}
             ${rangeHtml}
+            ${coach?.distTarget && coach?.distSL ? `
+              <div class="holding-copy-row">
+                <button class="copy-chip copy-chip-target" data-copy="${coach.distTarget.price.toFixed(2)}" title="Copy giá target để đặt lệnh">
+                  📋 Target <b>${coach.distTarget.price.toFixed(2)}</b>
+                </button>
+                <button class="copy-chip copy-chip-sl" data-copy="${coach.distSL.price.toFixed(2)}" title="Copy giá SL để check ATC">
+                  📋 SL <b>${coach.distSL.price.toFixed(2)}</b>
+                </button>
+              </div>
+            ` : ""}
             <div class="holding-actions-row">
               <button class="link-btn holding-analyze">Phân tích</button>
               ${action?.priority === 1 && pnl < 0
@@ -7051,6 +7162,24 @@
             );
           }
           updateTxSummary();
+        });
+        card.querySelectorAll(".copy-chip").forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const price = btn.dataset.copy;
+            if (!price) return;
+            try {
+              await navigator.clipboard.writeText(price);
+              const original = btn.innerHTML;
+              btn.classList.add("copy-chip-copied");
+              btn.innerHTML = `✅ Copied <b>${price}</b>`;
+              setTimeout(() => {
+                btn.classList.remove("copy-chip-copied");
+                btn.innerHTML = original;
+              }, 1500);
+            } catch {
+              btn.innerHTML = "❌ Copy fail";
+            }
+          });
         });
       });
     }
