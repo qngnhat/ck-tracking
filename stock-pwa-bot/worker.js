@@ -110,6 +110,28 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/spike-test" && request.method === "POST") {
+      // Manual trigger spike alert check
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(checkSpikeAlerts(env));
+      return new Response("Spike alert check triggered", { status: 200 });
+    }
+    if (url.pathname === "/spike-state" && request.method === "GET") {
+      // Read active picks state (debug)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const sb = sbClient(env);
+      const picks = await sbQuery(sb, "climax_active_picks", { select: "*" });
+      return new Response(JSON.stringify(picks || [], null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response("Stock PWA Bot Worker", { status: 200 });
   },
 
@@ -137,8 +159,9 @@ export default {
       console.log("[cron] skip — outside VN trading session", new Date().toISOString());
       return;
     }
-    console.log("[cron] check triggers fired at", new Date().toISOString());
+    console.log("[cron] check triggers + spike alerts fired at", new Date().toISOString());
     ctx.waitUntil(checkAllWatches(env));
+    ctx.waitUntil(checkSpikeAlerts(env));
   },
 };
 
@@ -526,12 +549,161 @@ async function scanVolClimaxMatches() {
   return result.matches;
 }
 
+// ── Spike-alert state: persist climax matches to climax_active_picks ──
+
+const SPIKE_HOLD_DAYS = 7;          // calendar days ~ 5 trading days
+const SPIKE_THRESHOLD_PCT = 3.0;    // alert khi intraday return ≥ +3% từ open
+const SPIKE_COOLDOWN_MIN = 10;      // tối thiểu 10 min giữa 2 alerts cùng mã
+
+async function persistClimaxMatches(env, matches) {
+  const sb = sbClient(env);
+  // 1. Cleanup picks đã expire
+  const nowIso = new Date().toISOString();
+  await sbDelete(sb, "climax_active_picks", { lt: { expires_at: nowIso } });
+
+  if (!matches || matches.length === 0) {
+    console.log("[persist] no climax matches to persist");
+    return;
+  }
+
+  const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: today,
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * (1 + SPIKE_THRESHOLD_PCT / 100)).toFixed(4),
+    tier: m.tier,
+    expires_at: expiresAt,
+    above_threshold: false,
+    last_alert_at: null,
+  }));
+  const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
+  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} climax matches saved (expires ${expiresAt.slice(0, 10)})`);
+}
+
+// Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
+async function fetchVndIntraday(symbol) {
+  // VN open 9:00 = 02:00 UTC. Lấy from = today 01:00 UTC (buffer 1h).
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 1, 0, 0));
+  const from = Math.floor(todayStart.getTime() / 1000);
+  const to = Math.floor(Date.now() / 1000);
+  const url = `${VND_HISTORY_URL}?resolution=5&symbol=${symbol}&from=${from}&to=${to}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+      "Origin": "https://dchart.vndirect.com.vn",
+      "Referer": "https://dchart.vndirect.com.vn/",
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.s !== "ok" || !data.c?.length) throw new Error("no intraday data");
+  return {
+    opens: data.o,
+    highs: data.h,
+    lows: data.l,
+    closes: data.c,
+    times: data.t,
+  };
+}
+
+async function checkSpikeAlerts(env) {
+  const sb = sbClient(env);
+  const nowIso = new Date().toISOString();
+  // Read active picks (not expired)
+  const picks = await sbQuery(sb, "climax_active_picks", {
+    select: "symbol,entry_price,target_price,tier,above_threshold,last_alert_at,signal_date",
+  });
+  if (!picks || picks.length === 0) {
+    return;
+  }
+  const active = picks.filter((p) => true); // already filtered by expires_at >= now? sbQuery doesn't filter, do manual
+  // Note: sbQuery không support .gte → cleanup chạy ở EOD persist nên active = current rows
+  if (active.length === 0) return;
+
+  console.log(`[spike] checking ${active.length} active picks`);
+
+  // Fetch intraday concurrently (Cloudflare limit ~50 subrequests; ~5 picks typical → safe)
+  const results = await Promise.all(active.map(async (p) => {
+    try {
+      const bars = await fetchVndIntraday(p.symbol);
+      const n = bars.opens.length;
+      if (n === 0) return null;
+      const openToday = bars.opens[0];
+      const currentHigh = Math.max(...bars.highs);
+      const currentLast = bars.closes[n - 1];
+      const intradayRet = ((currentHigh - openToday) / openToday) * 100;
+      const lastRet = ((currentLast - openToday) / openToday) * 100;
+      return { pick: p, openToday, currentHigh, currentLast, intradayRet, lastRet };
+    } catch (e) {
+      console.warn(`[spike] ${p.symbol} intraday fetch fail:`, e.message);
+      return null;
+    }
+  }));
+
+  // State machine + fire alerts
+  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+
+  for (const r of results) {
+    if (!r) continue;
+    const p = r.pick;
+    const wasAbove = p.above_threshold;
+    const isAbove = r.intradayRet >= SPIKE_THRESHOLD_PCT;
+
+    // Cooldown check
+    let canFire = true;
+    if (p.last_alert_at) {
+      const elapsed = (Date.now() - new Date(p.last_alert_at).getTime()) / 60000;
+      if (elapsed < SPIKE_COOLDOWN_MIN) canFire = false;
+    }
+
+    if (isAbove && !wasAbove && canFire) {
+      // Transition false→true: FIRE alert
+      const msg =
+        `🚀 *${p.symbol}* spike intraday\n\n` +
+        `Entry signal: ${p.entry_price} (${p.signal_date}, Tier ${p.tier})\n` +
+        `Open hôm nay: ${r.openToday.toFixed(2)}\n` +
+        `High intraday: *${r.currentHigh.toFixed(2)}* (+${r.intradayRet.toFixed(2)}% từ open)\n` +
+        `Giá hiện tại: ${r.currentLast.toFixed(2)} (+${r.lastRet.toFixed(2)}%)\n\n` +
+        `💡 Cân nhắc bán nốt (manual decision):\n` +
+        `• Nếu high vẫn còn → đặt LO bán quanh ${r.currentHigh.toFixed(2)}\n` +
+        `• Nếu đã rớt từ high → bán market ngay nếu vẫn lãi\n` +
+        `• Hoặc giữ tiếp nếu pattern còn mạnh\n\n` +
+        `⏰ ${new Date().toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })} VN`;
+      for (const chatId of chats) {
+        await tgSendMessage(env.BOT_TOKEN, chatId, msg);
+      }
+      await sbUpdate(sb, "climax_active_picks", {
+        eq: { symbol: p.symbol },
+        data: { above_threshold: true, last_alert_at: nowIso },
+      });
+      console.log(`[spike] FIRED ${p.symbol} @ +${r.intradayRet.toFixed(2)}% → ${chats.length} chats`);
+    } else if (!isAbove && wasAbove) {
+      // Transition true→false: re-arm (cho phép alert lại nếu sau này lên lại)
+      await sbUpdate(sb, "climax_active_picks", {
+        eq: { symbol: p.symbol },
+        data: { above_threshold: false },
+      });
+      console.log(`[spike] ${p.symbol} dropped below threshold, re-armed`);
+    }
+    // else: no state change, no alert
+  }
+}
+
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
 async function sendMarketDigest(env) {
   console.log("[digest] scanning universe + market stats...");
   const result = await scanAllSymbols();
   const { matches, market, gainers, losers, topVol } = result;
   console.log(`[digest] ${matches.length} climax · ${market.upCount}↑/${market.downCount}↓ · avg ${market.avgChange.toFixed(2)}%`);
+
+  // Persist climax matches → active_picks (used by spike-alert intraday cron)
+  await persistClimaxMatches(env, matches);
 
   // Fetch VN-Index để có index data
   let vniInfo = null;
@@ -1053,6 +1225,51 @@ async function sbUpdate(sb, table, opts) {
   });
   if (!res.ok) {
     console.warn(`[sb] update ${table} failed:`, res.status, await res.text());
+    return false;
+  }
+  return true;
+}
+
+async function sbUpsert(sb, table, rows, onConflict) {
+  const params = new URLSearchParams();
+  if (onConflict) params.set("on_conflict", onConflict);
+  const url = `${sb.url}/rest/v1/${table}?${params.toString()}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: sb.key,
+      authorization: `Bearer ${sb.key}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+  });
+  if (!res.ok) {
+    console.warn(`[sb] upsert ${table} failed:`, res.status, await res.text());
+    return false;
+  }
+  return true;
+}
+
+async function sbDelete(sb, table, opts) {
+  const params = new URLSearchParams();
+  if (opts.lt) {
+    for (const [k, v] of Object.entries(opts.lt)) params.append(k, `lt.${v}`);
+  }
+  if (opts.eq) {
+    for (const [k, v] of Object.entries(opts.eq)) params.append(k, `eq.${v}`);
+  }
+  const url = `${sb.url}/rest/v1/${table}?${params.toString()}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      apikey: sb.key,
+      authorization: `Bearer ${sb.key}`,
+      Prefer: "return=minimal",
+    },
+  });
+  if (!res.ok) {
+    console.warn(`[sb] delete ${table} failed:`, res.status, await res.text());
     return false;
   }
   return true;
