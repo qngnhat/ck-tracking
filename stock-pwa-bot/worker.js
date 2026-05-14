@@ -287,6 +287,9 @@ async function handleTelegramWebhook(request, env) {
 // (vd 0→1 = "1/3 met", 1→2 = "upgrade to 2/3"). User chỉ unsubscribe thủ
 // công qua app (dismissed_by_user=true). Cron không auto-unsubscribe.
 
+// Cooldown giữa 2 alerts cùng watch để tránh spam khi giá dao động quanh threshold
+const WATCH_ALERT_COOLDOWN_MIN = 30;
+
 async function checkAllWatches(env) {
   const sb = sbClient(env);
 
@@ -342,23 +345,47 @@ async function checkAllWatches(env) {
       try { t = JSON.parse(t); } catch { t = {}; }
     }
 
-    const reasons = [];
+    // Đếm 3 trigger conditions + collect "met" và "waiting" reasons cho message rõ ràng
+    const met = [];
+    const waiting = [];
     let metCount = 0;
-    if (t.closeAbove && cur >= t.closeAbove) {
-      reasons.push(`✅ close *${cur.toFixed(2)}* ≥ ${t.closeAbove.toFixed(2)}`);
-      metCount++;
+    let totalTriggers = 0;
+    if (t.closeAbove != null) {
+      totalTriggers++;
+      if (cur >= t.closeAbove) {
+        met.push(`✅ Giá đóng *${cur.toFixed(2)}* vượt mức *${t.closeAbove.toFixed(2)}* (xác nhận xu hướng tăng)`);
+        metCount++;
+      } else {
+        waiting.push(`⏳ Chờ giá đóng vượt ${t.closeAbove.toFixed(2)} (hiện ${cur.toFixed(2)})`);
+      }
     }
-    if (t.volAbove && curVol >= t.volAbove) {
-      reasons.push(`✅ vol *${(curVol / 1000).toFixed(0)}K* ≥ ${(t.volAbove / 1000).toFixed(0)}K`);
-      metCount++;
+    if (t.volAbove != null) {
+      totalTriggers++;
+      if (curVol >= t.volAbove) {
+        met.push(`✅ Khối lượng *${(curVol / 1000).toFixed(0)}K* vượt mức *${(t.volAbove / 1000).toFixed(0)}K* (có lực mua mới)`);
+        metCount++;
+      } else {
+        waiting.push(`⏳ Chờ KL vượt ${(t.volAbove / 1000).toFixed(0)}K (hiện ${(curVol / 1000).toFixed(0)}K)`);
+      }
     }
-    if (t.gapAbove && curOpen > t.gapAbove) {
-      reasons.push(`✅ open *${curOpen.toFixed(2)}* > ${t.gapAbove.toFixed(2)} (gap up)`);
-      metCount++;
+    if (t.gapAbove != null) {
+      totalTriggers++;
+      if (curOpen > t.gapAbove) {
+        met.push(`✅ Mở cửa *${curOpen.toFixed(2)}* gap up trên *${t.gapAbove.toFixed(2)}* (sức mạnh đầu phiên)`);
+        metCount++;
+      } else {
+        waiting.push(`⏳ Chờ mở cửa gap up trên ${t.gapAbove.toFixed(2)} (hiện ${curOpen.toFixed(2)})`);
+      }
     }
 
     const lastNotified = w.last_notified_count || 0;
-    const shouldFire = metCount > lastNotified;
+    const isUpgrade = metCount > lastNotified;
+
+    // Cooldown: kể cả là upgrade thật, vẫn cần đủ 30 min từ alert trước để tránh
+    // spam khi giá oscillate quanh threshold (vd 1→2→1→2 trong 10 min).
+    const cooldownOk = !w.notified_at ||
+      (new Date(checkTs).getTime() - new Date(w.notified_at).getTime()) / 60000 >= WATCH_ALERT_COOLDOWN_MIN;
+    const shouldFire = isUpgrade && cooldownOk;
 
     // Always update last_check_at + met_count
     const updateData = {
@@ -369,19 +396,47 @@ async function checkAllWatches(env) {
     if (shouldFire) {
       upgraded++;
       const chatId = chatByUser.get(w.user_id);
-      const tierTxt = lastNotified === 0
-        ? `🔔 *${w.symbol}* — Trigger met! (${metCount}/3)`
-        : `📈 *${w.symbol}* — Tier upgrade! (${lastNotified}/3 → ${metCount}/3)`;
-      const text = `${tierTxt}\n\n` +
-        reasons.join("\n") +
-        `\n\nMở app Bonggnez xem plan chi tiết.`;
+
+      // Tier semantic: 1/3 mới khởi đầu, 2/3 sắp đủ, 3/3 đủ điều kiện vào
+      let headerLine, ctaLine;
+      if (metCount === totalTriggers) {
+        headerLine = `🟢 *${w.symbol}* — ĐỦ ${metCount}/${totalTriggers} tín hiệu vào lệnh`;
+        ctaLine =
+          `💡 *Hành động*: Cân nhắc vào lệnh theo plan\n` +
+          `   • Vào ATC chiều nay HOẶC LO sáng mai\n` +
+          `   • Đặt SL theo plan, KHÔNG vào không có SL\n` +
+          `   • Mở app Bonggnez tab Phân tích → ${w.symbol} xem plan chi tiết`;
+      } else if (metCount === totalTriggers - 1 && totalTriggers >= 2) {
+        headerLine = `🟡 *${w.symbol}* — ${metCount}/${totalTriggers} tín hiệu vào (sắp đủ)`;
+        ctaLine =
+          `💡 *Hành động*: Theo dõi sát, chưa đủ vào chắc chắn.\n` +
+          `   Đợi tín hiệu cuối cùng xác nhận trước khi vào lệnh.`;
+      } else {
+        headerLine = `⚠️ *${w.symbol}* — ${metCount}/${totalTriggers} tín hiệu vào (mới khởi đầu)`;
+        ctaLine =
+          `💡 *Hành động*: CHƯA vào lệnh — chỉ là tín hiệu đầu tiên.\n` +
+          `   Cần xác nhận thêm trước khi vào.`;
+      }
+
+      const parts = [headerLine, "", ...met];
+      if (waiting.length > 0) {
+        parts.push("", ...waiting);
+      }
+      parts.push("", ctaLine);
+      parts.push("─────");
+      parts.push("_T+ entry trigger từ watchlist của mày — bỏ theo dõi trong app nếu không cần._");
+
+      const text = parts.join("\n");
       if (chatId) {
         await tgSendMessage(env.BOT_TOKEN, chatId, text);
       }
       updateData.last_notified_count = metCount;
       updateData.notified = true;
       updateData.notified_at = checkTs;
-      updateData.notified_reason = reasons.join("; ").replace(/\*/g, "");
+      updateData.notified_reason = met.join("; ").replace(/\*/g, "");
+    } else if (isUpgrade && !cooldownOk) {
+      // Upgrade thật nhưng đang trong cooldown → skip silent, vẫn update count
+      updateData.last_notified_count = metCount;
     } else if (metCount < lastNotified) {
       // Met count giảm (vd 2→1) — không fire downgrade noti, nhưng update count
       // để next cron có thể re-fire khi tăng lại.
