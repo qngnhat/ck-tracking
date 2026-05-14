@@ -5643,6 +5643,76 @@
               </div>
             </div>
           </div>
+
+          <details class="climax-orders">
+            <summary>📋 Checklist đặt lệnh SSI iBoard (click mở)</summary>
+            <div class="climax-orders-body">
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">1</span>
+                  <b>Đặt MUA</b>
+                  <span class="order-when">tối <b>${fmtDM(new Date())}</b> hoặc sáng <b>${t1Label}</b> trước <b>8:45</b></span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>SSI iBoard → <b>Đặt lệnh thường</b></li>
+                  <li>Loại lệnh: <b>LO</b> (Lệnh giới hạn) — <u>không dùng ATO</u> để tránh gap up khớp giá xấu</li>
+                  <li>Giá: <b>${fp(plan.entryMax)}</b> (limit max ${fp(plan.entryMax)}, tối thiểu ${fp(plan.entryMin)})</li>
+                  <li>Khối lượng: <b>${plan.sizeQty ? plan.sizeQty.toLocaleString("vi-VN") + " cp" : "≈15% NAV / giá entryMax"}</b></li>
+                  <li>Hiệu lực: trong ngày <b>${t1Label}</b> · không khớp → tự huỷ cuối phiên</li>
+                </ul>
+              </div>
+
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">2</span>
+                  <b>Đặt BÁN target +3%</b>
+                  <span class="order-when">ngay sau khi lệnh mua khớp (sáng <b>${t1Label}</b> sau 9:15)</span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>SSI iBoard → <b>Lệnh điều kiện</b> → <b>Take Profit</b> (TP/PTO)</li>
+                  <li>Điều kiện kích hoạt: <b>giá khớp ≥ ${fp(plan.target)}</b></li>
+                  <li>Lệnh khi kích hoạt: <b>LO bán giá ${fp(plan.target)}</b></li>
+                  <li>Khối lượng: <b>toàn bộ số CP vừa mua</b></li>
+                  <li>Hiệu lực: <b>7 ngày</b> (cover từ ${t3Label} đến ${t5Label})</li>
+                  <li>Cách 2 (nếu không quen lệnh điều kiện): mỗi sáng ${t3Label}/${t4Label}/${t5Label} đặt <b>LO bán ${fp(plan.target)}</b> mới (LO chỉ hiệu lực 1 ngày)</li>
+                </ul>
+              </div>
+
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">3</span>
+                  <b>Check CẮT LỖ close-only</b>
+                  <span class="order-when">mỗi ngày <b>14:25-14:30</b> từ ${t1Label} đến ${t5Label}</span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>Mở app SSI, xem giá hiện tại (gần ATC)</li>
+                  <li><b>Nếu giá ≤ ${fp(plan.sl)}</b> → vào <b>Đặt lệnh thường</b> → loại <b>ATC bán toàn bộ</b></li>
+                  <li>Nếu giá &gt; ${fp(plan.sl)} → KHÔNG làm gì, hold tiếp</li>
+                  <li>⚠️ <u>Không dùng lệnh điều kiện Stop Loss SSI</u> vì kích hoạt intraday, sẽ cắt sớm trên wick (backtest đã verify: SL intraday -8% destroy edge)</li>
+                </ul>
+              </div>
+
+              <div class="order-step">
+                <div class="order-step-head">
+                  <span class="order-step-num">4</span>
+                  <b>Đặt BÁN force T+5</b>
+                  <span class="order-when">sáng <b>${t5Label}</b> trước <b>14:25</b></span>
+                </div>
+                <ul class="order-step-detail">
+                  <li>Chỉ làm <b>nếu bước 2 (target +3%) chưa khớp</b></li>
+                  <li>SSI iBoard → <b>Đặt lệnh thường</b></li>
+                  <li>Loại lệnh: <b>ATC bán</b> (khớp tại giá đóng cửa)</li>
+                  <li>Khối lượng: <b>toàn bộ số CP còn lại</b></li>
+                  <li>Sau đó nhớ <b>huỷ lệnh điều kiện Take Profit</b> ở bước 2 để tránh đặt lệnh mua/bán hớ</li>
+                </ul>
+              </div>
+
+              <div class="order-note">
+                💡 <b>Phí SSI mặc định</b>: mua 0.15-0.25%, bán 0.15-0.25% + thuế bán 0.1% = round-trip ~0.4-0.6%. Backtest đã trừ 0.4%.<br>
+                💡 <b>Nếu mua không khớp</b> sáng ${t1Label} (giá mở cửa > ${fp(plan.entryMax)}) → <b>bỏ trade này</b>, không đuổi giá.
+              </div>
+            </div>
+          </details>
         </div>
       `;
     });

@@ -2337,6 +2337,91 @@ body.is-offline {
   line-height: 1.5;
 }
 
+/* ─── Order checklist SSI ─── */
+.climax-orders {
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.climax-orders > summary {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4fc3f7;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(79, 195, 247, 0.06);
+  list-style: none;
+}
+.climax-orders > summary::-webkit-details-marker { display: none; }
+.climax-orders > summary::after {
+  content: "▼";
+  float: right;
+  font-size: 10px;
+  opacity: 0.6;
+  transition: transform 0.2s;
+}
+.climax-orders[open] > summary::after { transform: rotate(180deg); }
+.climax-orders-body {
+  padding: 4px 14px 14px;
+}
+.order-step {
+  margin-top: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  border-left: 3px solid #4fc3f7;
+  border-radius: 6px;
+}
+.order-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #e0e0e0;
+}
+.order-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  color: #000;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.order-when {
+  margin-left: auto;
+  font-size: 11px;
+  color: #aaa;
+  font-weight: 400;
+}
+.order-step-detail {
+  margin: 8px 0 0;
+  padding-left: 28px;
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.65;
+}
+.order-step-detail li { margin-bottom: 4px; }
+.order-step-detail b { color: #fff; }
+.order-step-detail u { color: #ffb74d; text-decoration: none; font-weight: 600; }
+.order-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(76, 175, 80, 0.06);
+  border: 1px dashed rgba(76, 175, 80, 0.3);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: #a5d6a7;
+  line-height: 1.65;
+}
+
 /* ── Climax card V2: 3 box MUA/CẮT/BÁN với timeline ── */
 .climax-card-v2 {
   background: rgba(255, 152, 0, 0.05);
