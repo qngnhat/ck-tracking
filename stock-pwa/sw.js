@@ -1,6 +1,6 @@
 // ── Service Worker: cache app shell with stale-while-revalidate ──
 
-const CACHE = "stock-analyzer-v105";
+const CACHE = "stock-analyzer-v106";
 const APP_SHELL = [
   "./",
   "./index.html",

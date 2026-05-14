@@ -5654,8 +5654,8 @@
                   <span class="order-when">tối <b>${fmtDM(new Date())}</b> hoặc sáng <b>${t1Label}</b> trước <b>8:45</b></span>
                 </div>
                 <ul class="order-step-detail">
-                  <li>SSI iBoard → <b>Đặt lệnh thường</b></li>
-                  <li>Loại lệnh: <b>LO</b> (Lệnh giới hạn) — <u>không dùng ATO</u> để tránh gap up khớp giá xấu</li>
+                  <li>SSI iBoard → menu <b>Lệnh thường</b> <span class="ssi-term" data-term="LENH_THUONG">?</span></li>
+                  <li>Loại lệnh: <b>LO</b> <span class="ssi-term" data-term="LO">?</span> — <u>không dùng ATO</u> <span class="ssi-term" data-term="ATO">?</span> để tránh gap up khớp giá xấu</li>
                   <li>Giá: <b>${fp(plan.entryMax)}</b> (limit max ${fp(plan.entryMax)}, tối thiểu ${fp(plan.entryMin)})</li>
                   <li>Khối lượng: <b>${plan.sizeQty ? plan.sizeQty.toLocaleString("vi-VN") + " cp" : "≈15% NAV / giá entryMax"}</b></li>
                   <li>Hiệu lực: trong ngày <b>${t1Label}</b> · không khớp → tự huỷ cuối phiên</li>
@@ -5669,12 +5669,12 @@
                   <span class="order-when">ngay sau khi lệnh mua khớp (sáng <b>${t1Label}</b> sau 9:15)</span>
                 </div>
                 <ul class="order-step-detail">
-                  <li>SSI iBoard → <b>Lệnh điều kiện</b> → <b>Take Profit</b> (TP/PTO)</li>
-                  <li>Điều kiện kích hoạt: <b>giá khớp ≥ ${fp(plan.target)}</b></li>
-                  <li>Lệnh khi kích hoạt: <b>LO bán giá ${fp(plan.target)}</b></li>
+                  <li>SSI iBoard → menu <b>GTD</b> <span class="ssi-term" data-term="GTD">?</span> (lệnh treo nhiều ngày)</li>
+                  <li>Lệnh: <b>GTD bán</b> giá <b>${fp(plan.target)}</b></li>
                   <li>Khối lượng: <b>toàn bộ số CP vừa mua</b></li>
-                  <li>Hiệu lực: <b>7 ngày</b> (cover từ ${t3Label} đến ${t5Label})</li>
-                  <li>Cách 2 (nếu không quen lệnh điều kiện): mỗi sáng ${t3Label}/${t4Label}/${t5Label} đặt <b>LO bán ${fp(plan.target)}</b> mới (LO chỉ hiệu lực 1 ngày)</li>
+                  <li>Hạn hiệu lực: <b>${t5Label}</b> (~7 ngày) — cover từ ${t3Label} đến ${t5Label}</li>
+                  <li>Mỗi sáng SSI tự đẩy lại lệnh, giá chạm là khớp — không cần đặt lại mỗi ngày</li>
+                  <li>Cách 2 (nếu không quen GTD): mỗi sáng ${t3Label}/${t4Label}/${t5Label} đặt <b>Lệnh thường loại LO bán ${fp(plan.target)}</b> mới (LO chỉ hiệu lực 1 ngày)</li>
                 </ul>
               </div>
 
@@ -5686,9 +5686,15 @@
                 </div>
                 <ul class="order-step-detail">
                   <li>Mở app SSI, xem giá hiện tại (gần ATC)</li>
-                  <li><b>Nếu giá ≤ ${fp(plan.sl)}</b> → vào <b>Đặt lệnh thường</b> → loại <b>ATC bán toàn bộ</b></li>
+                  <li><b>Nếu giá ≤ ${fp(plan.sl)}</b> → menu <b>Lệnh thường</b> → loại <b>ATC</b> <span class="ssi-term" data-term="ATC">?</span> bán toàn bộ</li>
                   <li>Nếu giá &gt; ${fp(plan.sl)} → KHÔNG làm gì, hold tiếp</li>
-                  <li>⚠️ <u>Không dùng lệnh điều kiện Stop Loss SSI</u> vì kích hoạt intraday, sẽ cắt sớm trên wick (backtest đã verify: SL intraday -8% destroy edge)</li>
+                  <li class="ssi-warn">⚠️ <u>TUYỆT ĐỐI KHÔNG dùng</u>:
+                    <b>Stop</b> <span class="ssi-term ssi-term-bad" data-term="STOP">?</span>,
+                    <b>Stop Limit</b> <span class="ssi-term ssi-term-bad" data-term="STOP_LIMIT">?</span>,
+                    <b>Trailing Stop</b> <span class="ssi-term ssi-term-bad" data-term="TRAILING">?</span>,
+                    <b>OCO</b> <span class="ssi-term ssi-term-bad" data-term="OCO">?</span>,
+                    <b>Stop Loss/Take Profit</b> <span class="ssi-term ssi-term-bad" data-term="SLTP">?</span>
+                    — tất cả trigger intraday, phá rule close-only</li>
                 </ul>
               </div>
 
@@ -5699,11 +5705,11 @@
                   <span class="order-when">sáng <b>${t5Label}</b> trước <b>14:25</b></span>
                 </div>
                 <ul class="order-step-detail">
-                  <li>Chỉ làm <b>nếu bước 2 (target +3%) chưa khớp</b></li>
-                  <li>SSI iBoard → <b>Đặt lệnh thường</b></li>
-                  <li>Loại lệnh: <b>ATC bán</b> (khớp tại giá đóng cửa)</li>
+                  <li>Chỉ làm <b>nếu bước 2 (GTD target) chưa khớp</b></li>
+                  <li>SSI iBoard → menu <b>Lệnh thường</b></li>
+                  <li>Loại lệnh: <b>ATC</b> bán (khớp tại giá đóng cửa)</li>
                   <li>Khối lượng: <b>toàn bộ số CP còn lại</b></li>
-                  <li>Sau đó nhớ <b>huỷ lệnh điều kiện Take Profit</b> ở bước 2 để tránh đặt lệnh mua/bán hớ</li>
+                  <li>Sau đó nhớ <b>huỷ lệnh GTD</b> ở bước 2 để tránh treo lệnh hớ</li>
                 </ul>
               </div>
 
@@ -5711,6 +5717,44 @@
                 💡 <b>Phí SSI mặc định</b>: mua 0.15-0.25%, bán 0.15-0.25% + thuế bán 0.1% = round-trip ~0.4-0.6%. Backtest đã trừ 0.4%.<br>
                 💡 <b>Nếu mua không khớp</b> sáng ${t1Label} (giá mở cửa > ${fp(plan.entryMax)}) → <b>bỏ trade này</b>, không đuổi giá.
               </div>
+
+              <details class="ssi-glossary">
+                <summary>📖 Giải thích thuật ngữ SSI (click mở)</summary>
+                <dl class="ssi-glossary-list">
+                  <dt id="g-LENH_THUONG">Lệnh thường</dt>
+                  <dd>Menu đầu tiên trong SSI iBoard. Chứa các loại LO / ATO / ATC / MP tuỳ theo giờ giao dịch. Đây là loại lệnh dùng nhiều nhất.</dd>
+
+                  <dt id="g-LO">LO — Lệnh giới hạn (Limit Order)</dt>
+                  <dd>Đặt giá cụ thể, ví dụ "bán 43.04". Chỉ khớp khi có người mua/bán đối ứng ở giá ≥/≤ giá đặt. Không khớp cuối phiên → tự huỷ.</dd>
+
+                  <dt id="g-ATO">ATO — At The Opening</dt>
+                  <dd>Khớp tại giá <b>mở cửa</b> phiên (9:00-9:15). Đặt trước 9:15. Rủi ro: gap up → khớp giá rất cao. <u>Không dùng cho strategy này</u>.</dd>
+
+                  <dt id="g-ATC">ATC — At The Closing</dt>
+                  <dd>Khớp tại giá <b>đóng cửa</b> phiên (14:30-14:45). Đặt trước 14:25. Dùng khi cần thoát chắc chắn tại close (cắt lỗ, force T+5).</dd>
+
+                  <dt id="g-MP">MP — Market Price</dt>
+                  <dd>Bán/mua ngay theo giá thị trường hiện hành. Khớp tức thì nhưng giá có thể xấu nếu thanh khoản mỏng.</dd>
+
+                  <dt id="g-GTD">GTD — Good Till Date ⭐ DÙNG</dt>
+                  <dd>Giống LO nhưng <b>hiệu lực nhiều ngày</b> (chọn ngày hết hạn). Mỗi sáng SSI tự đẩy lại lệnh. Hoàn hảo cho "đặt bán target rồi quên đi tới khi khớp".</dd>
+
+                  <dt id="g-STOP" class="bad">Stop — Lệnh dừng ❌ KHÔNG dùng</dt>
+                  <dd>Khi giá chạm mức X → đặt lệnh MP. <b>Trigger intraday</b> — sẽ cắt lỗ trên wick (giá rớt nhanh xuyên SL rồi hồi). Backtest đã verify: intraday SL destroy edge.</dd>
+
+                  <dt id="g-STOP_LIMIT" class="bad">Stop Limit ❌ KHÔNG dùng</dt>
+                  <dd>Giống Stop nhưng kích hoạt LO thay vì MP. Vẫn intraday → vẫn destroy edge.</dd>
+
+                  <dt id="g-TRAILING" class="bad">Trailing Stop ❌ KHÔNG dùng</dt>
+                  <dd>Stop loss "bám theo" giá: giá lên thì mức cắt tự nâng. Intraday → cắt sớm trên rung lắc. Không phù hợp pattern mean-reversion.</dd>
+
+                  <dt id="g-OCO" class="bad">OCO — One Cancels Other ❌ KHÔNG dùng</dt>
+                  <dd>Đặt 2 lệnh cùng lúc (vd TP +3% OR SL -8%), khớp 1 thì cái kia huỷ. Vấn đề: stop part vẫn intraday → phá rule close-only.</dd>
+
+                  <dt id="g-SLTP" class="bad">Stop Loss / Take Profit ❌ KHÔNG dùng</dt>
+                  <dd>Lệnh combo vừa có SL vừa có TP. Cả 2 trigger intraday → SL part destroy edge.</dd>
+                </dl>
+              </details>
             </div>
           </details>
         </div>
@@ -5787,6 +5831,27 @@
         const input = document.getElementById("symbol-input");
         if (input) input.value = sym;
         analyzeSymbol(sym);
+      });
+    });
+
+    // SSI term chip click → open glossary + scroll to term definition
+    content.querySelectorAll(".ssi-term").forEach((chip) => {
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const term = chip.dataset.term;
+        if (!term) return;
+        const card = chip.closest(".climax-card-v2");
+        if (!card) return;
+        const glossary = card.querySelector("details.ssi-glossary");
+        const ordersDetails = card.querySelector("details.climax-orders");
+        if (ordersDetails) ordersDetails.open = true;
+        if (glossary) glossary.open = true;
+        const target = card.querySelector(`#g-${CSS.escape(term)}`);
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add("glossary-highlight");
+          setTimeout(() => target.classList.remove("glossary-highlight"), 2000);
+        }
       });
     });
 

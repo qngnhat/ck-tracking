@@ -670,11 +670,15 @@ async function checkSpikeAlerts(env) {
         `Open hôm nay: ${r.openToday.toFixed(2)}\n` +
         `High intraday: *${r.currentHigh.toFixed(2)}* (+${r.intradayRet.toFixed(2)}% từ open)\n` +
         `Giá hiện tại: ${r.currentLast.toFixed(2)} (+${r.lastRet.toFixed(2)}%)\n\n` +
-        `💡 Cân nhắc bán nốt (manual decision):\n` +
-        `• Nếu high vẫn còn → đặt LO bán quanh ${r.currentHigh.toFixed(2)}\n` +
-        `• Nếu đã rớt từ high → bán market ngay nếu vẫn lãi\n` +
-        `• Hoặc giữ tiếp nếu pattern còn mạnh\n\n` +
-        `⏰ ${new Date().toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })} VN`;
+        `💡 *Cân nhắc bán nốt* (manual decision) — SSI iBoard:\n` +
+        `① Nếu giá vẫn quanh đỉnh → menu *Lệnh thường*, loại *LO* bán giá ${r.currentHigh.toFixed(2)}\n` +
+        `② Nếu đã rớt xa khỏi đỉnh → loại *MP* bán (khớp ngay) nếu vẫn lãi\n` +
+        `③ Hoặc giữ tiếp — vẫn còn lãi an toàn, đợi target +3% tự khớp\n\n` +
+        `⏰ ${new Date().toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })} VN\n` +
+        `─────\n` +
+        `_LO = lệnh giới hạn (giá cụ thể, không khớp nếu giá thị trường xấu hơn)._\n` +
+        `_MP = market price (khớp ngay theo giá hiện hành, có thể trượt)._\n` +
+        `_Lệnh thường = menu đầu SSI iBoard, chứa LO/MP/ATC/ATO theo giờ phiên._`;
       for (const chatId of chats) {
         await tgSendMessage(env.BOT_TOKEN, chatId, msg);
       }
