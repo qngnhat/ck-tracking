@@ -2279,6 +2279,52 @@ body.is-offline {
   border-color: rgba(33, 150, 243, 0.5);
   color: #64b5f6;
 }
+.climax-tier-badge.tier-Elite {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.25), rgba(255, 87, 34, 0.25));
+  border-color: #ff9800;
+  color: #ffb74d;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(255, 152, 0, 0.3);
+}
+
+/* ── VN-Index regime banner ── */
+.vni-regime-banner {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid;
+}
+.vni-regime-banner.regime-correction {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.12), rgba(255, 87, 34, 0.08));
+  border-color: rgba(255, 152, 0, 0.4);
+  color: #ffb74d;
+}
+.vni-regime-banner.regime-bull {
+  background: rgba(76, 175, 80, 0.08);
+  border-color: rgba(76, 175, 80, 0.3);
+  color: #a5d6a7;
+}
+.vni-regime-banner.regime-neutral {
+  background: rgba(120, 144, 156, 0.08);
+  border-color: rgba(120, 144, 156, 0.3);
+  color: #b0bec5;
+}
+.vni-regime-sub {
+  font-size: 11px;
+  margin-top: 4px;
+  opacity: 0.75;
+}
+
+.tplus-banner-elite {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.12), rgba(255, 87, 34, 0.08)) !important;
+  border-color: #ff9800 !important;
+  box-shadow: 0 0 12px rgba(255, 152, 0, 0.15);
+}
+.tplus-banner-elite .tplus-exp-title {
+  color: #ffb74d;
+}
 .climax-subtitle {
   font-size: 13px;
   color: #aaa;

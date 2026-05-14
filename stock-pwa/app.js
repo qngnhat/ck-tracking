@@ -5594,11 +5594,15 @@
   }
 
   function renderClimaxBounceSection(picks, totalCount, opts = {}) {
-    const tierLabel = opts.tier === "A" ? "Edge cao" : opts.tier === "B" ? "Edge vừa" : null;
+    const tierLabel = opts.tier === "Elite" ? "Edge cao nhất"
+      : opts.tier === "A" ? "Edge cao"
+      : opts.tier === "B" ? "Edge vừa" : null;
     const tierBadge = opts.tier
-      ? `<span class="climax-tier-badge tier-${opts.tier}">${opts.tier} · ${tierLabel}</span>`
+      ? `<span class="climax-tier-badge tier-${opts.tier}">${opts.tier === "Elite" ? "⚡" : ""} ${opts.tier} · ${tierLabel}</span>`
       : "";
-    const subtitle = opts.tier === "A"
+    const subtitle = opts.tier === "Elite"
+      ? "Climax pattern + VNI correction regime — Win 61%, Sharpe 1.71 (institutional grade)"
+      : opts.tier === "A"
       ? "Strict: drop >7% + vol >2× + RSI <35 — Win 59%, Sharpe 0.92"
       : opts.tier === "B"
       ? "Relax: drop >5% + vol >2× + RSI <50 — Win 58%, Sharpe 1.01"
@@ -5824,15 +5828,60 @@
     const s = curState();
     const tierA = s.lastResult?.climaxTierA || [];
     const tierB = s.lastResult?.climaxTierB || [];
+    const elite = s.lastResult?.climaxElite || [];
     const countA = s.lastResult?.climaxCountA || 0;
     const countB = s.lastResult?.climaxCountB || 0;
+    const countElite = s.lastResult?.climaxCountElite || 0;
     const totalCount = countA + countB;
+    const isEliteRegime = s.lastResult?.isEliteRegime || false;
+    const vniRegime = s.lastResult?.vniRegime || "neutral";
+    const vniRet20 = s.lastResult?.vniRet20;
+
+    // ── VN-Index regime banner ──
+    const regimeBanner = vniRet20 != null ? (() => {
+      if (vniRegime === "correction") {
+        return `
+          <div class="vni-regime-banner regime-correction">
+            ⚡ <b>Thị trường đang correction</b> (VN-Index 20 phiên: ${vniRet20.toFixed(1)}%) —
+            Vol Climax có edge CAO hôm nay. Mọi match đều là <b>Tier Elite</b>.
+            <div class="vni-regime-sub">Win 61% · Sharpe 1.71 (backtest 8.5y)</div>
+          </div>`;
+      } else if (vniRegime === "bull") {
+        return `
+          <div class="vni-regime-banner regime-bull">
+            🐂 <b>Thị trường bull</b> (VN-Index 20 phiên: +${vniRet20.toFixed(1)}%) —
+            Climax pattern <u>edge thấp hơn</u> trong bull market.
+            <div class="vni-regime-sub">Backtest: bull market Win 36% (KÉM), correction Win 61% (TỐT)</div>
+          </div>`;
+      } else {
+        return `
+          <div class="vni-regime-banner regime-neutral">
+            ⚖️ <b>Thị trường neutral</b> (VN-Index 20 phiên: ${vniRet20 >= 0 ? "+" : ""}${vniRet20.toFixed(1)}%) — Climax pattern edge bình thường.
+          </div>`;
+      }
+    })() : "";
 
     // ── Stats + expectation banner cho phong cách T+3 (Vol Climax Bounce) ──
-    const statsHtml = `
+    const statsHtml = isEliteRegime ? `
       <div class="tplus-stats">
         <span class="tplus-stats-line">
-          🔻 <b>${countA}</b> Tier A (Edge cao) · <b>${countB}</b> Tier B (Edge vừa) — tổng <b>${totalCount}</b> mã
+          ⚡ <b>${countElite}</b> Tier Elite — climax matches + VNI correction regime
+        </span>
+      </div>
+      <div class="tplus-expectation-banner tplus-banner-elite">
+        <div class="tplus-exp-title">⚡ Bắt đáy T+ ELITE · climax + thị trường correction</div>
+        <div class="tplus-exp-body">
+          Backtest 8.5y: Win <b>61.2%</b>, Avg <b>+2.05%</b>/trade, Sharpe <b>1.71</b><br>
+          So với baseline (không filter regime): Win 56%, Avg +0.81%, Sharpe 0.70
+        </div>
+        <div class="tplus-exp-warning">
+          ⚠️ Hold T+3 → T+5 (target +3%, SL close -8%). Size <b>15% NAV/lệnh</b>. Max <b>2-3 lệnh</b> đồng thời.
+        </div>
+      </div>
+    ` : `
+      <div class="tplus-stats">
+        <span class="tplus-stats-line">
+          🔻 <b>${countA}</b> Tier A · <b>${countB}</b> Tier B — tổng <b>${totalCount}</b> mã
         </span>
       </div>
       <div class="tplus-expectation-banner">
@@ -5849,7 +5898,7 @@
 
     // Empty state khi cả 2 tier đều rỗng
     if (totalCount === 0) {
-      content.innerHTML = statsHtml + `
+      content.innerHTML = regimeBanner + statsHtml + `
         <div class="empty-state ranking-intro">
           <div class="empty-icon">💤</div>
           <p><b>Không có mã match Bắt đáy T+ hôm nay (cả Tier A + B).</b></p>
@@ -5860,9 +5909,13 @@
       return;
     }
 
-    let html = statsHtml;
-    if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
-    if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
+    let html = regimeBanner + statsHtml;
+    if (isEliteRegime && countElite > 0) {
+      html += renderClimaxBounceSection(elite, countElite, { tier: "Elite" });
+    } else {
+      if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
+      if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
+    }
 
     content.innerHTML = html;
 

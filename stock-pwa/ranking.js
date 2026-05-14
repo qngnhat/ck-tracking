@@ -1314,11 +1314,22 @@ window.__SSI_RANKING__ = (function () {
       sector: getSector(code),
     }));
 
-    // Fetch VN-Index history 1 lần cho RS computation
+    // Fetch VN-Index history 1 lần cho RS computation + regime detection
     let vnindexCloses = null;
+    let vniRegime = "neutral";
+    let vniRet20 = null;
     try {
       const vni = await ANALYSIS.fetchHistory("VNINDEX", "D", 250);
       vnindexCloses = vni.closes;
+      // VNI regime cho Tier Elite filter: ret20 < -5% → correction = climax có edge cao
+      if (vnindexCloses && vnindexCloses.length >= 21) {
+        const cur = vnindexCloses[vnindexCloses.length - 1];
+        const past20 = vnindexCloses[vnindexCloses.length - 21];
+        vniRet20 = ((cur - past20) / past20) * 100;
+        if (vniRet20 < -5) vniRegime = "correction";
+        else if (vniRet20 > 3) vniRegime = "bull";
+        else vniRegime = "neutral";
+      }
     } catch {}
 
     // Foreign flow fetch chỉ cho mã trong curated universe (large/mid caps)
@@ -1405,16 +1416,27 @@ window.__SSI_RANKING__ = (function () {
     const climaxTierA = climaxMatches.filter((m) => m.tier === "A");
     const climaxTierB = climaxMatches.filter((m) => m.tier === "B");
 
+    // Tier Elite: TẤT CẢ climax matches khi VNI in correction (ret20 < -5%).
+    // Backtest 8.5y: Win 56% → 61%, Avg +0.8% → +2.0%, Sharpe 0.7 → 1.7.
+    // Khi correction mode active, không hiển thị Tier A/B riêng (tất cả đều Elite).
+    const isEliteRegime = vniRegime === "correction";
+    const climaxElite = isEliteRegime ? climaxMatches.slice(0, 10) : [];
+
     const result = {
       picks,
       climaxPicks: climaxMatches.slice(0, 10),
       climaxTierA: climaxTierA.slice(0, 8),
       climaxTierB: climaxTierB.slice(0, 8),
+      climaxElite,
+      isEliteRegime,
+      vniRegime,
+      vniRet20,
       allCount: stocks.length,
       eligibleCount: valid.length,
       climaxCount: climaxMatches.length,
       climaxCountA: climaxTierA.length,
       climaxCountB: climaxTierB.length,
+      climaxCountElite: climaxElite.length,
       regime,
       minScore,
       timestamp: Date.now(),

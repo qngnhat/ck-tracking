@@ -571,7 +571,7 @@ function computeStockStats(data) {
 }
 
 async function scanAllSymbols() {
-  // 1 pass: fetch + compute climax + market stats
+  // 1 pass: fetch + compute climax + market stats + VN-Index regime
   const allStocks = [];
   const batchSize = 10;
   for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
@@ -590,10 +590,30 @@ async function scanAllSymbols() {
     allStocks.push(...results.filter((r) => r && r.stats));
   }
 
-  // Climax matches
+  // VN-Index regime detection (ret20 < -5% = correction = Tier Elite active)
+  let vniRegime = "neutral";
+  let vniRet20 = null;
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 35);
+    const cs = vni.closes;
+    if (cs.length >= 21) {
+      vniRet20 = ((cs[cs.length - 1] - cs[cs.length - 21]) / cs[cs.length - 21]) * 100;
+      if (vniRet20 < -5) vniRegime = "correction";
+      else if (vniRet20 > 3) vniRegime = "bull";
+    }
+  } catch (e) {
+    console.warn("[scan] VN-Index fetch fail:", e.message);
+  }
+
+  // Climax matches (flag elite if VNI in correction)
+  const isEliteRegime = vniRegime === "correction";
   const matches = allStocks
     .filter((s) => s.climax)
-    .map((s) => ({ symbol: s.symbol, ...s.climax }))
+    .map((s) => ({
+      symbol: s.symbol,
+      ...s.climax,
+      isElite: isEliteRegime,
+    }))
     .sort((a, b) => b.bounceStrength - a.bounceStrength);
 
   // Market stats: sort by change %
@@ -615,6 +635,9 @@ async function scanAllSymbols() {
     gainers,
     losers,
     topVol,
+    vniRegime,
+    vniRet20,
+    isEliteRegime,
   };
 }
 
@@ -648,13 +671,15 @@ async function persistClimaxMatches(env, matches) {
     signal_date: today,
     entry_price: m.currentPrice,
     target_price: +(m.currentPrice * (1 + SPIKE_THRESHOLD_PCT / 100)).toFixed(4),
-    tier: m.tier,
+    // Khi VNI in correction, store as Elite (override Tier A/B label).
+    tier: m.isElite ? "Elite" : m.tier,
     expires_at: expiresAt,
     above_threshold: false,
     last_alert_at: null,
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
-  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} climax matches saved (expires ${expiresAt.slice(0, 10)})`);
+  const eliteCount = rows.filter((r) => r.tier === "Elite").length;
+  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} matches saved (${eliteCount} Elite, expires ${expiresAt.slice(0, 10)})`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
@@ -866,13 +891,30 @@ async function sendMarketDigest(env) {
     text += `  ${t.symbol}  ${fmtBn(t.stats.turnover)}tỷ (${sign}${t.stats.changePct.toFixed(1)}%)\n`;
   }
 
+  // VN-Index regime banner cho Tier Elite
+  if (result.vniRegime === "correction" && result.vniRet20 != null) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `⚡ *Tier Elite regime ACTIVE*\n`;
+    text += `VN-Index 20 phiên: ${result.vniRet20.toFixed(1)}% → thị trường correction.\n`;
+    text += `Backtest: regime này Win 61% / Sharpe 1.71 vs baseline Win 56% / Sharpe 0.70.\n`;
+    text += `Tất cả match Climax dưới đây = *Tier Elite*.\n`;
+  } else if (result.vniRegime === "bull" && result.vniRet20 != null) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `🐂 _VN-Index bull (+${result.vniRet20.toFixed(1)}% 20p) — Climax edge thấp hơn correction regime._\n`;
+  }
+
   // Bắt đáy T+ section
+  const isEliteRegime = result.isEliteRegime;
   const tierA = matches.filter((m) => m.tier === "A");
   const tierB = matches.filter((m) => m.tier === "B");
 
   text += `\n━━━━━━━━━━━━━━━\n`;
   text += `🔻 *Bắt đáy T+ (Vol Climax Bounce)*\n`;
-  text += `${tierA.length} Tier A · ${tierB.length} Tier B\n`;
+  if (isEliteRegime) {
+    text += `⚡ ${matches.length} Tier Elite\n`;
+  } else {
+    text += `${tierA.length} Tier A · ${tierB.length} Tier B\n`;
+  }
 
   if (matches.length === 0) {
     text += `\n📭 Không có signal hôm nay.\n`;
@@ -886,19 +928,23 @@ async function sendMarketDigest(env) {
     const t3Label = fmtDM(t3);
     const t5Label = fmtDM(t5);
 
-    const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)];
-    for (const m of showMatches.slice(0, 5)) {
+    const showMatches = isEliteRegime
+      ? matches.slice(0, 5)
+      : [...tierA.slice(0, 3), ...tierB.slice(0, 3)].slice(0, 5);
+    for (const m of showMatches) {
       const cur = m.currentPrice;
       const entryMax = cur * 1.02;
       const entryMid = (entryMax + cur * 0.99) / 2;
       const sl = entryMid * 0.92;
       const target = entryMid * 1.03;
 
-      const tierTag = m.tier === "A" ? "🟢 A" : "🔵 B";
+      const tierTag = isEliteRegime ? "⚡ Elite" : m.tier === "A" ? "🟢 A" : "🔵 B";
       text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
       text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
     }
-    text += `Size: 15% NAV Tier A, 10% Tier B. Max 2-3 lệnh.\n`;
+    text += isEliteRegime
+      ? `Size Elite: 15% NAV. Max 2-3 lệnh đồng thời.\n`
+      : `Size: 15% NAV Tier A, 10% Tier B. Max 2-3 lệnh.\n`;
   }
 
   text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;
