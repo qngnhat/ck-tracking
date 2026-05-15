@@ -1401,7 +1401,14 @@ window.__SSI_RANKING__ = (function () {
     // T+ quét 199 mã Large+Mid (median turnover ≥ 3 tỷ/ngày) — match backtest
     // universe của Vol Climax Bounce. Hardcoded để pre-filter, tránh scan
     // 656 mã full HOSE+HNX (waste vì sẽ bị turnover filter loại sau).
-    const stocks = LARGE_MID_UNIVERSE.map((code) => ({
+    // Universe: prefer FULL_UNIVERSE (HOSE+HNX+UPCOM ~1411 mã, set bởi full_universe.js)
+    // Fallback LARGE_MID_UNIVERSE 199 mã nếu full_universe.js chưa load.
+    // Detector tự filter turnover ≥ 3 tỷ/ngày → mã penny vẫn bị reject ngay,
+    // không phá edge backtest. Scan thêm UPCOM để catch các mã ngoài Large+Mid.
+    const universe = (typeof window !== "undefined" && Array.isArray(window.FULL_UNIVERSE))
+      ? window.FULL_UNIVERSE
+      : LARGE_MID_UNIVERSE;
+    const stocks = universe.map((code) => ({
       symbol: code,
       sector: getSector(code),
     }));
@@ -1426,7 +1433,8 @@ window.__SSI_RANKING__ = (function () {
 
     // Foreign flow fetch chỉ cho mã trong curated universe (large/mid caps)
     // để speed up scan 2x. NN signal worth +1.5/13 max.
-    const batchSize = 20;
+    // Batch 30 (vs 20 cũ) — 1411 mã: ~47 batches × 700ms = ~33s. Acceptable với progress bar.
+    const batchSize = 30;
     let done = 0;
     for (let i = 0; i < stocks.length; i += batchSize) {
       const batch = stocks.slice(i, i + batchSize);

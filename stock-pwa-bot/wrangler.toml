@@ -10,8 +10,11 @@ crons = [
   # Mỗi 3 phút từ 02:00 → 07:57 UTC, weekdays (~ 9:00-14:57 VN time)
   # Worker scheduled() tự skip nếu ngoài phiên (lunch break, weekend, holiday)
   "*/3 2-7 * * 1-5",
-  # EOD digest 14:50 VN (7:50 UTC) — gửi summary cuối phiên (Phase 4)
-  "50 7 * * 1-5"
+  # EOD digest 14:50 VN (7:50 UTC) — gửi summary cuối phiên + init multi-stage scan
+  "50 7 * * 1-5",
+  # Multi-stage scan chunks mỗi 1 phút từ 08:00 → 08:59 UTC (~ 15:00-15:59 VN)
+  # Process 35 mã/chunk × 41 chunks = full universe (1411 mã) sau ~41 min
+  "* 8 * * 1-5"
 ]
 
 # Notes:

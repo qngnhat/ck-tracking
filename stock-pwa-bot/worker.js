@@ -1,3 +1,5 @@
+import { FULL_UNIVERSE } from "./full_universe_data.js";
+
 /**
  * Cloudflare Worker — Stock PWA Telegram Bot
  *
@@ -139,6 +141,47 @@ export default {
       ctx.waitUntil(checkSpikeAlerts(env));
       return new Response("Spike alert check triggered", { status: 200 });
     }
+    if (url.pathname === "/scan-init" && request.method === "POST") {
+      // Manual trigger full-universe scan init
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(initScan(env));
+      return new Response("Scan init triggered (will take ~40 min)", { status: 200 });
+    }
+    if (url.pathname === "/scan-chunk" && request.method === "POST") {
+      // Manual trigger next chunk
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(processScanChunk(env));
+      return new Response("Scan chunk triggered", { status: 200 });
+    }
+    if (url.pathname === "/scan-status" && request.method === "GET") {
+      // Read scan state (debug)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const state = await getScanState(env);
+      if (state) {
+        // Trim partial JSONs cho readability
+        const compact = { ...state };
+        try {
+          compact.climax_count = JSON.parse(state.climax_partial || "[]").length;
+          compact.momentum_count = JSON.parse(state.momentum_partial || "[]").length;
+          delete compact.climax_partial;
+          delete compact.momentum_partial;
+        } catch {}
+        return new Response(JSON.stringify(compact, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("No scan state", { status: 404 });
+    }
     if (url.pathname === "/spike-state" && request.method === "GET") {
       // Read active picks state (debug)
       const secret = url.searchParams.get("secret");
@@ -156,9 +199,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    // Multi-cron dispatch dựa trên event.cron expression match.
-    // - "*/3 2-7 * * 1-5" → check triggers (mỗi 3 min trong phiên)
-    // - "50 7 * * 1-5"   → EOD digest (14:50 VN cuối phiên)
+    // Multi-cron dispatch:
+    // - "*/3 2-7 * * 1-5" → intraday watch + spike alerts (mỗi 3 min trong phiên)
+    // - "50 7 * * 1-5"   → EOD digest (14:50 VN) + init multi-stage scan
+    // - "* 8 * * 1-5"    → process scan chunks (mỗi 1 min, 15:00-15:59 VN)
     const cron = event.cron || "";
     if (cron === "50 7 * * 1-5") {
       // EOD digest — VN holiday vẫn skip
@@ -166,15 +210,22 @@ export default {
         console.log("[cron-eod] skip — VN holiday");
         return;
       }
-      console.log("[cron-eod] EOD digest fired at", new Date().toISOString());
+      console.log("[cron-eod] EOD fired at", new Date().toISOString());
       // Per-user watchlist digest (cho user có watches active)
       ctx.waitUntil(sendEodDigest(env));
-      // Market digest (VN-Index + top gainers/losers/vol + Bắt đáy T+)
-      // Gửi cho tất cả user connected, kể cả không có watch
+      // Quick 35-mã digest (sent immediately, ~30s after market close)
       ctx.waitUntil(sendMarketDigest(env));
+      // Init multi-stage full-universe scan (sẽ finalize ~15:30 VN)
+      ctx.waitUntil(initScan(env));
       return;
     }
-    // Default: check triggers (mỗi 3 min)
+    if (cron === "* 8 * * 1-5") {
+      // Chunked scan processing during 15:00-15:59 VN
+      if (isVnHoliday()) return;
+      ctx.waitUntil(processScanChunk(env));
+      return;
+    }
+    // Default: */3 intraday check triggers + spike
     if (!isVnTradingNow()) {
       console.log("[cron] skip — outside VN trading session", new Date().toISOString());
       return;
@@ -719,6 +770,184 @@ async function scanVolClimaxMatches() {
   return result.matches;
 }
 
+// ── Multi-stage EOD scan: FULL_UNIVERSE (1411 mã) chunked qua nhiều cron ticks ──
+// Free tier 50 subreq/invocation → chunk 35 mã. 1411/35 = ~41 chunks × 1 min = ~41 min.
+// Schedule: EOD 14:50 init → process chunks 15:00-15:59 → finalize sau chunk cuối.
+
+const CHUNK_SIZE = 35;
+
+async function getScanState(env) {
+  const sb = sbClient(env);
+  const rows = await sbQuery(sb, "scan_state", { select: "*", eq: { id: "main" } });
+  return rows?.[0] || null;
+}
+
+async function setScanState(env, data) {
+  const sb = sbClient(env);
+  return sbUpdate(sb, "scan_state", { eq: { id: "main" }, data });
+}
+
+async function initScan(env) {
+  // Fetch VNI regime trước để store
+  let vniRegime = "neutral";
+  let vniRet20 = null;
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 35);
+    const cs = vni.closes;
+    if (cs.length >= 21) {
+      vniRet20 = ((cs[cs.length - 1] - cs[cs.length - 21]) / cs[cs.length - 21]) * 100;
+      if (vniRet20 < -5) vniRegime = "correction";
+      else if (vniRet20 > 3) vniRegime = "bull";
+    }
+  } catch (e) {
+    console.warn("[init-scan] VNI fetch fail:", e.message);
+  }
+
+  await setScanState(env, {
+    status: "in_progress",
+    scan_date: new Date().toISOString().slice(0, 10),
+    current_offset: 0,
+    total_universe: FULL_UNIVERSE.length,
+    climax_partial: "[]",
+    momentum_partial: "[]",
+    market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
+    vni_regime: vniRegime,
+    vni_ret20: vniRet20,
+    started_at: new Date().toISOString(),
+    completed_at: null,
+    error_count: 0,
+  });
+  console.log(`[init-scan] started, ${FULL_UNIVERSE.length} mã, VNI regime=${vniRegime} (ret20=${vniRet20?.toFixed?.(1)}%)`);
+
+  // Immediately process first chunk to make progress (free tier 30s budget)
+  await processScanChunk(env);
+}
+
+async function processScanChunk(env) {
+  const state = await getScanState(env);
+  if (!state || state.status !== "in_progress") {
+    return;  // No active scan
+  }
+  const offset = state.current_offset || 0;
+  const total = state.total_universe || FULL_UNIVERSE.length;
+  if (offset >= total) {
+    await finalizeScan(env, state);
+    return;
+  }
+
+  const chunk = FULL_UNIVERSE.slice(offset, offset + CHUNK_SIZE);
+  console.log(`[chunk] processing ${offset}-${offset + chunk.length}/${total}`);
+
+  const results = await Promise.all(chunk.map(async (sym) => {
+    try {
+      const data = await fetchVndHistory(sym, 220);
+      return {
+        symbol: sym,
+        climax: detectVolClimaxBounce(data),
+        momentum: detectStrengthContinuation(data),
+        stats: computeStockStats(data),
+      };
+    } catch (e) {
+      return null;
+    }
+  }));
+
+  // Merge into partial state
+  const climaxPartial = JSON.parse(state.climax_partial || "[]");
+  const momentumPartial = JSON.parse(state.momentum_partial || "[]");
+  const marketStats = JSON.parse(state.market_stats || "{}");
+  let upCount = marketStats.upCount || 0;
+  let downCount = marketStats.downCount || 0;
+  let totalTurnover = marketStats.totalTurnover || 0;
+  let totalChange = marketStats.totalChange || 0;
+  let totalScanned = marketStats.totalScanned || 0;
+
+  for (const r of results) {
+    if (!r) continue;
+    if (r.stats) {
+      totalScanned++;
+      totalChange += r.stats.changePct;
+      totalTurnover += r.stats.turnover;
+      if (r.stats.changePct > 0) upCount++;
+      else if (r.stats.changePct < 0) downCount++;
+    }
+    if (r.climax) climaxPartial.push({ symbol: r.symbol, ...r.climax });
+    if (r.momentum) momentumPartial.push({ symbol: r.symbol, ...r.momentum });
+  }
+
+  const newOffset = offset + chunk.length;
+  await setScanState(env, {
+    current_offset: newOffset,
+    climax_partial: JSON.stringify(climaxPartial),
+    momentum_partial: JSON.stringify(momentumPartial),
+    market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
+    last_chunk_at: new Date().toISOString(),
+  });
+
+  console.log(`[chunk] done ${offset}→${newOffset} · climax+${results.filter(r => r?.climax).length} momentum+${results.filter(r => r?.momentum).length}`);
+
+  if (newOffset >= total) {
+    const finalState = {
+      ...state,
+      current_offset: newOffset,
+      climax_partial: JSON.stringify(climaxPartial),
+      momentum_partial: JSON.stringify(momentumPartial),
+      market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
+    };
+    await finalizeScan(env, finalState);
+  }
+}
+
+async function finalizeScan(env, state) {
+  console.log(`[finalize] scan complete, building digest`);
+
+  const climaxRaw = JSON.parse(state.climax_partial || "[]");
+  const momentumRaw = JSON.parse(state.momentum_partial || "[]");
+  const marketStats = JSON.parse(state.market_stats || "{}");
+  const isEliteRegime = state.vni_regime === "correction";
+  const isMomentumRegime = state.vni_regime === "bull" || state.vni_regime === "neutral";
+
+  const matches = climaxRaw
+    .map((m) => ({ ...m, isElite: isEliteRegime }))
+    .sort((a, b) => (b.bounceStrength || 0) - (a.bounceStrength || 0));
+  const momentumMatches = isMomentumRegime
+    ? momentumRaw.sort((a, b) => (b.momentumStrength || 0) - (a.momentumStrength || 0))
+    : [];
+
+  // Persist to active_picks
+  await persistClimaxMatches(env, matches);
+  await persistMomentumMatches(env, momentumMatches);
+
+  // Send full-coverage digest
+  const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
+  const fullDigestResult = {
+    matches,
+    momentumMatches,
+    market: {
+      avgChange,
+      upCount: marketStats.upCount || 0,
+      downCount: marketStats.downCount || 0,
+      totalTurnover: marketStats.totalTurnover || 0,
+      totalScanned: marketStats.totalScanned || 0,
+    },
+    gainers: [],   // chunked scan không track per-mã, skip top gainers
+    losers: [],
+    topVol: [],
+    vniRegime: state.vni_regime,
+    vniRet20: state.vni_ret20,
+    isEliteRegime,
+    isMomentumRegime,
+    fullCoverage: true,
+  };
+  await sendMarketDigest(env, fullDigestResult);
+
+  await setScanState(env, {
+    status: "completed",
+    completed_at: new Date().toISOString(),
+  });
+  console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, sent digest`);
+}
+
 // ── Spike-alert state: persist climax matches to climax_active_picks ──
 
 const SPIKE_HOLD_DAYS = 7;          // calendar days ~ 5 trading days
@@ -897,16 +1126,20 @@ async function checkSpikeAlerts(env) {
 }
 
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
-async function sendMarketDigest(env) {
-  console.log("[digest] scanning universe + market stats...");
-  const result = await scanAllSymbols();
+async function sendMarketDigest(env, precomputedResult = null) {
+  let result;
+  if (precomputedResult) {
+    console.log(`[digest] using precomputed (full coverage ${precomputedResult.fullCoverage ? "yes" : "no"})`);
+    result = precomputedResult;
+  } else {
+    console.log("[digest] scanning universe + market stats...");
+    result = await scanAllSymbols();
+    // Persist khi quét fresh (chunked scan đã persist trong finalizeScan)
+    await persistClimaxMatches(env, result.matches);
+    await persistMomentumMatches(env, result.momentumMatches || []);
+  }
   const { matches, market, gainers, losers, topVol } = result;
   console.log(`[digest] ${matches.length} climax · ${market.upCount}↑/${market.downCount}↓ · avg ${market.avgChange.toFixed(2)}%`);
-
-  // Persist climax matches → active_picks (used by spike-alert intraday cron)
-  await persistClimaxMatches(env, matches);
-  // Persist momentum matches → active_picks với tier='Momentum' (~30 phiên hold)
-  await persistMomentumMatches(env, result.momentumMatches || []);
 
   // Fetch VN-Index để có index data
   let vniInfo = null;
@@ -971,23 +1204,24 @@ async function sendMarketDigest(env) {
   text += `  ${breadthArrow} ${market.upCount}↑ / ${market.downCount}↓ · avg ${market.avgChange >= 0 ? "+" : ""}${market.avgChange.toFixed(2)}%\n`;
   text += `  💧 Thanh khoản: ${fmtBn(market.totalTurnover)} tỷ\n\n`;
 
-  // Top gainers
-  text += `🟢 *Top 5 tăng*:\n`;
-  for (const g of gainers) {
-    text += `  ${g.symbol}  +${g.stats.changePct.toFixed(1)}% @ ${g.stats.cur.toFixed(2)}\n`;
-  }
-
-  // Top losers
-  text += `\n🔴 *Top 5 giảm*:\n`;
-  for (const l of losers) {
-    text += `  ${l.symbol}  ${l.stats.changePct.toFixed(1)}% @ ${l.stats.cur.toFixed(2)}\n`;
-  }
-
-  // Top vol
-  text += `\n💧 *Top thanh khoản*:\n`;
-  for (const t of topVol) {
-    const sign = t.stats.changePct >= 0 ? "+" : "";
-    text += `  ${t.symbol}  ${fmtBn(t.stats.turnover)}tỷ (${sign}${t.stats.changePct.toFixed(1)}%)\n`;
+  // Top gainers/losers/vol — skip nếu chunked scan (không track per-mã top5)
+  if (gainers && gainers.length > 0) {
+    text += `🟢 *Top 5 tăng*:\n`;
+    for (const g of gainers) {
+      text += `  ${g.symbol}  +${g.stats.changePct.toFixed(1)}% @ ${g.stats.cur.toFixed(2)}\n`;
+    }
+    text += `\n🔴 *Top 5 giảm*:\n`;
+    for (const l of losers) {
+      text += `  ${l.symbol}  ${l.stats.changePct.toFixed(1)}% @ ${l.stats.cur.toFixed(2)}\n`;
+    }
+    text += `\n💧 *Top thanh khoản*:\n`;
+    for (const t of topVol) {
+      const sign = t.stats.changePct >= 0 ? "+" : "";
+      text += `  ${t.symbol}  ${fmtBn(t.stats.turnover)}tỷ (${sign}${t.stats.changePct.toFixed(1)}%)\n`;
+    }
+  } else if (result.fullCoverage) {
+    text += `🌐 *Full coverage scan*: ${market.totalScanned} mã HOSE+HNX+UPCOM\n`;
+    text += `_(Top gainers/losers skip để fit Cloudflare free tier limits)_\n`;
   }
 
   // VN-Index regime banner cho Tier Elite

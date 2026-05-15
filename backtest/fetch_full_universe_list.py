@@ -36,7 +36,11 @@ def main():
     hnx = fetch_floor("HNX")
     print(f"  {len(hnx)} HNX symbols")
 
-    all_stocks = hose + hnx
+    print("Fetching UPCOM list...")
+    upcom = fetch_floor("UPCOM")
+    print(f"  {len(upcom)} UPCOM symbols")
+
+    all_stocks = hose + hnx + upcom
     valid = []
     for s in all_stocks:
         code = (s.get("code") or "").strip().upper()
@@ -46,14 +50,44 @@ def main():
     valid = sorted(set(valid))
     print(f"\nTotal valid: {len(valid)} symbols")
 
+    # Write txt for reference
     out = BASE_DIR / "universe_full.txt"
     with open(out, "w") as f:
-        f.write("# Full HOSE + HNX universe — fetched từ VND API\n")
+        f.write("# Full HOSE + HNX + UPCOM universe — fetched từ VND API\n")
         f.write(f"# Total: {len(valid)} symbols\n\n")
         for code, floor, name in valid:
-            f.write(f"{code}\n")
-
+            f.write(f"{code}  # {floor}\n")
     print(f"Saved → {out}")
+
+    # Generate JS array for stock-pwa import
+    pwa_out = BASE_DIR.parent / "stock-pwa" / "full_universe.js"
+    by_floor = {"HOSE": [], "HNX": [], "UPCOM": []}
+    for code, floor, _ in valid:
+        if floor in by_floor:
+            by_floor[floor].append(code)
+    with open(pwa_out, "w") as f:
+        f.write("// Auto-generated bởi backtest/fetch_full_universe_list.py\n")
+        f.write(f"// Total: {len(valid)} symbols (HOSE+HNX+UPCOM, status:LISTED)\n")
+        f.write(f"// HOSE: {len(by_floor['HOSE'])} · HNX: {len(by_floor['HNX'])} · UPCOM: {len(by_floor['UPCOM'])}\n\n")
+        f.write("(function(){\n")
+        all_codes = [c for c, _, _ in valid]
+        f.write("  var FULL_UNIVERSE = [\n")
+        for i in range(0, len(all_codes), 10):
+            chunk = all_codes[i:i+10]
+            f.write("    " + ", ".join(f'"{c}"' for c in chunk) + ",\n")
+        f.write("  ];\n\n")
+        f.write("  var UNIVERSE_BY_FLOOR = {\n")
+        for floor, codes in by_floor.items():
+            f.write(f'    {floor}: [\n')
+            for i in range(0, len(codes), 10):
+                chunk = codes[i:i+10]
+                f.write("      " + ", ".join(f'"{c}"' for c in chunk) + ",\n")
+            f.write("    ],\n")
+        f.write("  };\n\n")
+        f.write("  window.FULL_UNIVERSE = FULL_UNIVERSE;\n")
+        f.write("  window.UNIVERSE_BY_FLOOR = UNIVERSE_BY_FLOOR;\n")
+        f.write("})();\n")
+    print(f"Saved → {pwa_out}")
 
 
 if __name__ == "__main__":
