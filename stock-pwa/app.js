@@ -648,6 +648,68 @@
     }
   }
 
+  // Detect "đỉnh sóng / phân phối" — overbought stocks late in their rally.
+  // Pain point from earlier: user bought CDC/LPB/GEX with RSI 65-85 + vol drying up,
+  // result -3 to -6% short hold. App previously had no pre-trade warning.
+  // Severity 'strong' = all 3 conditions, 'mild' = 2 of 3. No warning if <2.
+  function detectOverboughtTopping(r) {
+    const ret1m = r.performance?.["1th"];   // 1 tháng (~22 phiên) return %
+    const rsi = r.rsi;
+    const volRatio = r.volRatio;
+    if (rsi == null || volRatio == null || ret1m == null) return null;
+
+    const flags = [];
+    let score = 0;
+    if (rsi >= 80) { flags.push("rsi_strong"); score += 2; }
+    else if (rsi >= 70) { flags.push("rsi_mild"); score += 1; }
+
+    if (ret1m >= 25) { flags.push("rally_strong"); score += 2; }
+    else if (ret1m >= 15) { flags.push("rally_mild"); score += 1; }
+
+    if (volRatio <= 0.6) { flags.push("vol_dry_strong"); score += 2; }
+    else if (volRatio <= 0.85) { flags.push("vol_dry_mild"); score += 1; }
+
+    if (score < 3) return null;  // Need at least one strong or mix of mild
+
+    const severity = score >= 5 ? "strong" : "mild";
+    const reasons = [];
+    if (rsi >= 70) reasons.push(`RSI <b>${rsi.toFixed(0)}</b> (${rsi >= 80 ? "CỰC " : ""}overbought, >${rsi >= 80 ? 80 : 70})`);
+    if (ret1m >= 15) reasons.push(`Đã rally <b>+${ret1m.toFixed(1)}%</b> trong 1 tháng (đỉnh sóng)`);
+    if (volRatio <= 0.85) reasons.push(`Vol hôm nay <b>${volRatio.toFixed(2)}×</b> TB20 (không có lực mua mới — phân phối)`);
+
+    // MA20 = realistic pullback target
+    const ma20 = r.ma20;
+    const pullbackTarget = ma20 && ma20 < r.current ? ma20 : r.current * 0.92;
+
+    return { severity, score, flags, reasons, pullbackTarget };
+  }
+
+  function renderOverboughtBanner(warning, r) {
+    if (!warning) return "";
+    const cls = warning.severity === "strong" ? "warn-strong" : "warn-mild";
+    const icon = warning.severity === "strong" ? "🚨" : "⚠️";
+    const titleText = warning.severity === "strong"
+      ? "ĐỈNH SÓNG / PHÂN PHỐI — CỰC NGUY HIỂM"
+      : "Cảnh báo đỉnh sóng / phân phối";
+
+    return `
+      <div class="overbought-banner ${cls}">
+        <div class="ob-title">${icon} <b>${titleText}</b></div>
+        <div class="ob-reasons">
+          ${warning.reasons.map((x) => `<div class="ob-reason">• ${x}</div>`).join("")}
+        </div>
+        <div class="ob-action">
+          <b>👉 KHÔNG khuyến khích mua đỉnh</b>
+        </div>
+        <div class="ob-tips">
+          <div>• Đợi pullback về MA20 (~<b>${fp(warning.pullbackTarget)}</b>) hoặc RSI rớt &lt;60</div>
+          <div>• Hoặc đợi nến rút chân + volume xác nhận trở lại</div>
+          <div>• Nếu vẫn vào → size nhỏ (5% NAV), SL chặt, không hold qua T+5</div>
+        </div>
+      </div>
+    `;
+  }
+
   function renderOverviewTabContent(r) {
     const changeClass = r.dayChange >= 0 ? "up" : "down";
     const changeSign = r.dayChange >= 0 ? "+" : "";
@@ -672,7 +734,10 @@
     const companyLine = companyParts.length
       ? `<div class="an-company-line">${companyParts.join(" · ")}</div>`
       : "";
+    const overboughtWarning = detectOverboughtTopping(r);
+    const overboughtBanner = renderOverboughtBanner(overboughtWarning, r);
     return `
+      ${overboughtBanner}
       <!-- Header card -->
       <div class="an-card full-width">
         <button class="watchlist-toggle ${inWatchlist ? 'active' : ''}" id="watchlist-toggle" data-symbol="${r.symbol}" title="${inWatchlist ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">

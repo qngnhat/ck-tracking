@@ -2366,6 +2366,70 @@ body.is-offline {
 .tplus-banner-elite .tplus-exp-title {
   color: #ffb74d;
 }
+
+/* ── Overbought / Topping warning banner ── */
+.overbought-banner {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.overbought-banner.warn-mild {
+  background: rgba(255, 152, 0, 0.08);
+  border-color: rgba(255, 152, 0, 0.45);
+  color: #ffb74d;
+}
+.overbought-banner.warn-strong {
+  background: linear-gradient(135deg, rgba(255, 82, 82, 0.12), rgba(255, 87, 34, 0.1));
+  border-color: #ff5252;
+  color: #ff8a80;
+  box-shadow: 0 0 12px rgba(255, 82, 82, 0.2);
+}
+.ob-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.ob-reasons {
+  margin: 6px 0 10px;
+}
+.ob-reason {
+  font-size: 12px;
+  color: #ccc;
+  padding: 1px 0;
+}
+.ob-reason b {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.ob-action {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 8px 0;
+  font-size: 13px;
+}
+.ob-action b {
+  font-size: 14px;
+}
+.overbought-banner.warn-strong .ob-action b {
+  color: #ff5252;
+}
+.overbought-banner.warn-mild .ob-action b {
+  color: #ff9800;
+}
+.ob-tips {
+  font-size: 11.5px;
+  color: #bbb;
+  padding-top: 4px;
+}
+.ob-tips div {
+  padding: 2px 0;
+}
+.ob-tips b {
+  color: #fff;
+}
 .climax-subtitle {
   font-size: 13px;
   color: #aaa;
