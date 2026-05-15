@@ -2430,6 +2430,80 @@ body.is-offline {
 .ob-tips b {
   color: #fff;
 }
+
+/* ── Daily Briefing narrative card ── */
+.home-briefing-card {
+  background: linear-gradient(135deg, rgba(79, 195, 247, 0.05), rgba(255, 152, 0, 0.03));
+  border: 1px solid rgba(79, 195, 247, 0.2);
+}
+.daily-briefing {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #d0d0d0;
+}
+.db-section {
+  margin: 0 0 12px;
+  padding: 0;
+}
+.db-section:last-of-type {
+  margin-bottom: 8px;
+}
+.db-section b {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.db-section b.up { color: #4CAF50; }
+.db-section b.down { color: #ff5252; }
+.db-tag-correction {
+  color: #ffb74d !important;
+  padding: 1px 6px;
+  background: rgba(255, 152, 0, 0.12);
+  border-radius: 4px;
+}
+.db-tag-bull {
+  color: #4fc3f7 !important;
+  padding: 1px 6px;
+  background: rgba(79, 195, 247, 0.12);
+  border-radius: 4px;
+}
+.db-tag-neutral {
+  color: #b0bec5 !important;
+  padding: 1px 6px;
+  background: rgba(120, 144, 156, 0.12);
+  border-radius: 4px;
+}
+.db-tag-warn {
+  color: #ff5252 !important;
+}
+.db-tag-target {
+  color: #4CAF50 !important;
+}
+.db-recs {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(76, 175, 80, 0.06);
+  border-left: 3px solid #4CAF50;
+  border-radius: 6px;
+}
+.db-recs-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a5d6a7;
+  margin-bottom: 6px;
+}
+.db-recs-list {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.db-recs-list li {
+  margin-bottom: 4px;
+  color: #d0d0d0;
+}
+.db-recs-list b {
+  color: #fff;
+}
 .climax-subtitle {
   font-size: 13px;
   color: #aaa;

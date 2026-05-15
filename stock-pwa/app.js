@@ -3612,6 +3612,154 @@
   }
 
   // Portfolio MTD return (rough, from cached analysis)
+  // Daily Briefing narrative — như GPT-coach tóm tắt sáng.
+  // Reads cached regime + activeClimaxPicks + portfolio holdings → composes story.
+  function generateDailyBriefing(ctx) {
+    const { regime, vniRet20, climaxPicks, momentumPicks, holdings, mtdReturn } = ctx;
+    const sections = [];
+
+    // Section 1: Market regime
+    let marketPara;
+    if (regime === "correction") {
+      marketPara = `📊 VN-Index <b>${vniRet20.toFixed(1)}%</b> trong 20 phiên → đang <b class="db-tag-correction">correction</b>. ✅ <b>Climax Elite</b> regime ACTIVE — Win 61%, Sharpe 1.71 (backtest 8.5y).`;
+    } else if (regime === "bull") {
+      marketPara = `📊 VN-Index <b>+${vniRet20.toFixed(1)}%</b> trong 20 phiên → đang <b class="db-tag-bull">bull</b>. ⚠️ Climax pattern edge thấp (Win 28-35%). 🚀 <b>Momentum Swing</b> là strategy phù hợp.`;
+    } else if (vniRet20 != null) {
+      marketPara = `📊 VN-Index <b>${vniRet20 >= 0 ? "+" : ""}${vniRet20.toFixed(1)}%</b> trong 20 phiên → <b class="db-tag-neutral">neutral</b>. Climax pattern edge bình thường.`;
+    } else {
+      marketPara = `📊 Chưa có data VN-Index regime — bấm Scan để update.`;
+    }
+    sections.push(`<p class="db-section">${marketPara}</p>`);
+
+    // Section 2: Signals
+    const climaxCount = climaxPicks.length;
+    const momentumCount = momentumPicks.length;
+    let signalPara;
+    if (climaxCount === 0 && momentumCount === 0) {
+      signalPara = `🎯 <b>Không có signal hôm nay</b> — pattern hiếm (Climax ~0.8/day, Momentum ~0.8/day với universe 1411 mã). Ngày 0-1 match là bình thường.`;
+    } else {
+      const parts = [];
+      if (climaxCount > 0) {
+        const top = climaxPicks.slice(0, 3).map((p) => p.symbol).join(", ");
+        const moreClimax = climaxCount > 3 ? ` +${climaxCount - 3}` : "";
+        parts.push(`<b>${climaxCount} Climax</b> (${top}${moreClimax})`);
+      }
+      if (momentumCount > 0) {
+        const top = momentumPicks.slice(0, 3).map((p) => p.symbol).join(", ");
+        const moreMomentum = momentumCount > 3 ? ` +${momentumCount - 3}` : "";
+        parts.push(`<b>${momentumCount} Momentum</b> (${top}${moreMomentum})`);
+      }
+      signalPara = `🎯 Hôm nay phát hiện ${parts.join(" + ")}.`;
+    }
+    sections.push(`<p class="db-section">${signalPara}</p>`);
+
+    // Section 3: Portfolio
+    let critical = [];
+    let targetHit = [];
+    if (holdings.length === 0) {
+      sections.push(`<p class="db-section">💼 Chưa có danh mục — bắt đầu với 2-3 mã, size 10-15% NAV/lệnh để học pattern.</p>`);
+    } else {
+      critical = holdings.filter((h) => h.action?.priority === 1);
+      targetHit = holdings.filter((h) => h.pnlPct >= 5);
+
+      let portPara = `💼 Danh mục <b>${holdings.length} mã</b>`;
+      if (mtdReturn != null) {
+        portPara += `, MTD <b class="${mtdReturn >= 0 ? 'up' : 'down'}">${mtdReturn >= 0 ? "+" : ""}${mtdReturn.toFixed(1)}%</b>`;
+      }
+      portPara += `.`;
+
+      const lines = [portPara];
+      if (critical.length > 0) {
+        const names = critical.map((h) => `<b>${h.symbol}</b> (${h.pnlPct.toFixed(1)}%)`).join(", ");
+        lines.push(`🚨 <b class="db-tag-warn">${critical.length} sát/thủng SL</b>: ${names} → cần action`);
+      }
+      if (targetHit.length > 0) {
+        const names = targetHit.map((h) => `<b>${h.symbol}</b> (+${h.pnlPct.toFixed(1)}%)`).join(", ");
+        lines.push(`🎯 <b class="db-tag-target">${targetHit.length} hit TP</b>: ${names} → cân nhắc chốt`);
+      }
+      if (critical.length === 0 && targetHit.length === 0) {
+        lines.push(`✅ Tất cả holdings ổn — hold theo plan, không action urgent.`);
+      }
+      sections.push(`<p class="db-section">${lines.join("<br>")}</p>`);
+    }
+
+    // Section 4: Recommendations (priority list)
+    const recs = [];
+    if (critical.length > 0) {
+      const first = critical[0];
+      recs.push(`Mở SSI iBoard → check <b>${first.symbol}</b> close ATC. Nếu thủng SL → đặt <b>Lệnh thường ATC bán</b> ngay.`);
+    }
+    if (climaxPicks.length > 0) {
+      const p = climaxPicks[0];
+      const entryMax = (p.entry_price * 1.02).toFixed(2);
+      recs.push(`Sáng mai 8:00-8:45 → đặt <b>LO mua ${p.symbol}</b> giá ≤ ${entryMax} (Climax T+3-5, target ${p.target_price.toFixed(2)}).`);
+    }
+    if (momentumPicks.length > 0 && climaxPicks.length === 0) {
+      const m = momentumPicks[0];
+      const entryMax = (m.entry_price * 1.02).toFixed(2);
+      recs.push(`Sáng mai 8:00-8:45 → đặt <b>LO mua ${m.symbol}</b> giá ≤ ${entryMax} (Momentum hold ~20 phiên, trailing 7%).`);
+    }
+    if (targetHit.length > 0 && critical.length === 0) {
+      const first = targetHit[0];
+      recs.push(`<b>${first.symbol}</b> đã +${first.pnlPct.toFixed(1)}% → cân nhắc <b>GTD bán</b> 1/2 chốt lời.`);
+    }
+    if (recs.length === 0 && climaxCount === 0 && momentumCount === 0 && holdings.length === 0) {
+      recs.push(`Hôm nay không action gì. Đợi signal Telegram hoặc thị trường correction.`);
+    }
+
+    if (recs.length > 0) {
+      sections.push(`<div class="db-recs"><div class="db-recs-title">📌 Ưu tiên hôm nay:</div><ol class="db-recs-list">${recs.map((r) => `<li>${r}</li>`).join("")}</ol></div>`);
+    }
+
+    return sections.join("");
+  }
+
+  // Compose context cho generateDailyBriefing từ state hiện tại.
+  function buildBriefingContext() {
+    // Regime + ret20
+    let regime = "neutral";
+    let vniRet20 = null;
+    try {
+      const cached = JSON.parse(localStorage.getItem("vnindex_regime_v1") || "null");
+      if (cached?.data?.ret20 != null) {
+        vniRet20 = cached.data.ret20;
+        if (vniRet20 < -5) regime = "correction";
+        else if (vniRet20 > 3) regime = "bull";
+      }
+    } catch {}
+
+    // Active picks (từ Supabase via fetchActiveClimaxPicks)
+    const climaxPicks = [];
+    const momentumPicks = [];
+    for (const p of activeClimaxPicks.values()) {
+      if (p.tier === "Momentum") momentumPicks.push(p);
+      else climaxPicks.push(p);
+    }
+
+    // Holdings + verdicts
+    const holdingsRaw = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+    const holdings = holdingsRaw.map((h) => {
+      const ana = portfolioAnalysisCache[h.symbol];
+      if (!ana) return { symbol: h.symbol, pnlPct: 0 };
+      const cur = ana.current;
+      const pnlPct = h.cost_basis > 0
+        ? ((cur * h.qty - h.cost_basis) / h.cost_basis) * 100
+        : 0;
+      const inTplusTop = activeClimaxPicks.has(h.symbol);
+      const action = window.__SSI_PORTFOLIO__?.recommendAction?.(h, ana, inTplusTop);
+      return { symbol: h.symbol, pnlPct, rsi: ana.rsi, action };
+    });
+
+    return {
+      regime,
+      vniRet20,
+      climaxPicks,
+      momentumPicks,
+      holdings,
+      mtdReturn: getPortfolioMtdReturn(),
+    };
+  }
+
   function getPortfolioMtdReturn() {
     try {
       const pf = window.__SSI_PORTFOLIO__;
@@ -4455,6 +4603,9 @@
     const container = $("home-container");
     if (!container) return;
 
+    // Fetch active picks for briefing context (non-blocking — uses cache if fresh)
+    fetchActiveClimaxPicks().catch(() => {});
+
     // 1. Greeting card (immediate)
     const greeting = getGreeting();
     const dateStr = fmtFullDate();
@@ -4542,9 +4693,15 @@
         </div>
       </div>
 
+      <!-- Daily Briefing — narrative tóm tắt sáng -->
+      <div class="home-card home-briefing-card">
+        <div class="home-card-title">📰 Briefing</div>
+        <div class="daily-briefing">${generateDailyBriefing(buildBriefingContext())}</div>
+      </div>
+
       <!-- Hôm nay nên làm -->
       <div class="home-card">
-        <div class="home-card-title">📋 Hôm nay nên làm</div>
+        <div class="home-card-title">📋 Hôm nay nên làm (rule-based)</div>
         <ul class="home-actions">
           ${actions.map((a) => `<li><span class="home-action-icon">${a.icon}</span><span>${a.text}</span></li>`).join("")}
         </ul>
