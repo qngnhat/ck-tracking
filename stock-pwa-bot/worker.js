@@ -159,6 +159,23 @@ export default {
       ctx.waitUntil(processScanChunk(env));
       return new Response("Scan chunk triggered", { status: 200 });
     }
+    if (url.pathname === "/heartbeat" && request.method === "GET") {
+      // Read recent cron heartbeats (debug — verify cron actually fired)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const sb = sbClient(env);
+      // Last 50 fires, newest first
+      const r = await fetch(`${sb.url}/rest/v1/cron_heartbeat?select=*&order=fired_at.desc&limit=50`, {
+        headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` },
+      });
+      const data = r.ok ? await r.json() : [];
+      return new Response(JSON.stringify(data, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/scan-status" && request.method === "GET") {
       // Read scan state (debug)
       const secret = url.searchParams.get("secret");
@@ -208,9 +225,11 @@ export default {
       // EOD digest — VN holiday vẫn skip
       if (isVnHoliday()) {
         console.log("[cron-eod] skip — VN holiday");
+        ctx.waitUntil(logHeartbeat(env, "eod-skip", { reason: "vn-holiday" }));
         return;
       }
       console.log("[cron-eod] EOD fired at", new Date().toISOString());
+      ctx.waitUntil(logHeartbeat(env, "eod", { event_cron: cron }));
       // Per-user watchlist digest (cho user có watches active)
       ctx.waitUntil(sendEodDigest(env));
       // Quick 35-mã digest (sent immediately, ~30s after market close)
@@ -231,6 +250,7 @@ export default {
       return;
     }
     console.log("[cron] check triggers + spike alerts fired at", new Date().toISOString());
+    ctx.waitUntil(logHeartbeat(env, "intraday", { event_cron: cron }));
     ctx.waitUntil(checkAllWatches(env));
     ctx.waitUntil(checkSpikeAlerts(env));
   },
@@ -1303,16 +1323,39 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;
 
+  // Heartbeat trước khi send để xác nhận tới đoạn này
+  await logHeartbeat(env, precomputedResult ? "digest-finalize" : "digest-quick", {
+    matches: matches.length,
+    momentum: (result.momentumMatches || []).length,
+    vniRegime: result.vniRegime,
+    chats: chats.length,
+    fullCoverage: !!result.fullCoverage,
+    text_length: text.length,
+  });
+
   let sent = 0;
+  const sendErrors = [];
   for (const chatId of chats) {
     try {
-      await tgSendMessage(env.BOT_TOKEN, chatId, text);
-      sent++;
+      const resp = await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      if (resp?.ok) {
+        sent++;
+      } else {
+        sendErrors.push({ chatId, resp });
+        console.warn(`[digest] send fail ${chatId}:`, JSON.stringify(resp));
+      }
     } catch (e) {
+      sendErrors.push({ chatId, error: e.message });
       console.warn(`[digest] send fail ${chatId}:`, e.message);
     }
   }
   console.log(`[digest] market digest sent to ${sent}/${chats.length} users`);
+  // Log delivery result để verify lần sau
+  await logHeartbeat(env, "digest-sent", {
+    sent,
+    total: chats.length,
+    errors: sendErrors,
+  });
 }
 
 async function sendClimaxAlerts(env) {
@@ -1752,4 +1795,23 @@ async function sbDelete(sb, table, opts) {
     return false;
   }
   return true;
+}
+
+async function logHeartbeat(env, cronName, detail = {}) {
+  try {
+    const sb = sbClient(env);
+    const url = `${sb.url}/rest/v1/cron_heartbeat`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        apikey: sb.key,
+        authorization: `Bearer ${sb.key}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ cron_name: cronName, detail }),
+    });
+  } catch (e) {
+    console.warn("[heartbeat] log fail:", e.message);
+  }
 }
