@@ -118,7 +118,7 @@ export default {
       // Data non-sensitive (same info derivable from VND public data).
       const sb = sbClient(env);
       const picks = await sbQuery(sb, "climax_active_picks", {
-        select: "symbol,signal_date,entry_price,target_price,tier,expires_at",
+        select: "symbol,signal_date,entry_price,target_price,tier,expires_at,nn_net_5d_bn,is_premium",
       });
       const active = (picks || []).filter((p) =>
         !p.expires_at || new Date(p.expires_at) > new Date()
@@ -886,12 +886,17 @@ async function processScanChunk(env) {
   const results = await Promise.all(chunk.map(async (sym) => {
     try {
       const data = await fetchVndHistory(sym, 220);
-      return {
-        symbol: sym,
-        climax: detectVolClimaxBounce(data),
-        momentum: detectStrengthContinuation(data),
-        stats: computeStockStats(data),
-      };
+      const climax = detectVolClimaxBounce(data);
+      const momentum = detectStrengthContinuation(data);
+      const stats = computeStockStats(data);
+      // ENRICH climax matches với foreign flow (NN net buy filter).
+      // Backtest 7.4y: Tier A + NN net>0 Sharpe 0.36 → 1.90 (5×).
+      // Chỉ fetch khi mã match → tránh subrequest pressure (matches hiếm).
+      let foreign = null;
+      if (climax) {
+        foreign = await fetchForeignDaily(sym, 7).catch(() => null);
+      }
+      return { symbol: sym, climax, momentum, stats, foreign };
     } catch (e) {
       fetchFails++;
       return null;
@@ -923,7 +928,16 @@ async function processScanChunk(env) {
       if (r.stats.changePct > 0) upCount++;
       else if (r.stats.changePct < 0) downCount++;
     }
-    if (r.climax) climaxPartial.push({ symbol: r.symbol, ...r.climax });
+    if (r.climax) {
+      // Enrich với NN net 5d nếu có foreign data
+      const nnNet5d = computeNnNet5d(r.foreign);
+      const isPremium = nnNet5d != null && nnNet5d > 0;
+      climaxPartial.push({
+        symbol: r.symbol, ...r.climax,
+        nn_net_5d_bn: nnNet5d != null ? +(nnNet5d / 1e9).toFixed(2) : null,
+        is_premium: isPremium,
+      });
+    }
     if (r.momentum) momentumPartial.push({ symbol: r.symbol, ...r.momentum });
   }
 
@@ -1049,15 +1063,18 @@ async function persistClimaxMatches(env, matches) {
     signal_date: today,
     entry_price: m.currentPrice,
     target_price: +(m.currentPrice * (1 + SPIKE_THRESHOLD_PCT / 100)).toFixed(4),
-    // Khi VNI in correction, store as Elite (override Tier A/B label).
-    tier: m.isElite ? "Elite" : m.tier,
+    // Tier hierarchy: Premium (climax + NN net buy 5d > 0, backtest Sharpe 1.90)
+    // > Elite (climax + VNI correction) > A (climax strict) > B (climax relax)
+    tier: m.is_premium ? "Premium" : m.isElite ? "Elite" : m.tier,
+    nn_net_5d_bn: m.nn_net_5d_bn ?? null,
+    is_premium: !!m.is_premium,
     expires_at: expiresAt,
     above_threshold: false,
     last_alert_at: null,
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
-  const eliteCount = rows.filter((r) => r.tier === "Elite").length;
-  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} matches saved (${eliteCount} Elite, expires ${expiresAt.slice(0, 10)})`);
+  const premiumCount = rows.filter((r) => r.tier === "Premium").length;
+  console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} matches saved (${premiumCount} Premium, ${eliteCount} Elite, expires ${expiresAt.slice(0, 10)})`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
@@ -1290,15 +1307,36 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   // Bắt đáy T+ section
   const isEliteRegime = result.isEliteRegime;
-  const tierA = matches.filter((m) => m.tier === "A");
-  const tierB = matches.filter((m) => m.tier === "B");
+  const premiumMatches = matches.filter((m) => m.is_premium);
+  const tierA = matches.filter((m) => m.tier === "A" && !m.is_premium);
+  const tierB = matches.filter((m) => m.tier === "B" && !m.is_premium);
+
+  // 💎 Premium section đầu tiên (NN net buy confirmed, Sharpe 1.90 vs base 0.36)
+  if (premiumMatches.length > 0) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `💎 *Premium picks* (${premiumMatches.length}) — Climax + NN net mua\n`;
+    text += `_Backtest 7.4y: Win 61%, Sharpe 1.90 vs Tier A base Sharpe 0.36._\n\n`;
+    const t1 = addTradingDays(today, 1);
+    const t3 = addTradingDays(today, 4);
+    const t5 = addTradingDays(today, 6);
+    for (const m of premiumMatches.slice(0, 5)) {
+      const cur = m.currentPrice;
+      const entryMax = cur * 1.02;
+      const target = cur * 1.03 * 0.995;
+      const sl = cur * 0.92;
+      const nnTag = m.nn_net_5d_bn != null ? `NN +${m.nn_net_5d_bn}B/5d` : "";
+      text += `💎 *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag}\n`;
+      text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
+    }
+    text += `Size Premium: có thể x1.5 NAV vs Tier A/B thông thường.\n`;
+  }
 
   text += `\n━━━━━━━━━━━━━━━\n`;
   text += `🔻 *Bắt đáy T+ (Vol Climax Bounce)*\n`;
   if (isEliteRegime) {
-    text += `⚡ ${matches.length} Tier Elite\n`;
+    text += `⚡ ${matches.length} Tier Elite (đã bao gồm Premium ở trên)\n`;
   } else {
-    text += `${tierA.length} Tier A · ${tierB.length} Tier B\n`;
+    text += `${premiumMatches.length} Premium · ${tierA.length} Tier A · ${tierB.length} Tier B\n`;
   }
 
   if (matches.length === 0) {
@@ -1542,6 +1580,36 @@ async function fetchVndHistory(symbol, days = 5) {
     closes: data.c,
     volumes: data.v,
   };
+}
+
+// ── Foreign flow (NN net buy/sell) ───────────────────
+// API: VND finfo trả về net buy/sell per day. Schema từ ranking.js fetchForeignDaily.
+async function fetchForeignDaily(symbol, daysBack = 7) {
+  const toDate = new Date().toISOString().split("T")[0];
+  const fromDate = new Date(Date.now() - daysBack * 24 * 3600 * 1000)
+    .toISOString().split("T")[0];
+  const url = `https://api-finfo.vndirect.com.vn/v4/foreigns?q=code:${symbol}~tradingDate:gte:${fromDate}~tradingDate:lte:${toDate}&size=200&sort=tradingDate:asc`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json",
+    },
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return json.data || [];
+}
+
+function computeNnNet5d(foreign) {
+  if (!foreign || foreign.length === 0) return null;
+  // Schema: each entry có { tradingDate, code, buyVal, sellVal, netVal, ... }
+  // netVal đơn vị: VND. Lấy 5 ngày gần nhất sum.
+  const sorted = [...foreign].sort((a, b) =>
+    new Date(b.tradingDate).getTime() - new Date(a.tradingDate).getTime()
+  );
+  const last5 = sorted.slice(0, 5);
+  if (last5.length === 0) return null;
+  return last5.reduce((sum, x) => sum + (x.netVal || 0), 0);
 }
 
 // ── Telegram callback_query (inline button tap) ──────────

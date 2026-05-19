@@ -1459,6 +1459,15 @@ window.__SSI_RANKING__ = (function () {
             stock.volClimax = detectVolClimaxBounce(ohlcv);
             // Strength Continuation (Tier Momentum Swing — bull regime, hold ~20 phiên)
             stock.strengthCont = detectStrengthContinuation(ohlcv);
+            // Premium flag: climax match + NN net buy 5d > 0 (backtest Sharpe 1.90 vs base 0.36)
+            if (stock.volClimax?.matched && foreign && foreign.length > 0) {
+              const sorted = [...foreign].sort((a, b) =>
+                new Date(b.tradingDate).getTime() - new Date(a.tradingDate).getTime()
+              );
+              const nnNet5d = sorted.slice(0, 5).reduce((s, x) => s + (x.netVal || 0), 0);
+              stock.volClimax.nn_net_5d_bn = +(nnNet5d / 1e9).toFixed(2);
+              stock.volClimax.is_premium = nnNet5d > 0;
+            }
           } catch (e) {
             stock.error = e.message;
             stock.tplusFactors = null;
@@ -1514,12 +1523,19 @@ window.__SSI_RANKING__ = (function () {
         volRatio: s.volClimax.volRatio,
         rsi: s.volClimax.rsi,
         reasons: s.volClimax.reasons,
+        nn_net_5d_bn: s.volClimax.nn_net_5d_bn ?? null,
+        is_premium: s.volClimax.is_premium === true,
         bounceStrength: s.volClimax.volRatio * Math.abs(s.volClimax.ret3d),
       }))
-      .sort((a, b) => b.bounceStrength - a.bounceStrength);
+      .sort((a, b) => {
+        // Premium luôn lên đầu, sau đó sort bounceStrength
+        if (a.is_premium !== b.is_premium) return a.is_premium ? -1 : 1;
+        return b.bounceStrength - a.bounceStrength;
+      });
 
-    const climaxTierA = climaxMatches.filter((m) => m.tier === "A");
-    const climaxTierB = climaxMatches.filter((m) => m.tier === "B");
+    const climaxPremium = climaxMatches.filter((m) => m.is_premium);
+    const climaxTierA = climaxMatches.filter((m) => m.tier === "A" && !m.is_premium);
+    const climaxTierB = climaxMatches.filter((m) => m.tier === "B" && !m.is_premium);
 
     // Tier Elite: TẤT CẢ climax matches khi VNI in correction (ret20 < -5%).
     // Backtest 8.5y: Win 56% → 61%, Avg +0.8% → +2.0%, Sharpe 0.7 → 1.7.
@@ -1554,6 +1570,7 @@ window.__SSI_RANKING__ = (function () {
     const result = {
       picks,
       climaxPicks: climaxMatches.slice(0, 10),
+      climaxPremium: climaxPremium.slice(0, 8),
       climaxTierA: climaxTierA.slice(0, 8),
       climaxTierB: climaxTierB.slice(0, 8),
       climaxElite,
@@ -1566,6 +1583,7 @@ window.__SSI_RANKING__ = (function () {
       allCount: stocks.length,
       eligibleCount: valid.length,
       climaxCount: climaxMatches.length,
+      climaxCountPremium: climaxPremium.length,
       climaxCountA: climaxTierA.length,
       climaxCountB: climaxTierB.length,
       climaxCountElite: climaxElite.length,

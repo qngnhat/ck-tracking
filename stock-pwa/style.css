@@ -2293,6 +2293,13 @@ body.is-offline {
   font-weight: 700;
   box-shadow: 0 0 8px rgba(41, 182, 246, 0.25);
 }
+.climax-tier-badge.tier-Premium {
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.28), rgba(233, 30, 99, 0.28));
+  border-color: #ce93d8;
+  color: #f8bbd0;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(206, 147, 216, 0.45);
+}
 
 /* Momentum Swing section + cards */
 .momentum-section .climax-title {

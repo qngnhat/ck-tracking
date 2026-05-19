@@ -5979,18 +5979,23 @@
   }
 
   function renderClimaxBounceSection(picks, totalCount, opts = {}) {
-    const tierLabel = opts.tier === "Elite" ? "Edge cao nhất"
+    const tierLabel = opts.tier === "Premium" ? "Best edge (NN confirmed)"
+      : opts.tier === "Elite" ? "Edge cao nhất"
       : opts.tier === "A" ? "Edge cao"
       : opts.tier === "B" ? "Edge vừa" : null;
+    const tierIcon = opts.tier === "Premium" ? "💎"
+      : opts.tier === "Elite" ? "⚡" : "";
     const tierBadge = opts.tier
-      ? `<span class="climax-tier-badge tier-${opts.tier}">${opts.tier === "Elite" ? "⚡" : ""} ${opts.tier} · ${tierLabel}</span>`
+      ? `<span class="climax-tier-badge tier-${opts.tier}">${tierIcon} ${opts.tier} · ${tierLabel}</span>`
       : "";
-    const subtitle = opts.tier === "Elite"
+    const subtitle = opts.tier === "Premium"
+      ? "Climax + nước ngoài mua ròng 5 phiên — Win 61%, Sharpe 1.90 (backtest 7.4y)"
+      : opts.tier === "Elite"
       ? "Climax pattern + VNI correction regime — Win 61%, Sharpe 1.71 (institutional grade)"
       : opts.tier === "A"
-      ? "Strict: drop >7% + vol >2× + RSI <35 — Win 59%, Sharpe 0.92"
+      ? "Strict: drop >7% + vol >2× + RSI <35 — Win 56%, Sharpe 0.67"
       : opts.tier === "B"
-      ? "Relax: drop >5% + vol >2× + RSI <50 — Win 58%, Sharpe 1.01"
+      ? "Relax: drop >5% + vol >2× + RSI <50 — Win 56%, Sharpe 0.70"
       : "Mã vừa rơi mạnh có lực mua xác nhận — hold 3 phiên (T+3.5)";
 
     let html = `
@@ -6211,13 +6216,15 @@
   function renderRanking() {
     const content = $("ranking-content");
     const s = curState();
+    const premium = s.lastResult?.climaxPremium || [];
     const tierA = s.lastResult?.climaxTierA || [];
     const tierB = s.lastResult?.climaxTierB || [];
     const elite = s.lastResult?.climaxElite || [];
+    const countPremium = s.lastResult?.climaxCountPremium || 0;
     const countA = s.lastResult?.climaxCountA || 0;
     const countB = s.lastResult?.climaxCountB || 0;
     const countElite = s.lastResult?.climaxCountElite || 0;
-    const totalCount = countA + countB;
+    const totalCount = countPremium + countA + countB;
     const isEliteRegime = s.lastResult?.isEliteRegime || false;
     const vniRegime = s.lastResult?.vniRegime || "neutral";
     const vniRet20 = s.lastResult?.vniRet20;
@@ -6266,17 +6273,18 @@
     ` : `
       <div class="tplus-stats">
         <span class="tplus-stats-line">
-          🔻 <b>${countA}</b> Tier A · <b>${countB}</b> Tier B — tổng <b>${totalCount}</b> mã
+          💎 <b>${countPremium}</b> Premium · 🔻 <b>${countA}</b> Tier A · <b>${countB}</b> Tier B — tổng <b>${totalCount}</b> mã
         </span>
       </div>
       <div class="tplus-expectation-banner">
-        <div class="tplus-exp-title">📈 Bắt đáy T+ (Vol Climax Bounce) · 2-tier system</div>
+        <div class="tplus-exp-title">📈 Bắt đáy T+ · 3-tier system</div>
         <div class="tplus-exp-body">
-          <b>Tier A</b>: drop >7% + vol >2× + RSI <35 → Win 59%, Sharpe 0.92, ~38/năm<br>
-          <b>Tier B</b>: drop >5% + vol >2× + RSI <50 → Win 58%, Sharpe 1.01, ~57/năm
+          💎 <b>Premium</b>: Climax + NN net mua 5d > 0 → Win <b>61%</b>, Sharpe <b>1.90</b> (best edge)<br>
+          🔻 <b>Tier A</b>: drop >7% + vol >2× + RSI <35 → Win 56%, Sharpe 0.67<br>
+          🔵 <b>Tier B</b>: drop >5% + vol >2× + RSI <50 → Win 56%, Sharpe 0.70
         </div>
         <div class="tplus-exp-warning">
-          ⚠️ Hold T+3 → T+5 ATC (target +3%, force T+5). Size <b>15% NAV/lệnh</b> Tier A, <b>10%</b> Tier B. Max <b>2-3 lệnh</b> đồng thời.
+          ⚠️ Hold T+3 → T+5 ATC (target +3%, force T+5). Size <b>15-20% NAV/Premium</b>, <b>10-15%</b> Tier A, <b>10%</b> Tier B. Max <b>2-3 lệnh</b>.
         </div>
       </div>
     `;
@@ -6295,6 +6303,10 @@
     }
 
     let html = regimeBanner + statsHtml;
+    // Premium luôn render đầu (best edge)
+    if (countPremium > 0) {
+      html += renderClimaxBounceSection(premium, countPremium, { tier: "Premium" });
+    }
     if (isEliteRegime && countElite > 0) {
       html += renderClimaxBounceSection(elite, countElite, { tier: "Elite" });
     } else {
