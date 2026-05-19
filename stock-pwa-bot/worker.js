@@ -620,7 +620,9 @@ function detectStrengthContinuation(data) {
   const volSlice = volumes.slice(n - 21, n - 1);
   const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
   const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
-  if (volRatio <= 1.5) return null;
+  // Vol threshold 1.5 → 1.2: audit 19/05 cho thấy 0/101 mã pass v1.5; backtest
+  // 8.5y v=1.2 tăng signal 59→127/năm, giữ Win 60% + Sharpe 0.60 = free lunch.
+  if (volRatio <= 1.2) return null;
 
   if (cur <= curOpen) return null;
 

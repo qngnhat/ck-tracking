@@ -439,11 +439,14 @@ window.__SSI_RANKING__ = (function () {
       return { matched: false, reason: "wide_range", rangePct };
     }
 
-    // Volume above average (engaged, không phải dry)
+    // Volume above average (engaged, không phải dry).
+    // Threshold 1.5 → 1.2 sau audit 19/05/2026: 0/101 mã top liquid pass v1.5
+    // trong bull regime. Backtest 8.5y v1.2: 127 trades/năm vs 59, Win 60% +
+    // Sharpe 0.60 cả 2 → free lunch.
     const volSlice = volumes.slice(n - 21, n - 1);
     const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
     const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
-    if (volRatio <= 1.5) {
+    if (volRatio <= 1.2) {
       return { matched: false, reason: "low_vol", volRatio };
     }
 
