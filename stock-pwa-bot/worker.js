@@ -159,6 +159,24 @@ export default {
       ctx.waitUntil(processScanChunk(env));
       return new Response("Scan chunk triggered", { status: 200 });
     }
+    if (url.pathname === "/scan-restart" && request.method === "POST") {
+      // Force restart scan — useful sau code change hoặc khi scan stuck
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(initScan(env));
+      return new Response("Scan restart initiated", { status: 200 });
+    }
+    if (url.pathname === "/chunk-step" && request.method === "POST") {
+      // Manually advance scan by one chunk (for debug when chunked cron stalled)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(processScanChunk(env));
+      return new Response("Chunk step triggered", { status: 200 });
+    }
     if (url.pathname === "/heartbeat" && request.method === "GET") {
       // Read recent cron heartbeats (debug — verify cron actually fired)
       const secret = url.searchParams.get("secret");
@@ -241,6 +259,7 @@ export default {
     if (cron === "* 8 * * 1-5") {
       // Chunked scan processing during 15:00-15:59 VN
       if (isVnHoliday()) return;
+      ctx.waitUntil(logHeartbeat(env, "chunk", { event_cron: cron }));
       ctx.waitUntil(processScanChunk(env));
       return;
     }
@@ -848,18 +867,22 @@ async function initScan(env) {
 async function processScanChunk(env) {
   const state = await getScanState(env);
   if (!state || state.status !== "in_progress") {
+    await logHeartbeat(env, "chunk-skip", { reason: "no-active-scan", status: state?.status });
     return;  // No active scan
   }
   const offset = state.current_offset || 0;
   const total = state.total_universe || FULL_UNIVERSE.length;
   if (offset >= total) {
+    await logHeartbeat(env, "chunk-finalize", { offset, total });
     await finalizeScan(env, state);
     return;
   }
 
   const chunk = FULL_UNIVERSE.slice(offset, offset + CHUNK_SIZE);
   console.log(`[chunk] processing ${offset}-${offset + chunk.length}/${total}`);
+  const chunkStartMs = Date.now();
 
+  let fetchFails = 0;
   const results = await Promise.all(chunk.map(async (sym) => {
     try {
       const data = await fetchVndHistory(sym, 220);
@@ -870,9 +893,16 @@ async function processScanChunk(env) {
         stats: computeStockStats(data),
       };
     } catch (e) {
+      fetchFails++;
       return null;
     }
   }));
+  const chunkMs = Date.now() - chunkStartMs;
+  await logHeartbeat(env, "chunk-processed", {
+    offset, total, chunk_size: chunk.length,
+    duration_ms: chunkMs,
+    fetch_fails: fetchFails,
+  });
 
   // Merge into partial state
   const climaxPartial = JSON.parse(state.climax_partial || "[]");
