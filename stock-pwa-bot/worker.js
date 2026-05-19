@@ -159,6 +159,34 @@ export default {
       ctx.waitUntil(processScanChunk(env));
       return new Response("Scan chunk triggered", { status: 200 });
     }
+    if (url.pathname === "/seed-test-premium" && request.method === "POST") {
+      // TEST ONLY: seed a fake Premium pick to verify UI/digest
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const symbol = url.searchParams.get("symbol") || "FPT";
+      const entry = parseFloat(url.searchParams.get("entry") || "100");
+      const sb = sbClient(env);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+      const row = {
+        symbol,
+        signal_date: new Date().toISOString().slice(0, 10),
+        entry_price: entry,
+        target_price: +(entry * 1.03).toFixed(4),
+        tier: "Premium",
+        nn_net_5d_bn: 125.5,
+        is_premium: true,
+        expires_at: expiresAt,
+        above_threshold: false,
+        last_alert_at: null,
+      };
+      const ok = await sbUpsert(sb, "climax_active_picks", row, "symbol");
+      return new Response(JSON.stringify({ ok, row }, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/scan-restart" && request.method === "POST") {
       // Force restart scan — useful sau code change hoặc khi scan stuck
       const secret = url.searchParams.get("secret");
@@ -661,6 +689,8 @@ function detectStrengthContinuation(data) {
 function detectVolClimaxBounce(data) {
   const closes = data.closes;
   const opens = data.opens;
+  const highs = data.highs;
+  const lows = data.lows;
   const volumes = data.volumes;
   const n = closes?.length || 0;
   if (n < 25) return null;
@@ -688,16 +718,39 @@ function detectVolClimaxBounce(data) {
 
   if (rsi == null) return null;
 
-  // 2-tier system
+  // ATR(14) for adaptive drop threshold (Phase A: stock-specific volatility)
+  // Backtest 8.5y (run_atr_adaptive_threshold.py): Tier A K=3.0 Sharpe 0.67 → 1.09,
+  // in-sample turnaround from -0.41 to +1.38. Volatile stocks need bigger drop.
+  let atrPct = null;
+  if (highs && lows && n >= 15) {
+    let trSum = 0;
+    for (let i = n - 14; i < n; i++) {
+      const tr = Math.max(
+        highs[i] - lows[i],
+        Math.abs(highs[i] - closes[i - 1]),
+        Math.abs(lows[i] - closes[i - 1])
+      );
+      trSum += tr;
+    }
+    const atr14 = trSum / 14;
+    atrPct = atr14 / cur * 100;
+  }
+
+  // Adaptive Tier A: drop < -K × ATR_pct with K=3.0
+  // Fallback fixed -7% if ATR unavailable
+  const dropThreshA = atrPct ? -3.0 * atrPct : -7;
+  const dropThreshB = -5;  // Tier B keep fixed (ATR variants không cải thiện)
+
   const base = dayGreen && volRatio > 2.0;
-  const matchedA = base && ret3d < -7 && rsi < 35;
-  const matchedB = base && ret3d < -5 && rsi < 50;
+  const matchedA = base && ret3d < dropThreshA && rsi < 35;
+  const matchedB = base && ret3d < dropThreshB && rsi < 50;
   const tier = matchedA ? "A" : matchedB ? "B" : null;
   if (!tier) return null;
 
   return {
     tier,
-    ret3d, volRatio, rsi,
+    ret3d, volRatio, rsi, atrPct,
+    dropThreshold: tier === "A" ? dropThreshA : dropThreshB,
     currentPrice: cur,
     medianTurnover,
     bounceStrength: volRatio * Math.abs(ret3d),

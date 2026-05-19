@@ -337,6 +337,8 @@ window.__SSI_RANKING__ = (function () {
   function detectVolClimaxBounce(ohlcv) {
     const closes = ohlcv.closes;
     const opens = ohlcv.opens;
+    const highs = ohlcv.highs;
+    const lows = ohlcv.lows;
     const volumes = ohlcv.volumes;
     const n = closes.length;
     if (n < 30) return null;
@@ -366,25 +368,47 @@ window.__SSI_RANKING__ = (function () {
 
     if (rsi == null) return null;
 
-    // Common requirements: day green + vol > 2× + sufficient drop
+    // ATR(14) for stock-specific adaptive drop threshold (Phase A).
+    // Backtest 8.5y: Tier A K=3.0 × ATR_pct: Sharpe 0.67 → 1.09, Win 56 → 62%.
+    // Volatile mã (ATR 4%): drop -7% mild → cần -12% extreme.
+    // Stable mã (ATR 1.5%): drop -5% đã extreme.
+    let atrPct = null;
+    if (highs && lows && n >= 15) {
+      let trSum = 0;
+      for (let i = n - 14; i < n; i++) {
+        const tr = Math.max(
+          highs[i] - lows[i],
+          Math.abs(highs[i] - closes[i - 1]),
+          Math.abs(lows[i] - closes[i - 1])
+        );
+        trSum += tr;
+      }
+      atrPct = (trSum / 14) / cur * 100;
+    }
+    const dropThreshA = atrPct ? -3.0 * atrPct : -7;
+    const dropThreshB = -5;  // Tier B keep fixed (ATR variants không cải thiện)
+
+    // Common requirements: day green + vol > 2× + sufficient drop (adaptive for A)
     const baseConditions = dayGreen && volRatio > 2.0;
-    const matchedA = baseConditions && ret3d < -7 && rsi < 35;
-    const matchedB = baseConditions && ret3d < -5 && rsi < 50;
+    const matchedA = baseConditions && ret3d < dropThreshA && rsi < 35;
+    const matchedB = baseConditions && ret3d < dropThreshB && rsi < 50;
 
     const tier = matchedA ? "A" : matchedB ? "B" : null;
     const matched = tier !== null;
 
     if (!matched) {
-      return { matched: false, tier: null, ret3d, volRatio, rsi, medianTurnover };
+      return { matched: false, tier: null, ret3d, volRatio, rsi, medianTurnover, atrPct };
     }
 
     const tierLabel = tier === "A" ? "Edge cao" : "Edge vừa";
+    const dropThresh = tier === "A" ? dropThreshA : dropThreshB;
     return {
       matched, tier, tierLabel,
-      ret3d, volRatio, rsi, medianTurnover,
+      ret3d, volRatio, rsi, medianTurnover, atrPct,
+      dropThreshold: dropThresh,
       reasons: [
         `${tier === "A" ? "Tier A " : "Tier B "} · ${tierLabel}`,
-        `3 phiên giảm ${ret3d.toFixed(1)}% — capitulation`,
+        `3 phiên giảm ${ret3d.toFixed(1)}% — capitulation (ngưỡng ${dropThresh.toFixed(1)}%${atrPct && tier === "A" ? `, =3× ATR ${atrPct.toFixed(1)}%` : ""})`,
         `Volume ${volRatio.toFixed(1)}× TB20 — lực mua xác nhận`,
         `Nến xanh (close ${cur.toFixed(2)} > open ${curOpen.toFixed(2)})`,
         `RSI ${rsi.toFixed(0)} (${rsi < 35 ? "oversold" : "neutral"})`,
