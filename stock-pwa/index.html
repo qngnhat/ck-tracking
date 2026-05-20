@@ -36,6 +36,7 @@
       <button class="tab-btn" data-tab="analyze">📊 Phân tích</button>
       <button class="tab-btn active" data-tab="ranking">⚡ Lướt sóng</button>
       <button class="tab-btn" data-tab="portfolio">💼 Danh mục</button>
+      <button class="tab-btn" data-tab="perf">📈 Hiệu suất</button>
     </div>
   </header>
 
@@ -352,6 +353,27 @@
             <button class="link-btn" id="tracker-clear-btn">Xóa lịch sử</button>
           </div>
           <div id="tracker-content"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Performance tab (forward-test tracker) -->
+  <div class="tab-content tab-perf">
+    <main id="perf-container">
+      <div class="ranking-header">
+        <div>
+          <h2 class="ranking-title">📈 Hiệu suất app</h2>
+          <div class="ranking-meta">Forward-test: actual vs backtest expectation</div>
+        </div>
+        <div class="ranking-actions">
+          <button class="btn-icon" id="perf-refresh" title="Cập nhật">↻</button>
+        </div>
+      </div>
+      <div id="perf-content">
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">📊</div>
+          <p>Đang tải...</p>
         </div>
       </div>
     </main>

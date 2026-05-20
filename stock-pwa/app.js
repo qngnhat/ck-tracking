@@ -2795,6 +2795,8 @@
     // Portfolio auto-refresh: chỉ chạy khi tab Danh mục active
     if (tab === "portfolio") startPortfolioAutoRefresh();
     else stopPortfolioAutoRefresh();
+    // Performance tab: render fresh data
+    if (tab === "perf") renderPerfTab();
   }
 
   // Auto-refresh portfolio mỗi 60s khi tab active. Pause khi tab ẩn/đổi tab khác.
@@ -2830,7 +2832,7 @@
   // ── Swipe gesture mobile để chuyển tab ngang ──
   // Vuốt trái → tab kế tiếp, vuốt phải → tab trước. Skip nếu touch start
   // trên elements cần horizontal scroll (chart, tables, modals).
-  const TAB_ORDER = ["home", "analyze", "ranking", "portfolio"];
+  const TAB_ORDER = ["home", "analyze", "ranking", "portfolio", "perf"];
   const NO_SWIPE_SELECTORS = [
     "canvas",                         // Charts (tradingview, etc.)
     ".chart-card",                    // Chart card area
@@ -7279,6 +7281,164 @@
     `;
   }
 
+  // ── Performance tab: forward-test tracker ──
+  let perfTradesCache = null;
+  let perfFetchedAt = 0;
+
+  async function fetchTradeLog(forceRefresh = false) {
+    const TTL = 60 * 1000;
+    if (!forceRefresh && perfTradesCache && Date.now() - perfFetchedAt < TTL) {
+      return perfTradesCache;
+    }
+    try {
+      const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/trade-log", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const json = await r.json();
+      perfTradesCache = json.trades || [];
+      perfFetchedAt = Date.now();
+      return perfTradesCache;
+    } catch (e) {
+      console.warn("[perf] fetch fail:", e.message);
+      return perfTradesCache || [];
+    }
+  }
+
+  // Backtest expectations per tier (from backtest scripts)
+  const TIER_BACKTEST = {
+    "Premium":  { win: 61, avg: 2.62, sharpe: 1.90 },
+    "Elite":    { win: 61, avg: 2.05, sharpe: 1.71 },
+    "A":        { win: 56, avg: 0.81, sharpe: 0.67 },
+    "B":        { win: 56, avg: 0.81, sharpe: 0.70 },
+    "Momentum": { win: 60, avg: 0.78, sharpe: 0.60 },
+  };
+
+  async function renderPerfTab() {
+    const content = document.getElementById("perf-content");
+    if (!content) return;
+    content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">⏳</div><p>Đang tải trade log...</p></div>`;
+
+    const trades = await fetchTradeLog(true);
+
+    if (trades.length === 0) {
+      content.innerHTML = `
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">📊</div>
+          <p><b>Chưa có trade nào</b></p>
+          <p>Mỗi lần app fire signal (Premium/Elite/A/B/Momentum), trade log sẽ ghi nhận.</p>
+          <p>Sau 7 ngày, worker resolve outcome (target/SL/force) và tính actual return.</p>
+          <p><small>Forward-test tracker: so sánh actual vs backtest expectation theo thời gian.</small></p>
+        </div>`;
+      return;
+    }
+
+    const resolved = trades.filter((t) => t.resolved_at);
+    const unresolved = trades.filter((t) => !t.resolved_at);
+
+    // Per-tier stats
+    const tiers = {};
+    for (const t of resolved) {
+      if (!tiers[t.tier]) tiers[t.tier] = { n: 0, wins: 0, sumRet: 0 };
+      tiers[t.tier].n++;
+      if (t.is_win) tiers[t.tier].wins++;
+      tiers[t.tier].sumRet += parseFloat(t.net_ret || 0);
+    }
+
+    // Overall
+    const totalN = resolved.length;
+    const totalWins = resolved.filter((t) => t.is_win).length;
+    const totalRet = resolved.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
+
+    let html = `
+      <div class="perf-summary">
+        <div class="perf-summary-card">
+          <div class="perf-summary-label">Total resolved</div>
+          <div class="perf-summary-value">${totalN}</div>
+          <div class="perf-summary-sub">${unresolved.length} đang chờ</div>
+        </div>
+        <div class="perf-summary-card">
+          <div class="perf-summary-label">Win rate actual</div>
+          <div class="perf-summary-value">${totalN > 0 ? ((totalWins / totalN) * 100).toFixed(1) : "--"}%</div>
+          <div class="perf-summary-sub">${totalWins}/${totalN}</div>
+        </div>
+        <div class="perf-summary-card">
+          <div class="perf-summary-label">Avg net return</div>
+          <div class="perf-summary-value ${totalRet >= 0 ? "up" : "down"}">${totalN > 0 ? ((totalRet / totalN) * 100).toFixed(2) : "--"}%</div>
+          <div class="perf-summary-sub">per trade</div>
+        </div>
+        <div class="perf-summary-card">
+          <div class="perf-summary-label">Cumulative</div>
+          <div class="perf-summary-value ${totalRet >= 0 ? "up" : "down"}">${(totalRet * 100).toFixed(1)}%</div>
+          <div class="perf-summary-sub">gross sum</div>
+        </div>
+      </div>
+
+      <div class="perf-section">
+        <h3>Actual vs Backtest expectation</h3>
+        <table class="perf-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>n</th>
+              <th>Win actual</th>
+              <th>Win backtest</th>
+              <th>Avg actual</th>
+              <th>Avg backtest</th>
+              <th>Discrepancy</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    for (const [tier, s] of Object.entries(tiers)) {
+      const bt = TIER_BACKTEST[tier] || { win: 0, avg: 0 };
+      const winActual = (s.wins / s.n) * 100;
+      const avgActual = (s.sumRet / s.n) * 100;
+      const winDiff = winActual - bt.win;
+      const avgDiff = avgActual - bt.avg;
+      const ok = winDiff >= -10 && avgDiff >= -0.5;
+      html += `
+        <tr>
+          <td><b>${tier}</b></td>
+          <td>${s.n}</td>
+          <td>${winActual.toFixed(1)}%</td>
+          <td>${bt.win}%</td>
+          <td class="${avgActual >= 0 ? "up" : "down"}">${avgActual >= 0 ? "+" : ""}${avgActual.toFixed(2)}%</td>
+          <td>${bt.avg >= 0 ? "+" : ""}${bt.avg.toFixed(2)}%</td>
+          <td>${ok ? "✅" : "⚠️"} ${(avgDiff >= 0 ? "+" : "") + avgDiff.toFixed(2)}%</td>
+        </tr>`;
+    }
+    html += `</tbody></table></div>`;
+
+    // Recent trades table
+    html += `<div class="perf-section">
+      <h3>Recent trades (last 20)</h3>
+      <table class="perf-table">
+        <thead><tr><th>Date</th><th>Mã</th><th>Tier</th><th>Entry</th><th>Exit</th><th>Reason</th><th>Net</th></tr></thead>
+        <tbody>`;
+    const recent = [...trades].sort((a, b) => b.signal_date.localeCompare(a.signal_date)).slice(0, 20);
+    for (const t of recent) {
+      const ret = t.net_ret != null ? (parseFloat(t.net_ret) * 100).toFixed(2) : "--";
+      const cls = t.net_ret != null && parseFloat(t.net_ret) > 0 ? "up" : t.net_ret != null ? "down" : "";
+      html += `
+        <tr>
+          <td>${t.signal_date}</td>
+          <td><b>${t.symbol}</b>${t.is_premium ? " 💎" : ""}</td>
+          <td>${t.tier}</td>
+          <td>${parseFloat(t.entry_price).toFixed(2)}</td>
+          <td>${t.exit_price ? parseFloat(t.exit_price).toFixed(2) : "..."}</td>
+          <td>${t.exit_reason || "pending"}</td>
+          <td class="${cls}">${ret !== "--" ? (parseFloat(t.net_ret) > 0 ? "+" : "") + ret + "%" : "--"}</td>
+        </tr>`;
+    }
+    html += `</tbody></table></div>`;
+
+    content.innerHTML = html;
+  }
+
+  document.getElementById("perf-refresh")?.addEventListener("click", () => {
+    perfFetchedAt = 0;  // bust cache
+    renderPerfTab();
+  });
+
   // ── Portfolio render ──
   async function renderPortfolio() {
     const container = $("portfolio-content");
@@ -7496,6 +7656,10 @@
           coach.climaxTier = climaxPick.tier;
           coach.climaxSignalDate = climaxPick.signal_date;
           coach.climaxEntryPrice = climaxPick.entry_price;
+          coach.peakPrice = climaxPick.peak_price ?? null;
+          coach.peakDate = climaxPick.peak_date ?? null;
+          coach.isPremium = climaxPick.is_premium === true;
+          coach.nnNet5dBn = climaxPick.nn_net_5d_bn ?? null;
           // Trading days từ signal_date — đếm phiên (loại bỏ T7/CN)
           coach.tPlusPosition = tradingDaysBetween(climaxPick.signal_date, new Date());
           coach.daysHeld = coach.tPlusPosition;
@@ -7513,12 +7677,24 @@
         }
         const chipsHtml = coach ? (() => {
           const chips = [];
+          if (coach.isPremium) {
+            const nnTag = coach.nnNet5dBn != null ? ` · NN +${coach.nnNet5dBn}B/5d` : "";
+            chips.push(`<span class="coach-chip coach-chip-premium">💎 Premium${nnTag}</span>`);
+          }
           if (coach.tPlusPosition != null) {
             const lbl = coach.isTplusPick
-              ? `T+${coach.tPlusPosition} · Climax pick`
+              ? `T+${coach.tPlusPosition} · ${coach.climaxTier || "Climax"}`
               : `T+${coach.tPlusPosition} · ${coach.daysHeld}d held`;
             const cls = coach.isTplusPick ? "coach-chip-tplus" : "coach-chip-neutral";
             chips.push(`<span class="coach-chip ${cls}">${lbl}</span>`);
+          }
+          // Peak tracker chip — show if peak exists post-entry
+          if (coach.peakPrice && coach.climaxEntryPrice) {
+            const peakGain = ((coach.peakPrice - coach.climaxEntryPrice) / coach.climaxEntryPrice) * 100;
+            const curPx = coach.currentPrice;
+            const drawdownFromPeak = curPx > 0 ? ((curPx - coach.peakPrice) / coach.peakPrice) * 100 : 0;
+            const cls = drawdownFromPeak <= -3 ? "coach-chip-rsi-mild" : "coach-chip-neutral";
+            chips.push(`<span class="coach-chip ${cls}">📈 Đỉnh ${coach.peakPrice.toFixed(2)} (+${peakGain.toFixed(1)}%)${drawdownFromPeak < -0.5 ? ` · cách đỉnh ${drawdownFromPeak.toFixed(1)}%` : ""}</span>`);
           }
           if (coach.rsiWarn === "strong") {
             chips.push(`<span class="coach-chip coach-chip-rsi-strong">🚨 RSI ${coach.rsiValue.toFixed(0)} (cực overbought)</span>`);

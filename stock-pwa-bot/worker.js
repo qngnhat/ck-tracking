@@ -118,7 +118,7 @@ export default {
       // Data non-sensitive (same info derivable from VND public data).
       const sb = sbClient(env);
       const picks = await sbQuery(sb, "climax_active_picks", {
-        select: "symbol,signal_date,entry_price,target_price,tier,expires_at,nn_net_5d_bn,is_premium",
+        select: "symbol,signal_date,entry_price,target_price,tier,expires_at,nn_net_5d_bn,is_premium,peak_price,peak_date",
       });
       const active = (picks || []).filter((p) =>
         !p.expires_at || new Date(p.expires_at) > new Date()
@@ -245,6 +245,31 @@ export default {
       }
       return new Response("No scan state", { status: 404 });
     }
+    if (url.pathname === "/trade-log" && request.method === "GET") {
+      // Public read: forward-test tracker. Last 100 trades, newest first.
+      const sb = sbClient(env);
+      const r = await fetch(`${sb.url}/rest/v1/trade_log?select=*&order=signal_date.desc&limit=100`, {
+        headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` },
+      });
+      const data = r.ok ? await r.json() : [];
+      return new Response(JSON.stringify({ trades: data, fetched_at: new Date().toISOString() }, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=120",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+    if (url.pathname === "/resolve-picks" && request.method === "POST") {
+      // Manual trigger: resolve unresolved picks (signal_date < today - 7 days)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(resolveExpiredPicks(env));
+      return new Response("Resolve triggered", { status: 200 });
+    }
     if (url.pathname === "/spike-state" && request.method === "GET") {
       // Read active picks state (debug)
       const secret = url.searchParams.get("secret");
@@ -282,6 +307,10 @@ export default {
       ctx.waitUntil(sendMarketDigest(env));
       // Init multi-stage full-universe scan (sẽ finalize ~15:30 VN)
       ctx.waitUntil(initScan(env));
+      // Update peak prices for active picks (trailing stop helper)
+      ctx.waitUntil(updatePeakPrices(env));
+      // Resolve expired trade_log entries (forward-test tracker)
+      ctx.waitUntil(resolveExpiredPicks(env));
       return;
     }
     if (cron === "* 8 * * 1-5") {
@@ -1128,6 +1157,144 @@ async function persistClimaxMatches(env, matches) {
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   const premiumCount = rows.filter((r) => r.tier === "Premium").length;
   console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} matches saved (${premiumCount} Premium, ${eliteCount} Elite, expires ${expiresAt.slice(0, 10)})`);
+
+  // ALSO log to trade_log for forward-test tracker (unresolved, resolveCron sẽ fill)
+  await logInitialTrades(env, matches, today);
+}
+
+async function logInitialTrades(env, matches, signalDate) {
+  if (!matches || matches.length === 0) return;
+  const sb = sbClient(env);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: signalDate,
+    tier: m.is_premium ? "Premium" : m.isElite ? "Elite" : m.tier,
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * 1.03).toFixed(4),
+    sl_price: +(m.currentPrice * 0.92).toFixed(4),
+    nn_net_5d_bn: m.nn_net_5d_bn ?? null,
+    is_premium: !!m.is_premium,
+  }));
+  // Use UPSERT với on_conflict=symbol,signal_date để re-scan cùng day không lỗi
+  const ok = await sbUpsert(sb, "trade_log", rows, "symbol,signal_date");
+  console.log(`[trade-log] ${ok ? "✓" : "✗"} ${rows.length} initial trades logged`);
+}
+
+async function resolveExpiredPicks(env) {
+  // Find unresolved trade_log entries where signal_date <= today - 7 calendar days
+  const sb = sbClient(env);
+  const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  if (!r.ok) {
+    console.warn("[resolve] fetch unresolved fail");
+    return;
+  }
+  const pending = await r.json();
+  console.log(`[resolve] ${pending.length} trades to resolve (signal_date <= ${cutoff})`);
+  if (pending.length === 0) return;
+
+  let resolved = 0;
+  for (const t of pending) {
+    try {
+      // Fetch OHLCV days surrounding signal_date (15 calendar days buffer)
+      const sigTs = new Date(t.signal_date).getTime();
+      const to = Math.floor((sigTs + 15 * 24 * 3600 * 1000) / 1000);
+      const from = Math.floor((sigTs - 5 * 24 * 3600 * 1000) / 1000);
+      const url = `${VND_HISTORY_URL}?resolution=D&symbol=${t.symbol}&from=${from}&to=${to}`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json",
+          "Origin": "https://dchart.vndirect.com.vn",
+          "Referer": "https://dchart.vndirect.com.vn/",
+        },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.s !== "ok" || !data.c?.length) continue;
+
+      // Find idx of signal_date
+      const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
+      const sigIdx = times.indexOf(t.signal_date);
+      if (sigIdx < 0 || sigIdx + 6 >= times.length) continue;
+
+      // T+ simulate: entry = open(sigIdx+1), check close T+3..T+5
+      const entryPrice = data.o[sigIdx + 1];
+      if (!entryPrice || entryPrice <= 0) continue;
+      const slPrice = entryPrice * 0.92;
+      const targetPrice = entryPrice * 1.03;
+
+      let exitPrice = null;
+      let exitDay = null;
+      let exitReason = null;
+      for (let h = 1; h <= 5; h++) {
+        const idx = sigIdx + 1 + h;
+        if (idx >= data.c.length) break;
+        const cl = data.c[idx];
+        if (cl <= slPrice) {
+          exitPrice = cl; exitDay = h; exitReason = "sl"; break;
+        }
+        if (h >= 3 && cl >= targetPrice) {
+          exitPrice = cl; exitDay = h; exitReason = "target"; break;
+        }
+        if (h === 5) {
+          exitPrice = cl; exitDay = h; exitReason = "force";
+        }
+      }
+      if (exitPrice === null) continue;
+
+      const netRet = (exitPrice - entryPrice) / entryPrice - 0.004;
+      const updateData = {
+        resolved_at: new Date().toISOString(),
+        exit_price: +exitPrice.toFixed(4),
+        exit_day: exitDay,
+        exit_reason: exitReason,
+        net_ret: +netRet.toFixed(6),
+        is_win: netRet > 0,
+        // Update entry_price (actual T+1 open) to overwrite signal-day price
+        entry_price: +entryPrice.toFixed(4),
+      };
+      await sbUpdate(sb, "trade_log", { eq: { id: t.id }, data: updateData });
+      resolved++;
+      console.log(`[resolve] ${t.symbol} ${t.signal_date} ${t.tier}: ${exitReason} day=${exitDay} ret=${(netRet*100).toFixed(2)}%`);
+    } catch (e) {
+      console.warn(`[resolve] ${t.symbol}: ${e.message}`);
+    }
+  }
+  console.log(`[resolve] ${resolved}/${pending.length} resolved`);
+}
+
+async function updatePeakPrices(env) {
+  // For each active climax pick (signal_date < today, expires_at > today),
+  // fetch today's close price + update peak_price if higher.
+  // Sử dụng ở spike alert cron / EOD: hold T+1 → T+5 window có peak running.
+  const sb = sbClient(env);
+  const picks = await sbQuery(sb, "climax_active_picks", {
+    select: "id,symbol,entry_price,peak_price,signal_date",
+  });
+  if (!picks || picks.length === 0) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let updated = 0;
+  for (const p of picks) {
+    if (p.signal_date >= today) continue;  // chưa entry, không có peak
+    try {
+      const data = await fetchVndHistory(p.symbol, 3);
+      const curHigh = Math.max(...(data.highs || []));
+      if (!curHigh) continue;
+      const newPeak = Math.max(p.peak_price || 0, curHigh);
+      if (newPeak > (p.peak_price || 0)) {
+        await sbUpdate(sb, "climax_active_picks", {
+          eq: { id: p.id },
+          data: { peak_price: newPeak, peak_date: today },
+        });
+        updated++;
+      }
+    } catch {}
+  }
+  console.log(`[peak] updated ${updated}/${picks.length} active picks`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)

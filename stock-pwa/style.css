@@ -2293,6 +2293,73 @@ body.is-offline {
   font-weight: 700;
   box-shadow: 0 0 8px rgba(41, 182, 246, 0.25);
 }
+/* ─── Performance dashboard ─── */
+.perf-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+@media (max-width: 600px) {
+  .perf-summary { grid-template-columns: repeat(2, 1fr); }
+}
+.perf-summary-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.perf-summary-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+}
+.perf-summary-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+.perf-summary-value.up { color: #81c784; }
+.perf-summary-value.down { color: #ff8a80; }
+.perf-summary-sub {
+  font-size: 10px;
+  color: #aaa;
+}
+
+.perf-section {
+  margin-top: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  padding: 12px;
+}
+.perf-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #ccc;
+}
+.perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.perf-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: #888;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.perf-table td {
+  padding: 6px 8px;
+  color: #ccc;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+}
+.perf-table td.up { color: #81c784; }
+.perf-table td.down { color: #ff8a80; }
+
 .climax-tier-badge.tier-Premium {
   background: linear-gradient(135deg, rgba(156, 39, 176, 0.28), rgba(233, 30, 99, 0.28));
   border-color: #ce93d8;
@@ -5213,6 +5280,13 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   background: rgba(76, 175, 80, 0.1);
   color: #a5d6a7;
   border-color: rgba(76, 175, 80, 0.3);
+}
+.coach-chip-premium {
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.25), rgba(233, 30, 99, 0.25));
+  color: #f8bbd0;
+  border-color: #ce93d8;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(206, 147, 216, 0.35);
 }
 
 .holding-range {
