@@ -2220,6 +2220,7 @@ window.__SSI_RANKING__ = (function () {
 
   return {
     UNIVERSE,
+    getSector,
     loadTopPicksTPlus,
     getMarketRegime,
     loadMarketSnapshot,

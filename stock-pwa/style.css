@@ -5281,6 +5281,56 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #a5d6a7;
   border-color: rgba(76, 175, 80, 0.3);
 }
+/* ─── Drawdown circuit breaker ─── */
+.drawdown-banner {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: rgba(255, 87, 34, 0.08);
+  border: 1px solid rgba(255, 87, 34, 0.35);
+  border-radius: 10px;
+}
+.drawdown-banner-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #ff8a65;
+  margin-bottom: 8px;
+}
+.drawdown-row {
+  font-size: 13px;
+  color: #ffb74d;
+  padding: 6px 0;
+}
+.drawdown-row.drawdown-critical {
+  color: #ff5252;
+  font-weight: 600;
+}
+.drawdown-row.drawdown-warn {
+  color: #ffb74d;
+}
+.drawdown-sub {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+/* ─── Sector concentration warning ─── */
+.climax-sector-warn {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: rgba(255, 152, 0, 0.08);
+  border-left: 3px solid #ff9800;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ffb74d;
+  line-height: 1.5;
+}
+.climax-sector-warn.climax-sector-critical {
+  background: rgba(255, 82, 82, 0.1);
+  border-left-color: #ff5252;
+  color: #ff8a80;
+  font-weight: 600;
+}
+
 .coach-chip-premium {
   background: linear-gradient(135deg, rgba(156, 39, 176, 0.25), rgba(233, 30, 99, 0.25));
   color: #f8bbd0;

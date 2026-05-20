@@ -6040,6 +6040,14 @@
         ? `<div class="climax-size">💰 <b>${plan.sizeQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(plan.sizeValue)}, ${sizePctTxt}% NAV · ${plan.effectiveTier} sizing)</div>`
         : `<div class="climax-size climax-size-fallback">💰 Size khuyến nghị: <b>${sizePctTxt}% NAV/lệnh</b> (${plan.effectiveTier} tier — cập nhật cash trong Portfolio để có số CP cụ thể)</div>`;
 
+      // C2 Sector concentration warning
+      const sectorExp = getSectorExposureForPick(p.sector, plan.sizePct);
+      const sectorWarnHtml = sectorExp.critical
+        ? `<div class="climax-sector-warn climax-sector-critical">🚫 <b>${sectorLabel(p.sector)}</b> đã ${sectorExp.current.toFixed(0)}% NAV · pick này sẽ đẩy lên ${sectorExp.afterPick.toFixed(0)}%. <u>KHÔNG nên trade</u> — quá tập trung.</div>`
+        : sectorExp.warn
+        ? `<div class="climax-sector-warn">⚠️ <b>${sectorLabel(p.sector)}</b> đã ${sectorExp.current.toFixed(0)}% NAV · pick này sẽ đẩy lên ${sectorExp.afterPick.toFixed(0)}%. Cân nhắc giảm size hoặc skip.</div>`
+        : "";
+
       html += `
         <div class="climax-card-v2" data-symbol="${p.symbol}" data-rank="${i + 1}">
           <div class="climax-card-header">
@@ -6084,6 +6092,8 @@
               <div class="climax-tl-action">BÁN FORCE</div>
             </div>
           </div>
+
+          ${sectorWarnHtml}
 
           <div class="climax-boxes">
             <div class="climax-box climax-box-buy">
@@ -6239,6 +6249,15 @@
   function renderRanking() {
     const content = $("ranking-content");
     const s = curState();
+    sectorExposureCache = null;  // recompute fresh per render
+    // Trigger drawdown fetch (non-blocking; render uses whatever's cached)
+    fetchDrawdownStatus().then(() => {
+      // Re-render after data arrives if any tier paused
+      if (drawdownStatus && Object.values(drawdownStatus).some((t) => t.isPaused || t.consecLosses >= 2)) {
+        const banner = document.getElementById("drawdown-banner-slot");
+        if (banner) banner.innerHTML = buildDrawdownBanner();
+      }
+    });
     const premium = s.lastResult?.climaxPremium || [];
     const tierA = s.lastResult?.climaxTierA || [];
     const tierB = s.lastResult?.climaxTierB || [];
@@ -6312,9 +6331,11 @@
       </div>
     `;
 
+    const drawdownSlot = `<div id="drawdown-banner-slot">${buildDrawdownBanner()}</div>`;
+
     // Empty state khi cả 2 tier đều rỗng
     if (totalCount === 0) {
-      content.innerHTML = regimeBanner + statsHtml + `
+      content.innerHTML = drawdownSlot + regimeBanner + statsHtml + `
         <div class="empty-state ranking-intro">
           <div class="empty-icon">💤</div>
           <p><b>Không có mã match Bắt đáy T+ hôm nay (cả Tier A + B).</b></p>
@@ -6325,7 +6346,7 @@
       return;
     }
 
-    let html = regimeBanner + statsHtml;
+    let html = drawdownSlot + regimeBanner + statsHtml;
     // Premium luôn render đầu (best edge)
     if (countPremium > 0) {
       html += renderClimaxBounceSection(premium, countPremium, { tier: "Premium" });
@@ -6456,6 +6477,93 @@
   // Map: symbol → { signal_date, entry_price, target_price, tier, expires_at }
   let activeClimaxPicks = new Map();
   let activeClimaxPicksFetchedAt = 0;
+
+  // C1 Drawdown circuit breaker status (cached 5min)
+  let drawdownStatus = null;
+  let drawdownFetchedAt = 0;
+
+  // C2 Sector concentration: compute current portfolio sector exposure
+  // Used to warn before picking new mã trong sector đã > 50% NAV.
+  function computeSectorExposure() {
+    const exposure = {};
+    let totalMarket = 0;
+    try {
+      const cash = window.__SSI_PORTFOLIO__?.loadCash?.() ?? 0;
+      const holdings = window.__SSI_PORTFOLIO__?.currentHoldings?.() ?? [];
+      for (const h of holdings) {
+        const a = portfolioAnalysisCache?.[h.symbol];
+        if (!a?.current) continue;
+        const value = h.qty * a.current * 1000;
+        totalMarket += value;
+        const sec = RANKING.getSector?.(h.symbol) || "other";
+        exposure[sec] = (exposure[sec] || 0) + value;
+      }
+      const nav = totalMarket + cash;
+      const exposurePct = {};
+      for (const [sec, val] of Object.entries(exposure)) {
+        exposurePct[sec] = nav > 0 ? (val / nav) * 100 : 0;
+      }
+      return { nav, totalMarket, exposurePct };
+    } catch {
+      return { nav: 0, totalMarket: 0, exposurePct: {} };
+    }
+  }
+
+  // Cache để render không tính lại mỗi card
+  let sectorExposureCache = null;
+  function getSectorExposureForPick(sector, picksSizePct) {
+    if (!sectorExposureCache) sectorExposureCache = computeSectorExposure();
+    const curPct = sectorExposureCache.exposurePct[sector] || 0;
+    const afterPick = curPct + picksSizePct * 100;
+    return {
+      current: curPct,
+      afterPick,
+      warn: afterPick > 50,
+      critical: afterPick > 70,
+    };
+  }
+
+  function buildDrawdownBanner() {
+    if (!drawdownStatus) return "";
+    // Show banner if any tier has consecLosses >= 2 (warning) or isPaused (critical)
+    const issues = [];
+    for (const [tier, s] of Object.entries(drawdownStatus)) {
+      if (s.isPaused) {
+        issues.push(`<div class="drawdown-row drawdown-critical">
+          🚫 <b>${tier}</b> PAUSED — ${s.consecLosses} losses liên tiếp · cooldown đến <b>${s.pausedUntil || "?"}</b>.
+          <div class="drawdown-sub">Skip ${tier} tier trong cooldown để tránh emotional spiral. Cần reset.</div>
+        </div>`);
+      } else if (s.consecLosses >= 2) {
+        issues.push(`<div class="drawdown-row drawdown-warn">
+          ⚠️ <b>${tier}</b>: ${s.consecLosses} loss liên tiếp · gần pause threshold ${3 - s.consecLosses} loss nữa.
+          <div class="drawdown-sub">Cân nhắc giảm size hoặc skip pick ${tier} tiếp theo.</div>
+        </div>`);
+      }
+    }
+    if (issues.length === 0) return "";
+    return `<div class="drawdown-banner">
+      <div class="drawdown-banner-title">📉 Drawdown circuit breaker</div>
+      ${issues.join("")}
+    </div>`;
+  }
+
+  async function fetchDrawdownStatus(forceRefresh = false) {
+    const TTL_MS = 5 * 60 * 1000;
+    if (!forceRefresh && drawdownStatus && Date.now() - drawdownFetchedAt < TTL_MS) {
+      return drawdownStatus;
+    }
+    try {
+      const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/drawdown-status", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const json = await r.json();
+      drawdownStatus = json.status || {};
+      drawdownFetchedAt = Date.now();
+      return drawdownStatus;
+    } catch (e) {
+      console.warn("[drawdown] fetch failed:", e.message);
+      return drawdownStatus || {};
+    }
+  }
 
   async function fetchActiveClimaxPicks(forceRefresh = false) {
     // Cache 5 phút, server cũng cache 5 phút → tổng worst-case 10 phút lag

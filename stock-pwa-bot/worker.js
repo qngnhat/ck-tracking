@@ -304,6 +304,23 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/drawdown-status" && request.method === "GET") {
+      // Public read: drawdown circuit breaker status per tier.
+      // Premium pause = 3 consecutive losses → pause 5 trading days.
+      const sb = sbClient(env);
+      const result = {};
+      for (const tier of ["Premium", "Elite", "A", "B", "Momentum"]) {
+        result[tier] = await computeDrawdownStatus(sb, tier);
+      }
+      return new Response(JSON.stringify({ status: result, computed_at: new Date().toISOString() }, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=300",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
     if (url.pathname === "/trade-log" && request.method === "GET") {
       // Public read: forward-test tracker. Last 100 trades, newest first.
       const sb = sbClient(env);
@@ -2174,6 +2191,46 @@ async function sbDelete(sb, table, opts) {
     return false;
   }
   return true;
+}
+
+// C1 Drawdown circuit breaker: count consecutive losses per tier.
+// Premium 3 losses → pause 5 trading days (prevent emotional spiral).
+const DRAWDOWN_THRESHOLD = 3;
+const DRAWDOWN_COOLDOWN_TRADING_DAYS = 5;
+
+async function computeDrawdownStatus(sb, tier) {
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=symbol,signal_date,is_win,net_ret&tier=eq.${tier}&resolved_at=not.is.null&order=signal_date.desc&limit=10`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  if (!r.ok) {
+    return { tier, consecLosses: 0, isPaused: false, pausedUntil: null, recent: 0 };
+  }
+  const trades = await r.json();
+  // Count consecutive losses from most recent
+  let consec = 0;
+  for (const t of trades) {
+    if (t.is_win === false) consec++;
+    else break;
+  }
+  const isPaused = consec >= DRAWDOWN_THRESHOLD;
+  let pausedUntil = null;
+  if (isPaused && trades.length > 0) {
+    const lastLoss = new Date(trades[0].signal_date);
+    const end = new Date(lastLoss);
+    let added = 0;
+    while (added < DRAWDOWN_COOLDOWN_TRADING_DAYS) {
+      end.setDate(end.getDate() + 1);
+      if (end.getDay() !== 0 && end.getDay() !== 6) added++;
+    }
+    pausedUntil = end.toISOString().slice(0, 10);
+    // Re-check: if today already past pausedUntil, not paused anymore
+    const today = new Date().toISOString().slice(0, 10);
+    if (today > pausedUntil) {
+      return { tier, consecLosses: consec, isPaused: false, pausedUntil: null, recent: trades.length };
+    }
+  }
+  return { tier, consecLosses: consec, isPaused, pausedUntil, recent: trades.length };
 }
 
 async function logHeartbeat(env, cronName, detail = {}) {
