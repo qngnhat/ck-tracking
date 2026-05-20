@@ -417,6 +417,64 @@ window.__SSI_RANKING__ = (function () {
     };
   }
 
+  // ── Watch tier: near-signal monitoring (not buy signal) ──
+  // Mã fail 1 condition của Tier B nhưng gần — đem visible daily cho user.
+  // Backtest KHÔNG verify (edge unknown). Label rõ "monitor only".
+  function detectWatchTier(ohlcv) {
+    const closes = ohlcv.closes;
+    const opens = ohlcv.opens;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 30) return null;
+
+    // Same liquidity filter
+    const turnovers = [];
+    for (let i = n - 21; i < n - 1; i++) {
+      turnovers.push(closes[i] * volumes[i] * 1000);
+    }
+    turnovers.sort((a, b) => a - b);
+    const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+    if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+    const cur = closes[n - 1];
+    const curOpen = opens[n - 1];
+    const curVol = volumes[n - 1];
+    const prev3 = closes[n - 4];
+    const ret3d = (cur - prev3) / prev3 * 100;
+    const volSlice = volumes.slice(n - 21, n - 1);
+    const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+    const dayGreen = cur > curOpen;
+    const rsi = calcRsi(closes, 14);
+    if (rsi == null) return null;
+
+    // 4 conditions of "near Tier B" — soft thresholds
+    const cond_drop = ret3d < -2 && ret3d > -10;     // some drop (not pure flat or crash)
+    const cond_vol = volRatio > 1.0;                  // any volume above average
+    const cond_green = dayGreen;
+    const cond_rsi = rsi < 60;                        // not overbought
+    const metArr = [cond_drop, cond_vol, cond_green, cond_rsi];
+    const metCount = metArr.filter(Boolean).length;
+
+    // Need 3/4 to be "watching distance"
+    if (metCount < 3) return null;
+
+    const missing = [];
+    if (!cond_drop) missing.push("drop");
+    if (!cond_vol) missing.push("vol");
+    if (!cond_green) missing.push("nến đỏ");
+    if (!cond_rsi) missing.push("RSI cao");
+
+    return {
+      matched: true,
+      metCount,
+      missing,
+      currentPrice: cur,
+      ret3d, volRatio, rsi, medianTurnover,
+      bounceStrength: volRatio * Math.abs(ret3d),
+    };
+  }
+
   // ── Strength Continuation pattern (Tier Momentum Swing) ──
   // Backtest 8.5y bull regime: Win 55%, Avg +3.5%/trade, Sharpe 1.04, PF 2.44.
   // Hold ~20 phiên với trailing stop 7% từ peak. Khác Vol Climax (T+3-5).
@@ -1483,6 +1541,9 @@ window.__SSI_RANKING__ = (function () {
             stock.volClimax = detectVolClimaxBounce(ohlcv);
             // Strength Continuation (Tier Momentum Swing — bull regime, hold ~20 phiên)
             stock.strengthCont = detectStrengthContinuation(ohlcv);
+            // Watch tier: mã gần signal (3/4 conditions met). KHÔNG phải buy signal —
+            // monitor only. Edge unknown nhưng cho user vis daily.
+            stock.watchTier = detectWatchTier(ohlcv);
             // Premium flag: climax match + NN net buy 5d > 0 (backtest Sharpe 1.90 vs base 0.36)
             if (stock.volClimax?.matched && foreign && foreign.length > 0) {
               const sorted = [...foreign].sort((a, b) =>
@@ -1567,6 +1628,26 @@ window.__SSI_RANKING__ = (function () {
     const isEliteRegime = vniRegime === "correction";
     const climaxElite = isEliteRegime ? climaxMatches.slice(0, 10) : [];
 
+    // Watch tier: mã 3/4 conditions met (near Tier B). Exclude climax matches.
+    const climaxSyms = new Set(climaxMatches.map((m) => m.symbol));
+    const watchTier = stocks
+      .filter((s) => s.watchTier?.matched && !climaxSyms.has(s.symbol) && !coolDownSymbols.has(s.symbol))
+      .map((s) => ({
+        symbol: s.symbol,
+        sector: s.sector,
+        metCount: s.watchTier.metCount,
+        missing: s.watchTier.missing,
+        ret3d: s.watchTier.ret3d,
+        volRatio: s.watchTier.volRatio,
+        rsi: s.watchTier.rsi,
+        currentPrice: s.watchTier.currentPrice,
+      }))
+      .sort((a, b) => {
+        // Sort by metCount desc, then bounce-like score
+        if (b.metCount !== a.metCount) return b.metCount - a.metCount;
+        return b.volRatio * Math.abs(b.ret3d) - a.volRatio * Math.abs(a.ret3d);
+      });
+
     // Tier Momentum Swing: Strength Continuation pattern khi VNI bull/neutral.
     // Backtest 8.5y bull: Win 55%, Avg +3.5%, Sharpe 1.04, PF 2.44 (trailing 7% exit).
     // Hold ~20 phiên — KHÁC Climax (T+3-5). Complement nhau theo regime.
@@ -1602,6 +1683,8 @@ window.__SSI_RANKING__ = (function () {
       momentumPicks,
       isMomentumRegime,
       momentumCount: momentumPicks.length,
+      watchTier: watchTier.slice(0, 10),  // Top 10 near-signal mã (monitor only)
+      watchCount: watchTier.length,
       vniRegime,
       vniRet20,
       allCount: stocks.length,

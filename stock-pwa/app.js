@@ -5837,6 +5837,47 @@
              sizeQty, sizeValue, sizePct, effectiveTier, nav };
   }
 
+  function renderWatchTierSection(picks) {
+    // Watch tier: mã 3/4 conditions met (gần Tier B). KHÔNG phải buy signal.
+    // Compact list, label rõ "monitor only".
+    let html = `
+      <div class="climax-section watch-tier-section">
+        <div class="climax-header">
+          <h3 class="climax-title">
+            🔍 Đang theo dõi (Watch tier)
+            <span class="climax-badge">${picks.length} mã</span>
+          </h3>
+          <div class="climax-subtitle watch-tier-warning">
+            ⚠️ <b>Monitor only — KHÔNG phải buy signal.</b> Mã fail 1/4 conditions của Tier B.
+            Edge chưa verify backtest. Cân nhắc tự research thêm trước khi vào lệnh.
+          </div>
+        </div>
+        <div class="watch-tier-list">
+    `;
+    for (const p of picks.slice(0, 10)) {
+      const missingText = p.missing.length > 0 ? `Còn thiếu: ${p.missing.join(", ")}` : "Gần đủ";
+      const ret3dCls = p.ret3d < 0 ? "down" : "up";
+      html += `
+        <div class="watch-tier-card" data-symbol="${p.symbol}">
+          <div class="watch-tier-row1">
+            <span class="watch-tier-symbol">${p.symbol}</span>
+            <span class="watch-tier-sector">${sectorLabel(p.sector)}</span>
+            <span class="watch-tier-met">${p.metCount}/4 ✓</span>
+          </div>
+          <div class="watch-tier-row2">
+            <span class="watch-tier-stat ${ret3dCls}">3p: ${p.ret3d > 0 ? "+" : ""}${p.ret3d.toFixed(1)}%</span>
+            <span class="watch-tier-stat">Vol ${p.volRatio.toFixed(1)}×</span>
+            <span class="watch-tier-stat">RSI ${p.rsi.toFixed(0)}</span>
+            <span class="watch-tier-stat">@ ${p.currentPrice.toFixed(2)}</span>
+          </div>
+          <div class="watch-tier-missing">${missingText}</div>
+        </div>
+      `;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
   function renderMomentumSwingSection(picks, totalCount) {
     const today = new Date();
     let html = `
@@ -6365,7 +6406,28 @@
       html += renderMomentumSwingSection(momentumPicks, momentumCount);
     }
 
+    // Watch tier — mã near signal (monitor only, NOT buy signal)
+    const watchTier = s.lastResult?.watchTier || [];
+    if (watchTier.length > 0) {
+      html += renderWatchTierSection(watchTier);
+    }
+
     content.innerHTML = html;
+
+    // Watch tier cards — click to open analyze
+    content.querySelectorAll(".watch-tier-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const sym = card.dataset.symbol;
+        if (!sym) return;
+        analyzeContext = null;
+        analyzeContextPick = null;
+        analyzeContextRank = null;
+        switchTab("analyze");
+        const input = document.getElementById("symbol-input");
+        if (input) input.value = sym;
+        analyzeSymbol(sym);
+      });
+    });
 
     // Climax card V2 — click header to open analyze
     content.querySelectorAll(".climax-card-v2 .climax-card-title").forEach((header) => {

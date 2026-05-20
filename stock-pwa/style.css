@@ -5330,6 +5330,76 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #ffb74d;
   line-height: 1.5;
 }
+/* ─── Watch tier (monitor only) ─── */
+.watch-tier-section {
+  opacity: 0.92;  /* dim slightly to indicate non-primary */
+}
+.watch-tier-warning {
+  color: #ffb74d !important;
+  background: rgba(255, 152, 0, 0.05);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #ff9800;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.watch-tier-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.watch-tier-card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.watch-tier-card:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.watch-tier-row1 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.watch-tier-symbol {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+}
+.watch-tier-sector {
+  font-size: 10px;
+  color: #888;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+}
+.watch-tier-met {
+  margin-left: auto;
+  font-size: 11px;
+  color: #81d4fa;
+  font-weight: 600;
+}
+.watch-tier-row2 {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+.watch-tier-stat.up { color: #81c784; }
+.watch-tier-stat.down { color: #ff8a80; }
+.watch-tier-missing {
+  font-size: 10px;
+  color: #888;
+  margin-top: 4px;
+  font-style: italic;
+}
+
 .climax-sector-warn.climax-sector-critical {
   background: rgba(255, 82, 82, 0.1);
   border-left-color: #ff5252;
