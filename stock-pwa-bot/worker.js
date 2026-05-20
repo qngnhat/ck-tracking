@@ -159,6 +159,29 @@ export default {
       ctx.waitUntil(processScanChunk(env));
       return new Response("Scan chunk triggered", { status: 200 });
     }
+    if (url.pathname === "/clear-test-data" && request.method === "POST") {
+      // Clean up all manually-seeded test data
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const sb = sbClient(env);
+      // 1. Delete fake FPT from active picks (signal_date 2026-05-19, was test seed)
+      const r1 = await fetch(
+        `${sb.url}/rest/v1/climax_active_picks?symbol=eq.FPT&signal_date=eq.2026-05-19`,
+        { method: "DELETE", headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+      );
+      // 2. Delete fake trade_log entries (test seeds)
+      const testSymbols = "(VCB,HPG,MWG,DGC,PDR,SHS,MOM_FPT,GVR)";
+      const r2 = await fetch(
+        `${sb.url}/rest/v1/trade_log?symbol=in.${testSymbols}&signal_date=lt.2026-05-20`,
+        { method: "DELETE", headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+      );
+      return new Response(JSON.stringify({
+        active_picks_clear: r1.ok,
+        trade_log_clear: r2.ok,
+      }, null, 2), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/seed-test-premium" && request.method === "POST") {
       // TEST ONLY: seed a fake Premium pick to verify UI/digest
       const secret = url.searchParams.get("secret");
