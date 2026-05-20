@@ -245,6 +245,65 @@ export default {
       }
       return new Response("No scan state", { status: 404 });
     }
+    if (url.pathname === "/seed-trade-log-test" && request.method === "POST") {
+      // TEST ONLY: seed fake resolved trades for UI dashboard demo
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const sb = sbClient(env);
+      const today = new Date();
+      const ago = (days) => new Date(today.getTime() - days * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      // All rows must have EXACTLY same keys (PGRST102 constraint)
+      const mkTrade = (sym, daysAgo, tier, entry, isPremium, nn, exitOpts) => ({
+        symbol: sym,
+        signal_date: ago(daysAgo),
+        tier,
+        entry_price: entry,
+        target_price: +(entry * 1.03).toFixed(4),
+        sl_price: +(entry * 0.92).toFixed(4),
+        nn_net_5d_bn: nn,
+        is_premium: isPremium,
+        resolved_at: exitOpts ? new Date().toISOString() : null,
+        exit_price: exitOpts?.exitPrice ?? null,
+        exit_day: exitOpts?.exitDay ?? null,
+        exit_reason: exitOpts?.exitReason ?? null,
+        net_ret: exitOpts?.netRet ?? null,
+        is_win: exitOpts?.isWin ?? null,
+      });
+      const fakeTrades = [
+        mkTrade("VCB", 20, "Premium", 60, true, 85, { exitPrice: 61.8, exitDay: 3, exitReason: "target", netRet: 0.026, isWin: true }),
+        mkTrade("HPG", 15, "Premium", 26, true, 120, { exitPrice: 26.78, exitDay: 4, exitReason: "target", netRet: 0.026, isWin: true }),
+        mkTrade("MWG", 12, "Premium", 55, true, 42, { exitPrice: 53.5, exitDay: 5, exitReason: "force", netRet: -0.031, isWin: false }),
+        mkTrade("DGC", 18, "A", 90, false, null, { exitPrice: 92.7, exitDay: 3, exitReason: "target", netRet: 0.026, isWin: true }),
+        mkTrade("PDR", 14, "A", 18, false, null, { exitPrice: 16.56, exitDay: 4, exitReason: "sl", netRet: -0.084, isWin: false }),
+        mkTrade("SHS", 10, "B", 18, false, null, { exitPrice: 18.2, exitDay: 5, exitReason: "force", netRet: 0.007, isWin: true }),
+        mkTrade("MOM_FPT", 8, "Momentum", 75, false, null, { exitPrice: 77.6, exitDay: 4, exitReason: "target", netRet: 0.031, isWin: true }),
+        mkTrade("GVR", 3, "Premium", 37, true, 56, null),  // unresolved
+      ];
+      // Direct INSERT for debug
+      const insertUrl = `${sb.url}/rest/v1/trade_log?on_conflict=symbol,signal_date`;
+      const insertRes = await fetch(insertUrl, {
+        method: "POST",
+        headers: {
+          apikey: sb.key,
+          authorization: `Bearer ${sb.key}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=representation",
+        },
+        body: JSON.stringify(fakeTrades),
+      });
+      const respText = await insertRes.text();
+      return new Response(JSON.stringify({
+        status: insertRes.status,
+        ok: insertRes.ok,
+        response: respText.substring(0, 1500),
+        count: fakeTrades.length,
+      }, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/trade-log" && request.method === "GET") {
       // Public read: forward-test tracker. Last 100 trades, newest first.
       const sb = sbClient(env);
