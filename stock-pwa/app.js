@@ -5779,6 +5779,21 @@
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
 
+  // Per-tier sizing (Kelly approximate dựa trên Sharpe backtest).
+  // Higher Sharpe = bigger size justified by better risk-adjusted edge.
+  // Reference Sharpe: Premium 1.90 · Elite 1.71 · A 1.09 (ATR) · Momentum 0.60 · B 0.70
+  const SIZE_PCT_PER_TIER = {
+    "Premium":  0.20,   // 20% NAV — best edge
+    "Elite":    0.18,
+    "A":        0.15,
+    "B":        0.10,
+    "Momentum": 0.12,   // Hold lâu hơn nên size nhỏ hơn A
+  };
+
+  function getTierSizePct(tier) {
+    return SIZE_PCT_PER_TIER[tier] ?? 0.10;
+  }
+
   function computeClimaxPlan(p) {
     const cur = p.currentPrice;
     const entryMax = cur * 1.02;
@@ -5796,6 +5811,10 @@
     const t4 = addTradingDays(today, 5);
     const t5 = addTradingDays(today, 6); // force exit
 
+    // Per-tier sizing: Premium 20% > Elite 18% > A 15% > Momentum 12% > B 10%
+    const effectiveTier = p.is_premium ? "Premium" : (p.tier || "B");
+    const sizePct = getTierSizePct(effectiveTier);
+
     // Size hint từ NAV
     let sizeQty = null, sizeValue = null, nav = null;
     try {
@@ -5808,13 +5827,14 @@
       }
       nav = totalMarket + cash;
       if (nav > 0 && entryMid > 0) {
-        const targetVnd = nav * 0.15;
+        const targetVnd = nav * sizePct;
         sizeQty = Math.floor(targetVnd / (entryMid * 1000));
         sizeValue = sizeQty * entryMid * 1000;
       }
     } catch {}
 
-    return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, t4, t5, sizeQty, sizeValue, nav };
+    return { cur, entryMax, entryMin, entryMid, sl, target, t1, t3, t4, t5,
+             sizeQty, sizeValue, sizePct, effectiveTier, nav };
   }
 
   function renderMomentumSwingSection(picks, totalCount) {
@@ -6015,9 +6035,10 @@
       const t3Label = fmtDM(plan.t3);
       const t4Label = fmtDM(plan.t4);
       const t5Label = fmtDM(plan.t5);
+      const sizePctTxt = (plan.sizePct * 100).toFixed(0);
       const sizeHtml = plan.sizeQty
-        ? `<div class="climax-size">💰 <b>${plan.sizeQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(plan.sizeValue)}, 15% NAV)</div>`
-        : `<div class="climax-size climax-size-fallback">💰 Size khuyến nghị: <b>15% NAV/lệnh</b> (cập nhật cash trong Portfolio để có số CP cụ thể)</div>`;
+        ? `<div class="climax-size">💰 <b>${plan.sizeQty.toLocaleString("vi-VN")} cp</b> (~${fmtMoney(plan.sizeValue)}, ${sizePctTxt}% NAV · ${plan.effectiveTier} sizing)</div>`
+        : `<div class="climax-size climax-size-fallback">💰 Size khuyến nghị: <b>${sizePctTxt}% NAV/lệnh</b> (${plan.effectiveTier} tier — cập nhật cash trong Portfolio để có số CP cụ thể)</div>`;
 
       html += `
         <div class="climax-card-v2" data-symbol="${p.symbol}" data-rank="${i + 1}">
@@ -6102,7 +6123,7 @@
                   <li>SSI iBoard → menu <b>Lệnh thường</b> <span class="ssi-term" data-term="LENH_THUONG">?</span></li>
                   <li>Loại lệnh: <b>LO</b> <span class="ssi-term" data-term="LO">?</span> — <u>không dùng ATO</u> <span class="ssi-term" data-term="ATO">?</span> để tránh gap up khớp giá xấu</li>
                   <li>Giá: <b>${fp(plan.entryMax)}</b> (limit max ${fp(plan.entryMax)}, tối thiểu ${fp(plan.entryMin)})</li>
-                  <li>Khối lượng: <b>${plan.sizeQty ? plan.sizeQty.toLocaleString("vi-VN") + " cp" : "≈15% NAV / giá entryMax"}</b></li>
+                  <li>Khối lượng: <b>${plan.sizeQty ? plan.sizeQty.toLocaleString("vi-VN") + " cp" : `≈${sizePctTxt}% NAV / giá entryMax`}</b> (${plan.effectiveTier} tier · ${sizePctTxt}% NAV)</li>
                   <li>Hiệu lực: trong ngày <b>${t1Label}</b> · không khớp → tự huỷ cuối phiên</li>
                 </ul>
               </div>

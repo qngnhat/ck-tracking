@@ -1607,7 +1607,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
       text += `💎 *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag}\n`;
       text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
     }
-    text += `Size Premium: có thể x1.5 NAV vs Tier A/B thông thường.\n`;
+    text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly-adjusted, Sharpe 1.90 justifies bigger size)\n`;
   }
 
   text += `\n━━━━━━━━━━━━━━━\n`;
@@ -1645,8 +1645,8 @@ async function sendMarketDigest(env, precomputedResult = null) {
       text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
     }
     text += isEliteRegime
-      ? `Size Elite: 15% NAV. Max 2-3 lệnh đồng thời.\n`
-      : `Size: 15% NAV Tier A, 10% Tier B. Max 2-3 lệnh.\n`;
+      ? `💰 Size: 18% NAV/Elite. Max 2-3 lệnh đồng thời.\n`
+      : `💰 Size: 15% NAV Tier A · 10% NAV Tier B. Max 2-3 lệnh.\n`;
   }
 
   // Momentum Swing section (chỉ khi bull/neutral regime + có matches)
@@ -1666,7 +1666,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
       text += `  MUA ≤ ${entryMax.toFixed(2)} · init SL ${initSL.toFixed(2)} · trail 7% từ đỉnh\n`;
       text += `  Hold ~20 phiên · expected ~${expectedExit.toFixed(2)} (+3.5%)\n\n`;
     }
-    text += `Size: 10% NAV (hold lâu hơn Climax). Max 1-2 lệnh.\n`;
+    text += `💰 Size: 12% NAV/Momentum (hold ~20 phiên trailing). Max 1-2 lệnh.\n`;
     text += `⚠️ Khi VNI chuyển correction → cắt sớm Momentum, switch sang Climax Elite.\n`;
   }
 
