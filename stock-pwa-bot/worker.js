@@ -304,6 +304,14 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/morning-test" && request.method === "POST") {
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(sendMorningBriefing(env));
+      return new Response("Morning briefing triggered", { status: 200 });
+    }
     if (url.pathname === "/drawdown-status" && request.method === "GET") {
       // Public read: drawdown circuit breaker status per tier.
       // Premium pause = 3 consecutive losses → pause 5 trading days.
@@ -394,6 +402,17 @@ export default {
       if (isVnHoliday()) return;
       ctx.waitUntil(logHeartbeat(env, "chunk", { event_cron: cron }));
       ctx.waitUntil(processScanChunk(env));
+      return;
+    }
+    if (cron === "30 1 * * 1-5") {
+      // Morning briefing 8:30 VN (1:30 UTC) — Telegram summary
+      if (isVnHoliday()) {
+        ctx.waitUntil(logHeartbeat(env, "morning-skip", { reason: "vn-holiday" }));
+        return;
+      }
+      console.log("[cron-morning] fired at", new Date().toISOString());
+      ctx.waitUntil(logHeartbeat(env, "morning", { event_cron: cron }));
+      ctx.waitUntil(sendMorningBriefing(env));
       return;
     }
     // Default: */3 intraday check triggers + spike
@@ -1491,6 +1510,103 @@ async function checkSpikeAlerts(env) {
 }
 
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
+// Top 2 — Daily morning briefing 8:30 VN
+// Concise Telegram summary: last 5d performance + active picks countdown + day expectation.
+async function sendMorningBriefing(env) {
+  const sb = sbClient(env);
+
+  // 1. Fetch last 30 days resolved trades
+  const fiveDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=not.is.null&signal_date=gte.${fiveDaysAgo}&order=signal_date.desc&limit=20`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  const recentTrades = r.ok ? await r.json() : [];
+
+  // 2. Active picks not yet expired
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const activePicksRes = await fetch(
+    `${sb.url}/rest/v1/climax_active_picks?select=*&expires_at=gte.${new Date().toISOString()}&order=signal_date.desc&limit=20`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  const activePicks = activePicksRes.ok ? await activePicksRes.json() : [];
+
+  // 3. Drawdown status
+  const drawdown = {};
+  for (const tier of ["Premium", "A", "B"]) {
+    drawdown[tier] = await computeDrawdownStatus(sb, tier);
+  }
+
+  // 4. Fetch users
+  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  if (chats.length === 0) {
+    console.log("[morning] no connected users");
+    return;
+  }
+
+  // 5. Build message
+  const today = new Date();
+  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  let text = `☀️ *Sáng ${todayLabel}*\n\n`;
+
+  // Performance tuần qua
+  if (recentTrades.length > 0) {
+    const wins = recentTrades.filter((t) => t.is_win).length;
+    const totalRet = recentTrades.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
+    const winRate = (wins / recentTrades.length) * 100;
+    text += `📊 *Tuần qua* (${recentTrades.length} trade resolved):\n`;
+    text += `  · Win ${winRate.toFixed(0)}% (${wins}/${recentTrades.length})\n`;
+    text += `  · Cumulative ${totalRet >= 0 ? "+" : ""}${(totalRet * 100).toFixed(2)}%\n\n`;
+  } else {
+    text += `📊 _Chưa có trade resolved trong tuần qua. App vẫn track signal._\n\n`;
+  }
+
+  // Drawdown warnings
+  const pausedTiers = Object.entries(drawdown).filter(([_, d]) => d.isPaused);
+  const warnTiers = Object.entries(drawdown).filter(([_, d]) => !d.isPaused && d.consecLosses >= 2);
+  if (pausedTiers.length > 0) {
+    text += `🚫 *Drawdown alert*: `;
+    text += pausedTiers.map(([t, d]) => `${t} PAUSED đến ${d.pausedUntil}`).join(", ") + "\n\n";
+  } else if (warnTiers.length > 0) {
+    text += `⚠️ *Drawdown warn*: `;
+    text += warnTiers.map(([t, d]) => `${t} ${d.consecLosses}/3 losses`).join(", ") + "\n\n";
+  }
+
+  // Active picks countdown
+  if (activePicks.length > 0) {
+    text += `💼 *Active T+ picks* (${activePicks.length} mã):\n`;
+    for (const p of activePicks.slice(0, 5)) {
+      const sigDate = new Date(p.signal_date);
+      const daysHeld = Math.floor((today.getTime() - sigDate.getTime()) / (24 * 3600 * 1000));
+      const tradingDays = Math.max(0, Math.floor(daysHeld * 5 / 7));  // approx trading days
+      const remainingDays = Math.max(0, 5 - tradingDays);
+      const premiumTag = p.is_premium ? "💎 " : "";
+      const peakTag = p.peak_price ? ` · peak ${parseFloat(p.peak_price).toFixed(2)}` : "";
+      text += `  · ${premiumTag}*${p.symbol}* (${p.tier}) — T+${tradingDays}, còn ${remainingDays} phiên${peakTag}\n`;
+    }
+    text += `\n`;
+  }
+
+  // Today expectation
+  text += `📅 *Hôm nay*:\n`;
+  text += `  · Chờ EOD scan 14:50 cho signal mới\n`;
+  text += `  · Intraday spike alerts mỗi 3 phút cho active picks\n`;
+  text += `  · Check tab Hiệu suất trong app để xem equity curve\n`;
+
+  let sent = 0;
+  for (const chatId of chats) {
+    try {
+      const resp = await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      if (resp?.ok) sent++;
+    } catch (e) {
+      console.warn(`[morning] send fail ${chatId}:`, e.message);
+    }
+  }
+  console.log(`[morning] briefing sent to ${sent}/${chats.length}`);
+  await logHeartbeat(env, "morning-sent", { sent, total: chats.length });
+}
+
 async function sendMarketDigest(env, precomputedResult = null) {
   let result;
   if (precomputedResult) {

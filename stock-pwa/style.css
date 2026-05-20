@@ -2359,6 +2359,12 @@ body.is-offline {
 }
 .perf-table td.up { color: #81c784; }
 .perf-table td.down { color: #ff8a80; }
+.perf-chart-hint {
+  font-size: 11px;
+  color: #888;
+  margin-top: 4px;
+  font-style: italic;
+}
 
 .climax-tier-badge.tier-Premium {
   background: linear-gradient(135deg, rgba(156, 39, 176, 0.28), rgba(233, 30, 99, 0.28));

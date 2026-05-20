@@ -7502,6 +7502,17 @@
       </div>
 
       <div class="perf-section">
+        <h3>📈 Equity curve (actual vs backtest expected)</h3>
+        <div id="perf-equity-chart" style="height: 240px; width: 100%;"></div>
+        <div class="perf-chart-hint">Solid line = actual cumulative. Dashed = backtest expectation cùng số trades.</div>
+      </div>
+
+      <div class="perf-section">
+        <h3>📉 Drawdown (running peak to trough)</h3>
+        <div id="perf-drawdown-chart" style="height: 160px; width: 100%;"></div>
+      </div>
+
+      <div class="perf-section">
         <h3>Actual vs Backtest expectation</h3>
         <table class="perf-table">
           <thead>
@@ -7561,6 +7572,94 @@
     html += `</tbody></table></div>`;
 
     content.innerHTML = html;
+
+    // ── Render charts (after DOM exists) ──
+    if (resolved.length >= 2 && typeof LightweightCharts !== "undefined") {
+      renderPerfCharts(resolved);
+    }
+  }
+
+  function renderPerfCharts(resolved) {
+    // Sort by signal_date ascending
+    const sorted = [...resolved].sort((a, b) => a.signal_date.localeCompare(b.signal_date));
+
+    // Compute cumulative equity (actual)
+    let cumActual = 0;
+    let cumExpected = 0;
+    let peak = 0;
+    const actualData = [];
+    const expectedData = [];
+    const drawdownData = [];
+
+    for (const t of sorted) {
+      const ret = parseFloat(t.net_ret || 0);
+      const expectedRet = (TIER_BACKTEST[t.tier]?.avg || 0) / 100; // backtest avg in %
+      cumActual += ret;
+      cumExpected += expectedRet;
+      peak = Math.max(peak, cumActual);
+      const drawdown = cumActual - peak;  // ≤ 0
+      actualData.push({ time: t.signal_date, value: cumActual * 100 });
+      expectedData.push({ time: t.signal_date, value: cumExpected * 100 });
+      drawdownData.push({ time: t.signal_date, value: drawdown * 100 });
+    }
+
+    const chartOpts = {
+      layout: {
+        background: { type: "solid", color: "transparent" },
+        textColor: "#aaa",
+      },
+      grid: {
+        vertLines: { color: "rgba(255,255,255,0.05)" },
+        horzLines: { color: "rgba(255,255,255,0.05)" },
+      },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
+      timeScale: { borderColor: "rgba(255,255,255,0.1)" },
+      crosshair: { mode: 0 },
+    };
+
+    // Equity curve chart
+    const equityEl = document.getElementById("perf-equity-chart");
+    if (equityEl) {
+      equityEl.innerHTML = "";
+      const chart = LightweightCharts.createChart(equityEl, {
+        ...chartOpts,
+        width: equityEl.clientWidth,
+        height: 240,
+      });
+      const actualSeries = chart.addLineSeries({
+        color: "#4CAF50",
+        lineWidth: 2,
+        title: "Actual",
+      });
+      actualSeries.setData(actualData);
+      const expectedSeries = chart.addLineSeries({
+        color: "#ff9800",
+        lineWidth: 1,
+        lineStyle: 2,  // dashed
+        title: "Backtest expected",
+      });
+      expectedSeries.setData(expectedData);
+      chart.timeScale().fitContent();
+    }
+
+    // Drawdown chart
+    const ddEl = document.getElementById("perf-drawdown-chart");
+    if (ddEl) {
+      ddEl.innerHTML = "";
+      const chart2 = LightweightCharts.createChart(ddEl, {
+        ...chartOpts,
+        width: ddEl.clientWidth,
+        height: 160,
+      });
+      const ddSeries = chart2.addAreaSeries({
+        topColor: "rgba(255, 82, 82, 0.4)",
+        bottomColor: "rgba(255, 82, 82, 0.05)",
+        lineColor: "#ff5252",
+        lineWidth: 2,
+      });
+      ddSeries.setData(drawdownData);
+      chart2.timeScale().fitContent();
+    }
   }
 
   document.getElementById("perf-refresh")?.addEventListener("click", () => {
