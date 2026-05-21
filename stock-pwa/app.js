@@ -196,6 +196,9 @@
       currentData = data;
       chartData = data; // daily = same as analysis by default
       currentSymbol = symbol;
+      // Show reload button now that we have a symbol
+      const reloadBtn = $("analyze-reload-btn");
+      if (reloadBtn) reloadBtn.style.display = "";
       const r = ANALYSIS.analyze(symbol, data, {
         fundamentals,
         foreignFlow,
@@ -2769,6 +2772,20 @@
     analyzeSymbol(input.value);
   });
 
+  // Reload button — re-analyze current symbol (fresh fetch)
+  $("analyze-reload-btn")?.addEventListener("click", async () => {
+    if (!currentSymbol) return;
+    const btn = $("analyze-reload-btn");
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      await analyzeSymbol(currentSymbol);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("spinning");
+    }
+  });
+
   // Delegate chip clicks
   document.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
@@ -2834,65 +2851,8 @@
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
-  // ── Swipe gesture mobile để chuyển tab ngang ──
-  // Vuốt trái → tab kế tiếp, vuốt phải → tab trước. Skip nếu touch start
-  // trên elements cần horizontal scroll (chart, tables, modals).
-  const TAB_ORDER = ["home", "analyze", "ranking", "portfolio", "perf"];
-  const NO_SWIPE_SELECTORS = [
-    "canvas",                         // Charts (tradingview, etc.)
-    ".chart-card",                    // Chart card area
-    "#chart-container",
-    ".chart-range",                   // Range buttons inside chart
-    ".sct-table",                     // Sector comparison table (grid)
-    ".cmdp",                          // Command palette
-    ".settings-modal",                // Settings modal
-    ".sheet",                         // Bottom sheet tooltip
-    ".alert-panel.open",              // Alert panel khi mở
-    ".auth-dropdown.open",            // Auth dropdown khi mở
-    "input",                          // Input fields
-    "textarea",
-    ".tracker-pick-row[open]",        // Tracker detail mở
-    ".tracker-snap-picks-rich",       // Tracker rows
-    "[data-no-swipe]",                // Manual opt-out
-  ].join(",");
-
-  let swipeStart = null;
-  document.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { swipeStart = null; return; }
-    const t = e.touches[0];
-    // Skip nếu touch trong element cần horizontal scroll / modal
-    if (e.target.closest(NO_SWIPE_SELECTORS)) { swipeStart = null; return; }
-    swipeStart = { x: t.clientX, y: t.clientY, ts: Date.now() };
-  }, { passive: true });
-
-  document.addEventListener("touchmove", (e) => {
-    // Cancel if multi-finger (zoom)
-    if (e.touches.length > 1) swipeStart = null;
-  }, { passive: true });
-
-  document.addEventListener("touchend", (e) => {
-    if (!swipeStart) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - swipeStart.x;
-    const dy = t.clientY - swipeStart.y;
-    const dt = Date.now() - swipeStart.ts;
-    swipeStart = null;
-
-    // Threshold: horizontal ≥ 80px, vertical < 60px, fast (< 600ms)
-    if (Math.abs(dx) < 80) return;
-    if (Math.abs(dy) > 60) return;
-    if (dt > 600) return;
-    // Must be predominantly horizontal (dx 1.5x stronger than dy)
-    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-
-    const idx = TAB_ORDER.indexOf(currentTab);
-    if (idx < 0) return;
-    if (dx < 0 && idx < TAB_ORDER.length - 1) {
-      switchTab(TAB_ORDER[idx + 1]); // Swipe trái → next
-    } else if (dx > 0 && idx > 0) {
-      switchTab(TAB_ORDER[idx - 1]); // Swipe phải → previous
-    }
-  }, { passive: true });
+  // Swipe gesture removed per user request — đôi khi vô tình chuyển tab khi
+  // scroll trong card/list. Tab navigation chỉ qua tab buttons.
 
   // ════════════════════════════════════════════════════
   // ── MARKET REGIME WIDGET ──
@@ -4671,6 +4631,7 @@
             <div class="briefing-greet">${greeting}!</div>
             <div class="briefing-date">${dateStr}</div>
           </div>
+          <button class="btn-icon home-reload-btn" id="home-reload-btn" title="Reload home — fetch fresh regime, snapshot, picks">↻</button>
           ${countdownLabel
             ? `<div class="briefing-session" style="background:${sess.color}22;color:${sess.color};border-color:${sess.color}55">
                  <span>${sess.icon}</span>
@@ -4846,6 +4807,26 @@
     `;
 
     container.innerHTML = html;
+
+    // Reload home — bust caches + re-fetch fresh data
+    document.getElementById("home-reload-btn")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "⟳";
+      btn.classList.add("spinning");
+      try {
+        // Bust caches related to home
+        ["vnindex_regime_v1", "market_snapshot_full_v1"].forEach((k) => localStorage.removeItem(k));
+        activeClimaxPicksFetchedAt = 0;
+        drawdownFetchedAt = 0;
+        // Re-fetch + re-render
+        await loadMarketRegime();
+        await renderHome();
+      } catch (err) {
+        console.warn("[home-reload] fail:", err.message);
+      }
+    });
 
     // Bind clickable cards
     container.querySelectorAll(".home-card-clickable, .briefing-stat[data-target-tab]").forEach((card) => {
@@ -6717,16 +6698,6 @@
     };
     return map[sector] || sector;
   }
-
-  // Top-N selector
-  document.querySelectorAll("#seg-topn .seg-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#seg-topn .seg-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      curState().topN = parseInt(btn.dataset.n, 10);
-      if (curState().picks.length > 0) renderRanking();
-    });
-  });
 
   // Style toggle (Phong cách quét) — filter which tiers to show
   // Persist trong localStorage. Default 'all'.
