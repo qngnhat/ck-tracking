@@ -5400,6 +5400,27 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-style: italic;
 }
 
+/* Event tier — distinct styling (purple/teal accent) */
+.event-tier-section .climax-title {
+  color: #ce93d8;
+}
+.event-tier-warning {
+  color: #ce93d8 !important;
+  background: rgba(156, 39, 176, 0.05);
+  border-left-color: #9c27b0 !important;
+}
+.event-tier-card {
+  border-left: 3px solid rgba(156, 39, 176, 0.5);
+}
+.event-tag {
+  background: rgba(156, 39, 176, 0.15);
+  color: #ce93d8;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .climax-sector-warn.climax-sector-critical {
   background: rgba(255, 82, 82, 0.1);
   border-left-color: #ff5252;

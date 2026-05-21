@@ -417,6 +417,67 @@ window.__SSI_RANKING__ = (function () {
     };
   }
 
+  // ── Event tier: volume anomaly proxy for news/event detection ──
+  // Hypothesis: mã có vol >3× TB20 + gap >2% = likely news-driven event.
+  // Edge KHÔNG verify backtest (Pattern 4 Gap-up + Pattern 5 Vol-thrust đã test FAIL standalone).
+  // Treat as INFORMATIONAL only — flag mã đang có "động tĩnh bất thường".
+  function detectEventTier(ohlcv) {
+    const closes = ohlcv.closes;
+    const opens = ohlcv.opens;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 30) return null;
+
+    const turnovers = [];
+    for (let i = n - 21; i < n - 1; i++) {
+      turnovers.push(closes[i] * volumes[i] * 1000);
+    }
+    turnovers.sort((a, b) => a - b);
+    const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+    if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+    const cur = closes[n - 1];
+    const curOpen = opens[n - 1];
+    const curVol = volumes[n - 1];
+    const prevClose = closes[n - 2];
+
+    const ret1d = (cur - prevClose) / prevClose * 100;
+    const gapPct = (curOpen - prevClose) / prevClose * 100;
+    const volSlice = volumes.slice(n - 21, n - 1);
+    const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+    const dayGreen = cur > curOpen;
+
+    // Event conditions (OR logic):
+    // 1. Vol anomaly: vol >3× TB20 (extreme spike, likely news catalyst)
+    // 2. Gap event: |gap_open| >2.5% (overnight news reaction)
+    // 3. Thrust: |ret_1d| >4% với vol >2× (extreme move + confirmation)
+    const isVolAnomaly = volRatio > 3.0;
+    const isGapEvent = Math.abs(gapPct) > 2.5;
+    const isThrust = Math.abs(ret1d) > 4 && volRatio > 2.0;
+
+    if (!isVolAnomaly && !isGapEvent && !isThrust) return null;
+
+    const events = [];
+    if (isVolAnomaly) events.push(`vol ${volRatio.toFixed(1)}×`);
+    if (isGapEvent) events.push(`gap ${gapPct > 0 ? "+" : ""}${gapPct.toFixed(1)}%`);
+    if (isThrust) events.push(`thrust ${ret1d > 0 ? "+" : ""}${ret1d.toFixed(1)}%`);
+
+    const direction = ret1d > 0 ? "up" : "down";
+    return {
+      matched: true,
+      events,
+      direction,
+      ret1d,
+      gapPct,
+      volRatio,
+      dayGreen,
+      currentPrice: cur,
+      medianTurnover,
+      eventStrength: volRatio + Math.abs(gapPct) / 2 + Math.abs(ret1d),
+    };
+  }
+
   // ── Watch tier: near-signal monitoring (not buy signal) ──
   // Mã fail 1 condition của Tier B nhưng gần — đem visible daily cho user.
   // Backtest KHÔNG verify (edge unknown). Label rõ "monitor only".
@@ -1544,6 +1605,9 @@ window.__SSI_RANKING__ = (function () {
             // Watch tier: mã gần signal (3/4 conditions met). KHÔNG phải buy signal —
             // monitor only. Edge unknown nhưng cho user vis daily.
             stock.watchTier = detectWatchTier(ohlcv);
+            // Event tier: vol anomaly / gap / thrust = proxy for news event.
+            // Informational only — edge chưa verify backtest standalone.
+            stock.eventTier = detectEventTier(ohlcv);
             // Premium flag: climax match + NN net buy 5d > 0 (backtest Sharpe 1.90 vs base 0.36)
             if (stock.volClimax?.matched && foreign && foreign.length > 0) {
               const sorted = [...foreign].sort((a, b) =>
@@ -1648,6 +1712,23 @@ window.__SSI_RANKING__ = (function () {
         return b.volRatio * Math.abs(b.ret3d) - a.volRatio * Math.abs(a.ret3d);
       });
 
+    // Event tier: vol anomaly + gap + thrust = proxy news/event.
+    // Informational only — edge KHÔNG verify backtest standalone.
+    const eventTier = stocks
+      .filter((s) => s.eventTier?.matched && !coolDownSymbols.has(s.symbol))
+      .map((s) => ({
+        symbol: s.symbol,
+        sector: s.sector,
+        events: s.eventTier.events,
+        direction: s.eventTier.direction,
+        ret1d: s.eventTier.ret1d,
+        gapPct: s.eventTier.gapPct,
+        volRatio: s.eventTier.volRatio,
+        currentPrice: s.eventTier.currentPrice,
+        eventStrength: s.eventTier.eventStrength,
+      }))
+      .sort((a, b) => b.eventStrength - a.eventStrength);
+
     // Tier Momentum Swing: Strength Continuation pattern khi VNI bull/neutral.
     // Backtest 8.5y bull: Win 55%, Avg +3.5%, Sharpe 1.04, PF 2.44 (trailing 7% exit).
     // Hold ~20 phiên — KHÁC Climax (T+3-5). Complement nhau theo regime.
@@ -1685,6 +1766,8 @@ window.__SSI_RANKING__ = (function () {
       momentumCount: momentumPicks.length,
       watchTier: watchTier.slice(0, 10),  // Top 10 near-signal mã (monitor only)
       watchCount: watchTier.length,
+      eventTier: eventTier.slice(0, 10),  // Top 10 event-driven (informational)
+      eventCount: eventTier.length,
       vniRegime,
       vniRet20,
       allCount: stocks.length,

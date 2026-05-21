@@ -5837,6 +5837,46 @@
              sizeQty, sizeValue, sizePct, effectiveTier, nav };
   }
 
+  function renderEventTierSection(picks) {
+    // Event tier: vol anomaly / gap / thrust = proxy news event.
+    // INFORMATIONAL only — edge KHÔNG verify backtest standalone.
+    let html = `
+      <div class="climax-section event-tier-section">
+        <div class="climax-header">
+          <h3 class="climax-title">
+            📰 Sự kiện / Event tier
+            <span class="climax-badge">${picks.length} mã</span>
+          </h3>
+          <div class="climax-subtitle event-tier-warning">
+            ⚠️ <b>Experimental — KHÔNG phải buy signal.</b> Detect "động tĩnh bất thường"
+            (vol >3×, gap >2.5%, thrust ±4%). Có thể là tin tức/sự kiện — cần research thêm.
+            Backtest standalone Pattern này đã FAIL (Sharpe âm).
+          </div>
+        </div>
+        <div class="watch-tier-list">
+    `;
+    for (const p of picks.slice(0, 10)) {
+      const dirIcon = p.direction === "up" ? "📈" : "📉";
+      const dirCls = p.direction === "up" ? "up" : "down";
+      html += `
+        <div class="watch-tier-card event-tier-card" data-symbol="${p.symbol}">
+          <div class="watch-tier-row1">
+            <span class="watch-tier-symbol">${dirIcon} ${p.symbol}</span>
+            <span class="watch-tier-sector">${sectorLabel(p.sector)}</span>
+            <span class="watch-tier-met ${dirCls}">${p.ret1d >= 0 ? "+" : ""}${p.ret1d.toFixed(1)}%</span>
+          </div>
+          <div class="watch-tier-row2">
+            ${p.events.map((e) => `<span class="watch-tier-stat event-tag">${e}</span>`).join("")}
+            <span class="watch-tier-stat">@ ${p.currentPrice.toFixed(2)}</span>
+          </div>
+          <div class="watch-tier-missing">Sự kiện bất thường — search news mã này trước khi trade.</div>
+        </div>
+      `;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
   function renderWatchTierSection(picks) {
     // Watch tier: mã 3/4 conditions met (gần Tier B). KHÔNG phải buy signal.
     // Compact list, label rõ "monitor only".
@@ -6388,28 +6428,48 @@
     }
 
     let html = drawdownSlot + regimeBanner + statsHtml;
-    // Premium luôn render đầu (best edge)
-    if (countPremium > 0) {
-      html += renderClimaxBounceSection(premium, countPremium, { tier: "Premium" });
-    }
-    if (isEliteRegime && countElite > 0) {
-      html += renderClimaxBounceSection(elite, countElite, { tier: "Elite" });
-    } else {
-      if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
-      if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
+    const style = loadStyle();
+    const showBottom = style === "all" || style === "bottom";
+    const showMomentum = style === "all" || style === "momentum";
+    const showEvent = style === "all" || style === "event";
+    const showWatch = style === "all" || style === "bottom";  // Watch ≈ bắt đáy
+
+    // Bắt đáy tiers (Premium/Elite/A/B)
+    if (showBottom) {
+      if (countPremium > 0) {
+        html += renderClimaxBounceSection(premium, countPremium, { tier: "Premium" });
+      }
+      if (isEliteRegime && countElite > 0) {
+        html += renderClimaxBounceSection(elite, countElite, { tier: "Elite" });
+      } else {
+        if (countA > 0) html += renderClimaxBounceSection(tierA, countA, { tier: "A" });
+        if (countB > 0) html += renderClimaxBounceSection(tierB, countB, { tier: "B" });
+      }
     }
 
     // Tier Momentum Swing — chỉ render khi bull/neutral regime
-    const momentumPicks = s.lastResult?.momentumPicks || [];
-    const momentumCount = s.lastResult?.momentumCount || 0;
-    if (s.lastResult?.isMomentumRegime && momentumCount > 0) {
-      html += renderMomentumSwingSection(momentumPicks, momentumCount);
+    if (showMomentum) {
+      const momentumPicks = s.lastResult?.momentumPicks || [];
+      const momentumCount = s.lastResult?.momentumCount || 0;
+      if (s.lastResult?.isMomentumRegime && momentumCount > 0) {
+        html += renderMomentumSwingSection(momentumPicks, momentumCount);
+      }
+    }
+
+    // Event tier — vol anomaly / gap / thrust (informational)
+    if (showEvent) {
+      const eventPicks = s.lastResult?.eventTier || [];
+      if (eventPicks.length > 0) {
+        html += renderEventTierSection(eventPicks);
+      }
     }
 
     // Watch tier — mã near signal (monitor only, NOT buy signal)
-    const watchTier = s.lastResult?.watchTier || [];
-    if (watchTier.length > 0) {
-      html += renderWatchTierSection(watchTier);
+    if (showWatch) {
+      const watchTier = s.lastResult?.watchTier || [];
+      if (watchTier.length > 0) {
+        html += renderWatchTierSection(watchTier);
+      }
     }
 
     content.innerHTML = html;
@@ -6510,6 +6570,31 @@
       btn.classList.add("active");
       curState().topN = parseInt(btn.dataset.n, 10);
       if (curState().picks.length > 0) renderRanking();
+    });
+  });
+
+  // Style toggle (Phong cách quét) — filter which tiers to show
+  // Persist trong localStorage. Default 'all'.
+  const STYLE_KEY = "tplus_style_v1";
+  function loadStyle() {
+    return localStorage.getItem(STYLE_KEY) || "all";
+  }
+  function saveStyle(style) {
+    localStorage.setItem(STYLE_KEY, style);
+  }
+  function initStyleToggle() {
+    const current = loadStyle();
+    document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.style === current);
+    });
+  }
+  initStyleToggle();
+  document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#seg-style .seg-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      saveStyle(btn.dataset.style);
+      if (curState().picks.length > 0 || curState().lastResult) renderRanking();
     });
   });
 
