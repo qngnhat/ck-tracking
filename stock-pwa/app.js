@@ -5204,13 +5204,44 @@
 
   function showRankingIntro() {
     const content = $("ranking-content");
+    const style = loadStyle();
+    let icon, title, body;
+    if (style === "bottom") {
+      icon = "🔻"; title = "Bắt đáy T+ (Mean-Reversion)";
+      body = `
+        <p>Quét mã Large+Mid match pattern <b>Vol Climax Bounce</b>: 3 phiên giảm sâu + volume bùng + nến xanh + RSI oversold.</p>
+        <p><b>4 tiers</b>: 💎 Premium (Climax + NN net mua) · ⚡ Elite (Climax + VNI correction) · 🟢 Tier A · 🔵 Tier B.</p>
+        <p style="color:#4CAF50"><b>Backtest 8.5y:</b> Premium Win 61% Sharpe 1.90 · Tier A 56% Sharpe 1.09. Hold T+3-T+5 target +3%, SL -8%.</p>
+        <p style="color:#FF9800"><b>Lưu ý:</b> pattern hiếm trong bull market. Đợi correction để fire nhiều.</p>`;
+    } else if (style === "momentum") {
+      icon = "🚀"; title = "Đà tăng (Continuation)";
+      body = `
+        <p>Quét mã đang trong uptrend mạnh, ride momentum với trailing stop.</p>
+        <p><b>2 tiers</b>: 🚀 Strength Continuation (MA stack + consolidation breakout) · 📈 Trend HH/HL (3 higher highs/lows).</p>
+        <p style="color:#4CAF50"><b>Backtest 8.5y:</b> Strength Win 60% Sharpe 0.60 · Trend Win 45% Sharpe 0.75 PF 1.44.</p>
+        <p style="color:#FF9800"><b>Đặc tính</b>: Win &lt;50% nhưng PF cao — chấp nhận thua nhiều, đợi 1-2 winner LỚN che hết losers.</p>`;
+    } else if (style === "event") {
+      icon = "📰"; title = "Sự kiện / Event tier";
+      body = `
+        <p>Detect mã có "động tĩnh bất thường" — vol > 3× / gap > 2.5% / thrust ±4%.</p>
+        <p>Có thể là news/event không có public API. App chỉ flag — user research news ngoài app trước khi trade.</p>
+        <p style="color:#ff5252"><b>⚠️ Experimental</b> — backtest standalone FAIL. INFORMATIONAL only, không phải buy signal.</p>`;
+    } else {
+      // All styles
+      icon = "⚡"; title = "Lướt sóng T+";
+      body = `
+        <p>App quét 1411 mã (HOSE + HNX + UPCOM) với <b>3 phong cách</b>:</p>
+        <p>🔻 <b>Bắt đáy</b>: Climax oversold + bounce (4 tiers, Sharpe đến 1.90)<br>
+        🚀 <b>Đà tăng</b>: Trend continuation (2 tiers, Sharpe đến 0.75)<br>
+        📰 <b>Sự kiện</b>: Vol anomaly proxy (experimental)</p>
+        <p style="color:#4CAF50"><b>Backtest 8.5 năm cross-val</b>. Đa số ngày 0-2 picks — pattern by design selective.</p>
+        <p style="color:#FF9800"><b>Lưu ý</b>: Chọn phong cách tab trên + bấm Quét. Hold theo plan tier, đừng FOMO.</p>`;
+    }
     content.innerHTML = `
       <div class="empty-state ranking-intro">
-        <div class="empty-icon">🔻</div>
-        <h2>Bắt đáy T+</h2>
-        <p>Quét mã Large+Mid cap match pattern <b>Vol Climax Bounce</b>: 3 phiên giảm > 7% + volume > 2× TB20 + nến xanh + RSI &lt; 35. Hold <b>3 phiên (T+3.5)</b>.</p>
-        <p style="color:#4CAF50;margin-top:8px;font-size:11px"><b>Cross-validated 8.5 năm:</b> Win 59%, Avg +1.07%/lệnh, Sharpe 0.92 (316 trades 2018-2026).</p>
-        <p style="color:#FF9800;margin-top:8px"><b>Lưu ý:</b> pattern hiếm ~38 lệnh/năm — nhiều ngày empty là chuyện bình thường. Kỷ luật không FOMO, không vào lệnh khi không có signal rõ.</p>
+        <div class="empty-icon">${icon}</div>
+        <h2>${title}</h2>
+        ${body}
         <button class="btn-primary" id="ranking-load-btn">Quét pattern hôm nay</button>
       </div>
     `;
@@ -6711,6 +6742,11 @@
     document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.style === current);
     });
+    // Refresh intro to match selected style nếu chưa có result
+    if (!curState().lastResult && curState().picks.length === 0) {
+      // Defer để DOM sẵn sàng
+      setTimeout(() => showRankingIntro(), 0);
+    }
   }
   initStyleToggle();
   document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
@@ -6718,7 +6754,12 @@
       document.querySelectorAll("#seg-style .seg-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       saveStyle(btn.dataset.style);
-      if (curState().picks.length > 0 || curState().lastResult) renderRanking();
+      // Re-render dù có result hay không (intro cũng đổi theo style)
+      if (curState().picks.length > 0 || curState().lastResult) {
+        renderRanking();
+      } else {
+        showRankingIntro();
+      }
     });
   });
 
