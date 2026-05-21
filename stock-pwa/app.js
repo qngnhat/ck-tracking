@@ -4570,6 +4570,27 @@
     const container = $("home-container");
     if (!container) return;
 
+    // Defensive: set placeholder immediately so even if subsequent code throws,
+    // user sees SOMETHING instead of blank screen.
+    if (!container.innerHTML.trim()) {
+      container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Đang tải trang chủ…</div></div>`;
+    }
+
+    try {
+      await renderHomeImpl(container);
+    } catch (e) {
+      console.error("[renderHome] fail:", e);
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <p><b>Lỗi tải Trang chủ</b></p>
+          <p><small>${e?.message || e}</small></p>
+          <button class="btn-primary" onclick="location.reload()">Reload app</button>
+        </div>`;
+    }
+  }
+
+  async function renderHomeImpl(container) {
     // Fetch active picks for briefing context (non-blocking — uses cache if fresh)
     fetchActiveClimaxPicks().catch(() => {});
 
