@@ -3723,6 +3723,108 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   transform: scale(1.2);
 }
 
+/* Alert setup button — sits left of watchlist-toggle, inside header card */
+.alert-setup-btn {
+  position: absolute;
+  top: 6px;
+  right: 52px; /* left of star toggle (44px min-width + small gap) */
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 8px 12px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  line-height: 1;
+  filter: grayscale(20%);
+}
+.alert-setup-btn:hover { filter: none; }
+.alert-setup-btn:active { transform: scale(1.2); }
+
+/* Alert modal — dark theme to match existing modals */
+.alert-modal {
+  max-width: 480px;
+}
+.alert-form-intro {
+  font-size: 13px;
+  color: #b8c0d0;
+  background: rgba(33, 150, 243, 0.08);
+  border-left: 3px solid #2196F3;
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+  line-height: 1.45;
+}
+.alert-form-intro b { color: #fff; }
+.alert-trigger-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid #2a2a3e;
+}
+.alert-trigger-row:last-of-type {
+  border-bottom: none;
+}
+.alert-trigger-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #d0d6e2;
+  user-select: none;
+}
+.alert-trigger-label b { color: #fff; }
+.alert-trigger-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: #2196F3;
+}
+.alert-trigger-row input[type="number"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #2a2a3e;
+  background: #0f0f1e;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 15px;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.alert-trigger-row input[type="number"]:disabled {
+  opacity: 0.35;
+  background: #15152a;
+}
+.alert-trigger-row input[type="number"]:focus {
+  outline: none;
+  border-color: #2196F3;
+}
+.alert-trigger-row .form-hint {
+  color: #777;
+  font-size: 12px;
+}
+#alert-form-summary {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 193, 7, 0.08);
+  border-left: 3px solid #FFC107;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #d0d6e2;
+  line-height: 1.5;
+}
+#alert-form-summary b { color: #fff; }
+#alert-remove-btn {
+  color: #ef5350;
+  margin-right: auto;
+}
+
 .an-card.full-width {
   position: relative;
 }

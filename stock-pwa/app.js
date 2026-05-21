@@ -649,6 +649,15 @@
         wlBtn.title = added ? "Bỏ khỏi watchlist" : "Thêm vào watchlist";
       });
     }
+
+    // Bind alert-setup button → open modal
+    const alertBtn = root.querySelector("#alert-setup-btn");
+    if (alertBtn) {
+      alertBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openAlertModal(alertBtn.dataset.symbol);
+      });
+    }
   }
 
   // Detect "đỉnh sóng / phân phối" — overbought stocks late in their rally.
@@ -746,6 +755,7 @@
         <button class="watchlist-toggle ${inWatchlist ? 'active' : ''}" id="watchlist-toggle" data-symbol="${r.symbol}" title="${inWatchlist ? 'Bỏ khỏi watchlist' : 'Thêm vào watchlist'}">
           ${inWatchlist ? '★' : '☆'}
         </button>
+        <button class="alert-setup-btn" id="alert-setup-btn" data-symbol="${r.symbol}" title="Đặt cảnh báo tự động">🔔</button>
         <div class="an-head">
           <div class="an-symbol">${r.symbol}</div>
           ${companyLine}
@@ -931,6 +941,166 @@
     backdrop.classList.remove("open");
     modal.classList.remove("open");
     document.body.style.overflow = "";
+  }
+
+  // ── Alert setup modal (per-symbol custom triggers) ──
+  let alertModalSymbol = null;
+
+  function openAlertModal(symbol) {
+    if (!symbol) return;
+    alertModalSymbol = symbol;
+    const modal = $("alert-modal");
+    const backdrop = $("alert-modal-backdrop");
+    if (!modal || !backdrop) return;
+
+    // Title
+    const title = $("alert-modal-title");
+    if (title) title.textContent = `🔔 Đặt cảnh báo · ${symbol}`;
+
+    // Existing watch? prefill triggers
+    const watches = loadTplusWatches();
+    const existing = watches.find((w) => w.symbol === symbol && !w.dismissedByUser);
+
+    const closeEnable = $("alert-close-enable");
+    const closeValue = $("alert-close-value");
+    const volEnable = $("alert-vol-enable");
+    const volValue = $("alert-vol-value");
+    const gapEnable = $("alert-gap-enable");
+    const gapValue = $("alert-gap-value");
+    const removeBtn = $("alert-remove-btn");
+
+    // Reasonable defaults from current analysis context
+    const r = lastAnalysisResult;
+    const curPrice = r?.current || 0;
+    const avgVol = r?.avgVol || (r?.currentVol && r?.volRatio ? r.currentVol / r.volRatio : 0);
+    const defaultCloseTrigger = curPrice ? +(curPrice * 1.02).toFixed(2) : "";
+    const defaultVolTrigger = avgVol ? Math.round((avgVol * 1.5) / 1000) : ""; // K shares
+    const defaultGapTrigger = curPrice ? +(curPrice * 1.015).toFixed(2) : "";
+
+    const t = existing?.triggers || {};
+    closeEnable.checked = t.closeAbove != null;
+    closeValue.value = t.closeAbove != null ? t.closeAbove : defaultCloseTrigger;
+    closeValue.disabled = !closeEnable.checked;
+
+    volEnable.checked = t.volAbove != null;
+    // Store as K-shares in UI; convert to absolute shares on save
+    volValue.value = t.volAbove != null ? Math.round(t.volAbove / 1000) : defaultVolTrigger;
+    volValue.disabled = !volEnable.checked;
+
+    gapEnable.checked = t.gapAbove != null;
+    gapValue.value = t.gapAbove != null ? t.gapAbove : defaultGapTrigger;
+    gapValue.disabled = !gapEnable.checked;
+
+    removeBtn.style.display = existing ? "" : "none";
+
+    bindAlertModal();
+    updateAlertSummary();
+    backdrop.classList.add("open");
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeAlertModal() {
+    $("alert-modal")?.classList.remove("open");
+    $("alert-modal-backdrop")?.classList.remove("open");
+    document.body.style.overflow = "";
+    alertModalSymbol = null;
+  }
+
+  function bindAlertModal() {
+    const modal = $("alert-modal");
+    if (!modal || modal.dataset.bound) return;
+    modal.dataset.bound = "1";
+
+    $("alert-modal-close")?.addEventListener("click", closeAlertModal);
+    $("alert-modal-backdrop")?.addEventListener("click", closeAlertModal);
+    $("alert-cancel")?.addEventListener("click", closeAlertModal);
+
+    // Enable/disable input theo checkbox
+    [
+      ["alert-close-enable", "alert-close-value"],
+      ["alert-vol-enable", "alert-vol-value"],
+      ["alert-gap-enable", "alert-gap-value"],
+    ].forEach(([cbId, inId]) => {
+      const cb = $(cbId);
+      const inp = $(inId);
+      if (!cb || !inp) return;
+      cb.addEventListener("change", () => {
+        inp.disabled = !cb.checked;
+        if (cb.checked) inp.focus();
+        updateAlertSummary();
+      });
+      inp.addEventListener("input", updateAlertSummary);
+    });
+
+    $("alert-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await saveAlertSetup();
+    });
+
+    $("alert-remove-btn")?.addEventListener("click", async () => {
+      if (!alertModalSymbol) return;
+      if (!confirm(`Xoá theo dõi ${alertModalSymbol}?`)) return;
+      await removeTplusWatch(alertModalSymbol);
+      notifyBrowser(`Đã xoá theo dõi ${alertModalSymbol}`, "Bot không gửi alert nữa.", "#999");
+      closeAlertModal();
+      if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
+    });
+  }
+
+  function updateAlertSummary() {
+    const summary = $("alert-form-summary");
+    if (!summary) return;
+    const triggers = collectAlertTriggers();
+    const parts = [];
+    if (triggers.closeAbove) parts.push(`giá đóng > <b>${fp(triggers.closeAbove)}</b>`);
+    if (triggers.volAbove) parts.push(`khối lượng > <b>${fmtVol(triggers.volAbove)}</b>`);
+    if (triggers.gapAbove) parts.push(`giá mở > <b>${fp(triggers.gapAbove)}</b>`);
+    if (!parts.length) {
+      summary.innerHTML = `<span style="color:#999">Bật ít nhất 1 trigger để lưu.</span>`;
+      return;
+    }
+    summary.innerHTML = `Bot sẽ báo khi: ${parts.join(" <i>HOẶC</i> ")}`;
+  }
+
+  function collectAlertTriggers() {
+    const triggers = {};
+    if ($("alert-close-enable")?.checked) {
+      const v = parseFloat($("alert-close-value")?.value);
+      if (isFinite(v) && v > 0) triggers.closeAbove = v;
+    }
+    if ($("alert-vol-enable")?.checked) {
+      const k = parseFloat($("alert-vol-value")?.value);
+      if (isFinite(k) && k > 0) triggers.volAbove = k * 1000; // K shares → shares
+    }
+    if ($("alert-gap-enable")?.checked) {
+      const v = parseFloat($("alert-gap-value")?.value);
+      if (isFinite(v) && v > 0) triggers.gapAbove = v;
+    }
+    return triggers;
+  }
+
+  async function saveAlertSetup() {
+    if (!alertModalSymbol) return;
+    const triggers = collectAlertTriggers();
+    if (!Object.keys(triggers).length) {
+      alert("Bật ít nhất 1 trigger để lưu.");
+      return;
+    }
+    // Request notification permission (silent if already granted/denied)
+    if ("Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    await addTplusWatch(alertModalSymbol, triggers);
+
+    const auth = window.__SSI_AUTH__;
+    const tip = auth?.isLoggedIn?.()
+      ? "Đã sync Supabase — bot sẽ check mỗi 3 phút và gửi Telegram."
+      : "Đăng nhập + kết nối Telegram để bot tự check khi đóng app.";
+    notifyBrowser(`Đã đặt cảnh báo ${alertModalSymbol}`, tip, "#4CAF50");
+
+    closeAlertModal();
+    if (lastAnalysisResult) renderAnalysis(lastAnalysisResult);
   }
 
   async function renderSettingsBody() {

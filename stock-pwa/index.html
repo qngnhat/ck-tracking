@@ -165,6 +165,55 @@
     </form>
   </div>
 
+  <!-- Alert setup modal (đặt cảnh báo trigger per symbol) -->
+  <div class="modal-backdrop" id="alert-modal-backdrop"></div>
+  <div class="modal alert-modal" id="alert-modal">
+    <div class="modal-head">
+      <span class="modal-title" id="alert-modal-title">🔔 Đặt cảnh báo</span>
+      <button class="modal-close" id="alert-modal-close">✕</button>
+    </div>
+    <form class="modal-body" id="alert-form">
+      <div class="alert-form-intro">
+        Bot sẽ tự check mỗi 3 phút trong giờ giao dịch và gửi Telegram khi <b>1 trong 3</b> trigger bên dưới được kích hoạt.
+      </div>
+
+      <div class="form-row alert-trigger-row">
+        <label class="alert-trigger-label">
+          <input type="checkbox" id="alert-close-enable">
+          <span>① Giá đóng cửa <b>vượt</b></span>
+        </label>
+        <input type="number" id="alert-close-value" step="any" placeholder="VD: 25.5" disabled>
+        <small class="form-hint">đơn vị: nghìn đồng (giá tick VN)</small>
+      </div>
+
+      <div class="form-row alert-trigger-row">
+        <label class="alert-trigger-label">
+          <input type="checkbox" id="alert-vol-enable">
+          <span>② Khối lượng phiên <b>vượt</b></span>
+        </label>
+        <input type="number" id="alert-vol-value" step="any" placeholder="VD: 500" disabled>
+        <small class="form-hint">đơn vị: nghìn cổ phiếu (K shares)</small>
+      </div>
+
+      <div class="form-row alert-trigger-row">
+        <label class="alert-trigger-label">
+          <input type="checkbox" id="alert-gap-enable">
+          <span>③ Giá mở cửa <b>gap-up trên</b></span>
+        </label>
+        <input type="number" id="alert-gap-value" step="any" placeholder="VD: 26.0" disabled>
+        <small class="form-hint">đơn vị: nghìn đồng — báo khi ATO ≥ ngưỡng</small>
+      </div>
+
+      <div class="form-summary" id="alert-form-summary"></div>
+
+      <div class="form-actions">
+        <button type="button" class="link-btn" id="alert-remove-btn" style="display:none">Xoá theo dõi</button>
+        <button type="button" class="link-btn" id="alert-cancel">Huỷ</button>
+        <button type="submit" class="btn-primary" id="alert-submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Auth dropdown (logged in) -->
   <div class="auth-dropdown" id="auth-dropdown">
     <div class="auth-user-info">
