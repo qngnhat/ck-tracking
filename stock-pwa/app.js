@@ -5849,8 +5849,8 @@
           </h3>
           <div class="climax-subtitle">
             Mã 3 higher highs + 3 higher lows + vol confirm + uptrend.
-            Hold ~20 phiên với trailing stop 8% từ peak. Backtest 8.5y: Win 47%, Sharpe 0.76, PF 1.68.
-            <b>Khác Climax</b>: Win &lt; 50% nhưng winners RẤT lớn (PF cao).
+            Hold tối đa <b>T+10</b> với trailing stop <b>6%</b> từ peak. Backtest: Win 45%, Sharpe 0.75, PF 1.44.
+            <b>Đặc tính</b>: Win &lt; 50% nhưng PF &gt; 1.3 — winners lớn nhờ trailing capture trend.
           </div>
         </div>
         <div class="watch-tier-list">
@@ -5870,7 +5870,7 @@
             <span class="watch-tier-stat">MA50 ${p.ma50.toFixed(2)}</span>
           </div>
           <div class="watch-tier-missing">
-            🎯 Plan: SL ${p.planInitSL.toFixed(2)} (entry × 0.92) · Trailing ${p.planTrailPct}% từ peak · Force exit T+${p.planMaxHold}. Expected ~${p.planExpectedExit.toFixed(2)} (+5% avg).
+            🎯 Plan: Init SL ${p.planInitSL.toFixed(2)} (-6% entry) · Trailing ${p.planTrailPct}% từ peak · Force exit T+${p.planMaxHold}. Expected ~${p.planExpectedExit.toFixed(2)} (+4% avg).
           </div>
         </div>
       `;

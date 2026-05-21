@@ -477,11 +477,13 @@ window.__SSI_RANKING__ = (function () {
       ret3d: ((cur - closes[n - 4]) / closes[n - 4]) * 100,
       volRatio, ma20, ma50,
       medianTurnover,
-      // Exit plan: hold ~20 phiên, trailing 8% từ peak
-      planInitSL: +(cur * 0.92).toFixed(4),
-      planTrailPct: 8,
-      planMaxHold: 20,
-      planExpectedExit: +(cur * 1.05).toFixed(4),  // avg ~+5% historical
+      // Exit plan: hold T+10 max + trailing 6% từ peak (T+ ngắn phù hợp VN trader).
+      // Backtest 8.5y hold 10 trail 6%: Win 45%, Sharpe 0.61-0.75, PF 1.33-1.44.
+      // Win rate <50% nhưng PF >1.3 = trailing capture big winners.
+      planInitSL: +(cur * 0.94).toFixed(4),  // -6% init SL (tighter vs Climax -8%)
+      planTrailPct: 6,
+      planMaxHold: 10,
+      planExpectedExit: +(cur * 1.04).toFixed(4),  // avg ~+4% historical
       trendStrength: volRatio * Math.abs(((cur - closes[n - 4]) / closes[n - 4]) * 100),
     };
   }
