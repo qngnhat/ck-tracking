@@ -6418,51 +6418,129 @@
       }
     })() : "";
 
-    // ── Stats + expectation banner cho phong cách T+3 (Vol Climax Bounce) ──
-    const statsHtml = isEliteRegime ? `
-      <div class="tplus-stats">
-        <span class="tplus-stats-line">
-          ⚡ <b>${countElite}</b> Tier Elite — climax matches + VNI correction regime
-        </span>
-      </div>
-      <div class="tplus-expectation-banner tplus-banner-elite">
-        <div class="tplus-exp-title">⚡ Bắt đáy T+ ELITE · climax + thị trường correction</div>
-        <div class="tplus-exp-body">
-          Backtest 8.5y: Win <b>61.2%</b>, Avg <b>+2.05%</b>/trade, Sharpe <b>1.71</b><br>
-          So với baseline (không filter regime): Win 56%, Avg +0.81%, Sharpe 0.70
+    // Style filter — load BEFORE stats banner so banner adapts to selected style
+    const style = loadStyle();
+    const showBottom = style === "all" || style === "bottom";
+    const showMomentum = style === "all" || style === "momentum";
+    const showEvent = style === "all" || style === "event";
+    const showWatch = style === "all" || style === "bottom";  // Watch ≈ bắt đáy
+
+    // Get count per style
+    const momentumCount = s.lastResult?.momentumCount || 0;
+    const trendCount = s.lastResult?.trendCount || 0;
+    const eventCount = s.lastResult?.eventCount || 0;
+    const watchCount = s.lastResult?.watchCount || 0;
+
+    // ── Stats + expectation banner ──
+    // Adapt theo style đang chọn
+    let statsHtml = "";
+    if (showBottom && (style === "bottom" || style === "all")) {
+      statsHtml = isEliteRegime ? `
+        <div class="tplus-stats">
+          <span class="tplus-stats-line">
+            ⚡ <b>${countElite}</b> Tier Elite — climax matches + VNI correction regime
+          </span>
         </div>
-        <div class="tplus-exp-warning">
-          ⚠️ Hold T+3 → T+5 (target +3%, SL close -8%). Size <b>15% NAV/lệnh</b>. Max <b>2-3 lệnh</b> đồng thời.
+        <div class="tplus-expectation-banner tplus-banner-elite">
+          <div class="tplus-exp-title">⚡ Bắt đáy T+ ELITE · climax + thị trường correction</div>
+          <div class="tplus-exp-body">
+            Backtest 8.5y: Win <b>61.2%</b>, Avg <b>+2.05%</b>/trade, Sharpe <b>1.71</b><br>
+            So với baseline (không filter regime): Win 56%, Avg +0.81%, Sharpe 0.70
+          </div>
+          <div class="tplus-exp-warning">
+            ⚠️ Hold T+3 → T+5 (target +3%, SL close -8%). Size <b>15% NAV/lệnh</b>. Max <b>2-3 lệnh</b> đồng thời.
+          </div>
         </div>
-      </div>
-    ` : `
-      <div class="tplus-stats">
-        <span class="tplus-stats-line">
-          💎 <b>${countPremium}</b> Premium · 🔻 <b>${countA}</b> Tier A · <b>${countB}</b> Tier B — tổng <b>${totalCount}</b> mã
-        </span>
-      </div>
-      <div class="tplus-expectation-banner">
-        <div class="tplus-exp-title">📈 Bắt đáy T+ · 3-tier system</div>
-        <div class="tplus-exp-body">
-          💎 <b>Premium</b>: Climax + NN net mua 5d > 0 → Win <b>61%</b>, Sharpe <b>1.90</b> (best edge)<br>
-          🔻 <b>Tier A</b>: drop >7% + vol >2× + RSI <35 → Win 56%, Sharpe 0.67<br>
-          🔵 <b>Tier B</b>: drop >5% + vol >2× + RSI <50 → Win 56%, Sharpe 0.70
+      ` : `
+        <div class="tplus-stats">
+          <span class="tplus-stats-line">
+            💎 <b>${countPremium}</b> Premium · 🔻 <b>${countA}</b> Tier A · <b>${countB}</b> Tier B — tổng <b>${totalCount}</b> mã
+          </span>
         </div>
-        <div class="tplus-exp-warning">
-          ⚠️ Hold T+3 → T+5 ATC (target +3%, force T+5). Size <b>15-20% NAV/Premium</b>, <b>10-15%</b> Tier A, <b>10%</b> Tier B. Max <b>2-3 lệnh</b>.
+        <div class="tplus-expectation-banner">
+          <div class="tplus-exp-title">🔻 Bắt đáy T+ · 3-tier system</div>
+          <div class="tplus-exp-body">
+            💎 <b>Premium</b>: Climax + NN net mua 5d > 0 → Win <b>61%</b>, Sharpe <b>1.90</b> (best edge)<br>
+            🔻 <b>Tier A</b>: drop >7% + vol >2× + RSI <35 → Win 56%, Sharpe 0.67<br>
+            🔵 <b>Tier B</b>: drop >5% + vol >2× + RSI <50 → Win 56%, Sharpe 0.70
+          </div>
+          <div class="tplus-exp-warning">
+            ⚠️ Hold T+3 → T+5 ATC (target +3%, force T+5). Size <b>15-20% NAV/Premium</b>, <b>10-15%</b> Tier A, <b>10%</b> Tier B. Max <b>2-3 lệnh</b>.
+          </div>
         </div>
-      </div>
-    `;
+      `;
+    }
+    if (showMomentum && style === "momentum") {
+      statsHtml = `
+        <div class="tplus-stats">
+          <span class="tplus-stats-line">
+            🚀 <b>${momentumCount}</b> Strength Cont · 📈 <b>${trendCount}</b> Trend HH/HL
+          </span>
+        </div>
+        <div class="tplus-expectation-banner">
+          <div class="tplus-exp-title">🚀 Đà tăng · 2-algorithm system</div>
+          <div class="tplus-exp-body">
+            🚀 <b>Strength Continuation</b>: MA stack perfect + consolidation + vol → Win 60%, Sharpe 0.60 (~127/năm)<br>
+            📈 <b>Trend HH/HL</b>: 3 higher highs/lows + vol + uptrend → Win 45%, Sharpe 0.75, PF 1.44 (~140/năm)
+          </div>
+          <div class="tplus-exp-warning">
+            ⚠️ Trend: hold T+10 trailing 6% từ peak. Strength: hold T+20 trail 7%. Size <b>10-12% NAV/lệnh</b>. Win &lt;50% nhưng PF cao.
+          </div>
+        </div>
+      `;
+    }
+    if (showEvent && style === "event") {
+      statsHtml = `
+        <div class="tplus-stats">
+          <span class="tplus-stats-line">
+            📰 <b>${eventCount}</b> Event picks
+          </span>
+        </div>
+        <div class="tplus-expectation-banner">
+          <div class="tplus-exp-title">📰 Sự kiện / Event tier</div>
+          <div class="tplus-exp-body">
+            Detect "động tĩnh bất thường" — vol >3× TB20 OR gap >2.5% OR thrust ±4%.
+            Có thể là tin tức/sự kiện company.
+          </div>
+          <div class="tplus-exp-warning">
+            ⚠️ <b>Experimental</b> — backtest standalone FAIL (Sharpe âm). Chỉ INFORMATIONAL — cần research news ngoài app trước khi trade.
+          </div>
+        </div>
+      `;
+    }
 
     const drawdownSlot = `<div id="drawdown-banner-slot">${buildDrawdownBanner()}</div>`;
 
-    // Empty state khi cả 2 tier đều rỗng
-    if (totalCount === 0) {
+    // Empty state — only show when style-relevant sections all empty
+    const hasContent = (
+      (showBottom && (totalCount > 0 || watchCount > 0)) ||
+      (showMomentum && (momentumCount > 0 || trendCount > 0)) ||
+      (showEvent && eventCount > 0)
+    );
+    if (!hasContent) {
+      let emptyMsg = "";
+      if (style === "momentum") {
+        emptyMsg = `
+          <p><b>Không có mã match Đà tăng hôm nay.</b></p>
+          <p>Strength Continuation cần uptrend perfect + vol confirm + consolidation. Trend HH/HL cần 3 higher highs/lows + uptrend + vol > 1.2×.</p>
+          <p>Trong consolidation/bear market các pattern này hiếm fire — chuyển sang Bắt đáy hoặc đợi.</p>`;
+      } else if (style === "event") {
+        emptyMsg = `
+          <p><b>Không có sự kiện bất thường hôm nay.</b></p>
+          <p>Đợi mã có vol > 3× / gap > 2.5% / thrust ±4%.</p>`;
+      } else if (style === "bottom") {
+        emptyMsg = `
+          <p><b>Không có mã match Bắt đáy T+ hôm nay (Premium/Tier A/B + Watch).</b></p>
+          <p>Pattern Climax hiếm trong bull market. Chuyển sang Đà tăng hoặc đợi correction.</p>`;
+      } else {
+        emptyMsg = `
+          <p><b>Không có mã match bất kỳ pattern nào hôm nay.</b></p>
+          <p>Pattern hiếm — nhiều ngày sẽ empty. App vẫn auto check 14:50 EOD.</p>`;
+      }
       content.innerHTML = drawdownSlot + regimeBanner + statsHtml + `
         <div class="empty-state ranking-intro">
           <div class="empty-icon">💤</div>
-          <p><b>Không có mã match Bắt đáy T+ hôm nay (cả Tier A + B).</b></p>
-          <p>Pattern hiếm — Tier A ~38/năm, Tier B ~57/năm. Nhiều ngày sẽ empty là chuyện bình thường.</p>
+          ${emptyMsg}
           <p><small>App vẫn auto check lại mỗi 14:50 EOD và gửi Telegram khi có pattern fire.</small></p>
         </div>
       `;
@@ -6470,11 +6548,6 @@
     }
 
     let html = drawdownSlot + regimeBanner + statsHtml;
-    const style = loadStyle();
-    const showBottom = style === "all" || style === "bottom";
-    const showMomentum = style === "all" || style === "momentum";
-    const showEvent = style === "all" || style === "event";
-    const showWatch = style === "all" || style === "bottom";  // Watch ≈ bắt đáy
 
     // Bắt đáy tiers (Premium/Elite/A/B)
     if (showBottom) {
@@ -6492,7 +6565,6 @@
     // Tier Momentum Swing — chỉ render khi bull/neutral regime
     if (showMomentum) {
       const momentumPicks = s.lastResult?.momentumPicks || [];
-      const momentumCount = s.lastResult?.momentumCount || 0;
       if (s.lastResult?.isMomentumRegime && momentumCount > 0) {
         html += renderMomentumSwingSection(momentumPicks, momentumCount);
       }
