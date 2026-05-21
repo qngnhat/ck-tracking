@@ -909,12 +909,12 @@
   }
 
   // ── Settings modal ──
-  function openSettings() {
+  async function openSettings() {
     const modal = $("settings-modal");
     const backdrop = $("settings-backdrop");
     const body = $("settings-body");
     if (!modal || !backdrop || !body) return;
-    body.innerHTML = renderSettingsBody();
+    body.innerHTML = await renderSettingsBody();
     bindSettingsActions();
     backdrop.classList.add("open");
     modal.classList.add("open");
@@ -930,7 +930,7 @@
     document.body.style.overflow = "";
   }
 
-  function renderSettingsBody() {
+  async function renderSettingsBody() {
     const auth = window.__SSI_AUTH__;
     const loggedIn = auth?.isLoggedIn?.() || false;
 
@@ -965,8 +965,13 @@
     }
     const cacheKb = (cacheBytes / 1024).toFixed(1);
 
-    // App version (SW cache name)
-    const appVersion = "v92"; // sync với sw.js CACHE name suffix
+    // App version (SW cache name) — read live from Cache Storage instead of hardcode
+    let appVersion = "?";
+    try {
+      const keys = await caches.keys();
+      const cacheKey = keys.find((k) => k.startsWith("stock-analyzer-v"));
+      if (cacheKey) appVersion = cacheKey.replace("stock-analyzer-", "");
+    } catch {}
 
     return `
       <section class="settings-section">
