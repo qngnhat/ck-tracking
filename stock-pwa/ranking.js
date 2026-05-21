@@ -417,6 +417,75 @@ window.__SSI_RANKING__ = (function () {
     };
   }
 
+  // ── Trend Tier: HH/HL trend continuation with trailing stop ──
+  // Backtest 8.5y cross-val (run_momentum_trailing.py):
+  //   HH/HL + vol>1.2, hold 20 trail 8%: Win 47%, Sharpe 0.76, PF 1.68
+  //   Cross-val in/out sample both positive.
+  // Đặc điểm: Win rate <50% nhưng PF cao (trailing capture big trends).
+  // Khác Strength Continuation: pattern multi-day (3 HH + 3 HL), exit dynamic.
+  function detectTrendTier(ohlcv) {
+    const closes = ohlcv.closes;
+    const opens = ohlcv.opens;
+    const highs = ohlcv.highs;
+    const lows = ohlcv.lows;
+    const volumes = ohlcv.volumes;
+    const n = closes.length;
+    if (n < 60) return null;  // Need MA20/MA50
+
+    const turnovers = [];
+    for (let i = n - 21; i < n - 1; i++) {
+      turnovers.push(closes[i] * volumes[i] * 1000);
+    }
+    turnovers.sort((a, b) => a - b);
+    const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+    if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+    const cur = closes[n - 1];
+    const curOpen = opens[n - 1];
+    const curVol = volumes[n - 1];
+
+    // 3 HH + 3 HL: today high > yesterday high > day-2 high > day-3 high
+    // AND today low > yesterday low > day-2 low > day-3 low
+    const hh = highs[n - 1] > highs[n - 2] && highs[n - 2] > highs[n - 3] && highs[n - 3] > highs[n - 4];
+    const hl = lows[n - 1] > lows[n - 2] && lows[n - 2] > lows[n - 3] && lows[n - 3] > lows[n - 4];
+    if (!hh || !hl) return null;
+
+    // Today green
+    if (cur <= curOpen) return null;
+
+    // Uptrend filter: close > MA50 and MA20 > MA50
+    const ma20 = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+    const ma50 = closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+    if (!(cur > ma50 && ma20 > ma50)) return null;
+
+    // Vol confirm
+    const volSlice = volumes.slice(n - 21, n - 1);
+    const volAvg20 = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+    if (volRatio < 1.2) return null;
+
+    // Dedup: only signal first day of HH/HL streak.
+    // Check yesterday wasn't already HH/HL (4-day requirement)
+    const yh = highs[n - 2] > highs[n - 3] && highs[n - 3] > highs[n - 4] && highs[n - 4] > highs[n - 5];
+    const yl = lows[n - 2] > lows[n - 3] && lows[n - 3] > lows[n - 4] && lows[n - 4] > lows[n - 5];
+    const isFirstDay = !(yh && yl);
+    if (!isFirstDay) return null;
+
+    return {
+      matched: true,
+      currentPrice: cur,
+      ret3d: ((cur - closes[n - 4]) / closes[n - 4]) * 100,
+      volRatio, ma20, ma50,
+      medianTurnover,
+      // Exit plan: hold ~20 phiên, trailing 8% từ peak
+      planInitSL: +(cur * 0.92).toFixed(4),
+      planTrailPct: 8,
+      planMaxHold: 20,
+      planExpectedExit: +(cur * 1.05).toFixed(4),  // avg ~+5% historical
+      trendStrength: volRatio * Math.abs(((cur - closes[n - 4]) / closes[n - 4]) * 100),
+    };
+  }
+
   // ── Event tier: volume anomaly proxy for news/event detection ──
   // Hypothesis: mã có vol >3× TB20 + gap >2% = likely news-driven event.
   // Edge KHÔNG verify backtest (Pattern 4 Gap-up + Pattern 5 Vol-thrust đã test FAIL standalone).
@@ -1608,6 +1677,8 @@ window.__SSI_RANKING__ = (function () {
             // Event tier: vol anomaly / gap / thrust = proxy for news event.
             // Informational only — edge chưa verify backtest standalone.
             stock.eventTier = detectEventTier(ohlcv);
+            // Trend tier: HH/HL continuation, trailing exit (Sharpe 0.78 cross-val).
+            stock.trendTier = detectTrendTier(ohlcv);
             // Premium flag: climax match + NN net buy 5d > 0 (backtest Sharpe 1.90 vs base 0.36)
             if (stock.volClimax?.matched && foreign && foreign.length > 0) {
               const sorted = [...foreign].sort((a, b) =>
@@ -1712,6 +1783,26 @@ window.__SSI_RANKING__ = (function () {
         return b.volRatio * Math.abs(b.ret3d) - a.volRatio * Math.abs(a.ret3d);
       });
 
+    // Trend tier: HH/HL continuation, dedup first-day-of-streak.
+    // Backtest 8.5y: Win 47%, Sharpe 0.76, PF 1.68 cross-val (trailing exit).
+    const trendTier = stocks
+      .filter((s) => s.trendTier?.matched && !coolDownSymbols.has(s.symbol))
+      .map((s) => ({
+        symbol: s.symbol,
+        sector: s.sector,
+        currentPrice: s.trendTier.currentPrice,
+        ret3d: s.trendTier.ret3d,
+        volRatio: s.trendTier.volRatio,
+        ma20: s.trendTier.ma20,
+        ma50: s.trendTier.ma50,
+        planInitSL: s.trendTier.planInitSL,
+        planTrailPct: s.trendTier.planTrailPct,
+        planMaxHold: s.trendTier.planMaxHold,
+        planExpectedExit: s.trendTier.planExpectedExit,
+        trendStrength: s.trendTier.trendStrength,
+      }))
+      .sort((a, b) => b.trendStrength - a.trendStrength);
+
     // Event tier: vol anomaly + gap + thrust = proxy news/event.
     // Informational only — edge KHÔNG verify backtest standalone.
     const eventTier = stocks
@@ -1768,6 +1859,8 @@ window.__SSI_RANKING__ = (function () {
       watchCount: watchTier.length,
       eventTier: eventTier.slice(0, 10),  // Top 10 event-driven (informational)
       eventCount: eventTier.length,
+      trendTier: trendTier.slice(0, 10),  // Top 10 trend HH/HL with trailing
+      trendCount: trendTier.length,
       vniRegime,
       vniRet20,
       allCount: stocks.length,

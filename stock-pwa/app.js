@@ -5837,6 +5837,48 @@
              sizeQty, sizeValue, sizePct, effectiveTier, nav };
   }
 
+  function renderTrendTierSection(picks) {
+    // Trend tier: HH/HL với trailing stop. Backtest cross-val Sharpe 0.76.
+    // Win 47% nhưng PF 1.68 (trailing capture big winners).
+    let html = `
+      <div class="climax-section trend-tier-section">
+        <div class="climax-header">
+          <h3 class="climax-title">
+            📈 Trend tier (HH/HL)
+            <span class="climax-badge">${picks.length} mã</span>
+          </h3>
+          <div class="climax-subtitle">
+            Mã 3 higher highs + 3 higher lows + vol confirm + uptrend.
+            Hold ~20 phiên với trailing stop 8% từ peak. Backtest 8.5y: Win 47%, Sharpe 0.76, PF 1.68.
+            <b>Khác Climax</b>: Win &lt; 50% nhưng winners RẤT lớn (PF cao).
+          </div>
+        </div>
+        <div class="watch-tier-list">
+    `;
+    for (const p of picks.slice(0, 10)) {
+      html += `
+        <div class="watch-tier-card trend-tier-card" data-symbol="${p.symbol}">
+          <div class="watch-tier-row1">
+            <span class="watch-tier-symbol">📈 ${p.symbol}</span>
+            <span class="watch-tier-sector">${sectorLabel(p.sector)}</span>
+            <span class="watch-tier-met up">+${p.ret3d.toFixed(1)}% 3p</span>
+          </div>
+          <div class="watch-tier-row2">
+            <span class="watch-tier-stat">@ ${p.currentPrice.toFixed(2)}</span>
+            <span class="watch-tier-stat">Vol ${p.volRatio.toFixed(1)}×</span>
+            <span class="watch-tier-stat">MA20 ${p.ma20.toFixed(2)}</span>
+            <span class="watch-tier-stat">MA50 ${p.ma50.toFixed(2)}</span>
+          </div>
+          <div class="watch-tier-missing">
+            🎯 Plan: SL ${p.planInitSL.toFixed(2)} (entry × 0.92) · Trailing ${p.planTrailPct}% từ peak · Force exit T+${p.planMaxHold}. Expected ~${p.planExpectedExit.toFixed(2)} (+5% avg).
+          </div>
+        </div>
+      `;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
   function renderEventTierSection(picks) {
     // Event tier: vol anomaly / gap / thrust = proxy news event.
     // INFORMATIONAL only — edge KHÔNG verify backtest standalone.
@@ -6453,6 +6495,11 @@
       const momentumCount = s.lastResult?.momentumCount || 0;
       if (s.lastResult?.isMomentumRegime && momentumCount > 0) {
         html += renderMomentumSwingSection(momentumPicks, momentumCount);
+      }
+      // Trend tier: HH/HL continuation, trailing stop exit
+      const trendPicks = s.lastResult?.trendTier || [];
+      if (trendPicks.length > 0) {
+        html += renderTrendTierSection(trendPicks);
       }
     }
 

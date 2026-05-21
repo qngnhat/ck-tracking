@@ -5400,6 +5400,14 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-style: italic;
 }
 
+/* Trend tier — green accent (continuation/uptrend) */
+.trend-tier-section .climax-title {
+  color: #81c784;
+}
+.trend-tier-card {
+  border-left: 3px solid rgba(76, 175, 80, 0.5);
+}
+
 /* Event tier — distinct styling (purple/teal accent) */
 .event-tier-section .climax-title {
   color: #ce93d8;
