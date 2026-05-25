@@ -898,15 +898,17 @@ function detectVolClimaxBounce(data) {
   const dropThreshA = atrPct ? -3.0 * atrPct : -7;
   const dropThreshB = -5;  // Tier B keep fixed (ATR variants không cải thiện)
 
-  // Tier A: high-precision, giữ dayGreen requirement (Premium quality)
-  // Tier B: relaxed, bỏ dayGreen — backtest cross-val verify (run_climax_no_green.py):
-  //   Train 2022-24: n=815 Win 50.8% Sharpe +0.42
-  //   Test  2025-26: n=515 Win 61.2% Sharpe +1.58 (Test > Train = không overfit)
-  // Fire rate ~378/year (3.5× tăng vs production V0 110/year) — giải bài toán
-  // "gần tháng app không sinh signal" do day_green filter quá strict.
-  const baseVol = volRatio > 2.0;
-  const matchedA = baseVol && dayGreen && ret3d < dropThreshA && rsi < 35;
-  const matchedB = baseVol && ret3d < dropThreshB && rsi < 50;
+  // REVERTED 2026-05-25: no-green V1 deploy hôm qua dựa trên fixed-hold backtest
+  // (assume hold đủ T+5) → Sharpe 1.58. Nhưng dynamic-exit backtest realistic
+  // (TP+3%/SL-8% behavior thực tế) cho thấy KHÔNG có edge:
+  //   - 18 variants TP×SL×Hold tested (run_climax_rr_grid.py)
+  //   - Best Test: TP7%/SL8%/T+5 → Sharpe +0.06 avg +0.06% (break-even)
+  //   - SL hit nhiều hơn TP hit ở regime 2025-26 → lỗ realistic
+  // Conclusion: pattern Climax với realistic exit không có edge ở regime hiện
+  // tại. User chọn "ít signal nhưng high quality" → giữ dayGreen.
+  const base = dayGreen && volRatio > 2.0;
+  const matchedA = base && ret3d < dropThreshA && rsi < 35;
+  const matchedB = base && ret3d < dropThreshB && rsi < 50;
   const tier = matchedA ? "A" : matchedB ? "B" : null;
   if (!tier) return null;
 
