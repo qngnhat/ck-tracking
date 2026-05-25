@@ -7915,21 +7915,139 @@
     "Momentum": { win: 60, avg: 0.78, sharpe: 0.60 },
   };
 
+  // Rule-based verdict — KHÔNG cảm tính, chỉ dựa số liệu
+  function computeVerdict(trades, activeCount) {
+    const resolved = trades.filter((t) => t.resolved_at);
+    const n = resolved.length;
+    const wins = resolved.filter((t) => t.is_win).length;
+    const winRate = n > 0 ? (wins / n) * 100 : null;
+    const totalRet = resolved.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
+    const avgRet = n > 0 ? (totalRet / n) * 100 : null;
+
+    // Rule 1: app idle hoàn toàn
+    if (n === 0 && activeCount === 0) {
+      return {
+        level: "idle",
+        emoji: "🚨",
+        title: "APP IDLE — KHÔNG SINH SIGNAL",
+        body: "Trade log trống + 0 active picks. Worker scan đang không tìm thấy mã nào hợp lệ.",
+        actions: [
+          "Khả năng cao: signal logic quá strict (recall ~0.3%).",
+          "Cần relax điều kiện Vol Climax / Strength Continuation, hoặc add pattern mới.",
+          "Kiểm tra cron worker có chạy: <code>/scan-restart?secret=…</code>",
+        ],
+      };
+    }
+
+    // Rule 2: chờ resolve
+    if (n === 0 && activeCount > 0) {
+      return {
+        level: "waiting",
+        emoji: "⏳",
+        title: "ĐANG CHỜ KẾT QUẢ FORWARD-TEST",
+        body: `${activeCount} pick đang active, sẽ resolve sau 7 phiên giao dịch. Chưa có data thực để đánh giá.`,
+        actions: ["Quay lại sau ≥7 phiên để xem actual P&L."],
+      };
+    }
+
+    // Rule 3: sample nhỏ — chưa đủ kết luận
+    if (n < 20) {
+      return {
+        level: "insufficient",
+        emoji: "📊",
+        title: `SAMPLE NHỎ (n=${n}) — CHƯA ĐỦ KẾT LUẬN`,
+        body: `Win rate ${winRate.toFixed(1)}%, avg return ${avgRet >= 0 ? "+" : ""}${avgRet.toFixed(2)}%. Cần ít nhất 30 resolved trades để có statistical significance.`,
+        actions: ["Đừng all-in dựa trên data này. Giữ size nhỏ, tích lũy thêm sample."],
+      };
+    }
+
+    // Rule 4: lỗ thật
+    if (winRate < 45 || avgRet < -0.5) {
+      return {
+        level: "losing",
+        emoji: "🔴",
+        title: "APP ĐANG LỖ — TẠM DỪNG ENTRY",
+        body: `Win rate ${winRate.toFixed(1)}% (target ≥50%), avg return ${avgRet.toFixed(2)}% (target ≥+0.8%). Forward-test không validate backtest.`,
+        actions: [
+          "Tạm dừng entry theo signal app. Review backtest cho overfitting / survivorship bias.",
+          "Check tier nào lỗ nhất (table phía dưới) — tắt tier đó trước.",
+          "Re-run backtest với slippage realistic (cost 0.5-1%) trước khi dùng tiếp.",
+        ],
+      };
+    }
+
+    // Rule 5: hoà — không rõ rệt
+    if (winRate < 55 && avgRet < 0.5) {
+      return {
+        level: "neutral",
+        emoji: "🟡",
+        title: "PERFORMANCE HOÀ — KHÔNG RÕ EDGE",
+        body: `Win rate ${winRate.toFixed(1)}%, avg return ${avgRet.toFixed(2)}%. Đang break-even sau cost — không có edge rõ ràng.`,
+        actions: [
+          "Giảm size 50% cho đến khi có tier ăn rõ.",
+          "Xem table per-tier: tier nào lệch âm nhiều thì tắt, giữ tier ăn nhất.",
+        ],
+      };
+    }
+
+    // Rule 6: ăn rõ
+    return {
+      level: "winning",
+      emoji: "🟢",
+      title: "APP ĐANG ĂN — TIẾP TỤC THEO SIGNAL",
+      body: `Win rate ${winRate.toFixed(1)}%, avg return +${avgRet.toFixed(2)}%. Forward-test xác nhận edge.`,
+      actions: [
+        "Tiếp tục entry theo signal, size theo Kelly per-tier như config.",
+        "Vẫn check drawdown circuit breaker — 3 consec losses → pause 5 phiên.",
+      ],
+    };
+  }
+
+  function renderVerdictCard(verdict) {
+    const actionsHtml = verdict.actions.map((a) => `<li>${a}</li>`).join("");
+    return `
+      <div class="perf-verdict verdict-${verdict.level}">
+        <div class="verdict-header">
+          <span class="verdict-emoji">${verdict.emoji}</span>
+          <span class="verdict-title">${verdict.title}</span>
+        </div>
+        <div class="verdict-body">${verdict.body}</div>
+        <ul class="verdict-actions">${actionsHtml}</ul>
+      </div>`;
+  }
+
+  // Per-tier action recommendation dựa trên discrepancy vs backtest
+  function tierAction(tier, n, avgActual, avgBacktest) {
+    if (n < 5) return { label: "Sample <5", cls: "tier-action-skip" };
+    const diff = avgActual - avgBacktest; // điểm phần trăm
+    if (diff < -1.0) return { label: "🚨 Tạm tắt tier", cls: "tier-action-stop" };
+    if (diff < -0.5) return { label: "⚠️ Giảm size 50%", cls: "tier-action-reduce" };
+    if (diff >= -0.2) return { label: "✅ OK", cls: "tier-action-ok" };
+    return { label: "📊 Theo dõi tiếp", cls: "tier-action-watch" };
+  }
+
   async function renderPerfTab() {
     const content = document.getElementById("perf-content");
     if (!content) return;
     content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">⏳</div><p>Đang tải trade log...</p></div>`;
 
-    const trades = await fetchTradeLog(true);
+    // Fetch parallel: trade log + active picks (để verdict chính xác)
+    const [trades] = await Promise.all([
+      fetchTradeLog(true),
+      fetchActiveClimaxPicks(true).catch(() => {}),
+    ]);
+    const activeCount = activeClimaxPicks?.size || 0;
+    const verdict = computeVerdict(trades, activeCount);
 
+    // No trades AND no active → render verdict only (idle state)
     if (trades.length === 0) {
       content.innerHTML = `
-        <div class="empty-state ranking-intro">
+        ${renderVerdictCard(verdict)}
+        <div class="empty-state ranking-intro" style="margin-top: 20px;">
           <div class="empty-icon">📊</div>
-          <p><b>Chưa có trade nào</b></p>
-          <p>Mỗi lần app fire signal (Premium/Elite/A/B/Momentum), trade log sẽ ghi nhận.</p>
-          <p>Sau 7 ngày, worker resolve outcome (target/SL/force) và tính actual return.</p>
-          <p><small>Forward-test tracker: so sánh actual vs backtest expectation theo thời gian.</small></p>
+          <p><b>Chưa có forward-test data</b></p>
+          <p>Mỗi lần app fire signal (Premium/Elite/A/B/Momentum), trade log ghi nhận.</p>
+          <p>Sau 7 phiên, worker resolve outcome (target/SL/force) và tính actual return.</p>
         </div>`;
       return;
     }
@@ -7952,6 +8070,7 @@
     const totalRet = resolved.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
 
     let html = `
+      ${renderVerdictCard(verdict)}
       <div class="perf-summary">
         <div class="perf-summary-card">
           <div class="perf-summary-label">Total resolved</div>
@@ -7998,6 +8117,7 @@
               <th>Avg actual</th>
               <th>Avg backtest</th>
               <th>Discrepancy</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -8009,6 +8129,7 @@
       const winDiff = winActual - bt.win;
       const avgDiff = avgActual - bt.avg;
       const ok = winDiff >= -10 && avgDiff >= -0.5;
+      const action = tierAction(tier, s.n, avgActual, bt.avg);
       html += `
         <tr>
           <td><b>${tier}</b></td>
@@ -8018,9 +8139,14 @@
           <td class="${avgActual >= 0 ? "up" : "down"}">${avgActual >= 0 ? "+" : ""}${avgActual.toFixed(2)}%</td>
           <td>${bt.avg >= 0 ? "+" : ""}${bt.avg.toFixed(2)}%</td>
           <td>${ok ? "✅" : "⚠️"} ${(avgDiff >= 0 ? "+" : "") + avgDiff.toFixed(2)}%</td>
+          <td class="${action.cls}">${action.label}</td>
         </tr>`;
     }
-    html += `</tbody></table></div>`;
+    html += `</tbody></table>
+      <div class="perf-chart-hint" style="margin-top:8px">
+        <b>Action rule:</b> Tạm tắt nếu avg actual lệch &lt; −1.0% so với backtest. Giảm size 50% nếu lệch −0.5% đến −1.0%. OK nếu lệch ≥ −0.2%.
+      </div>
+    </div>`;
 
     // Recent trades table
     html += `<div class="perf-section">

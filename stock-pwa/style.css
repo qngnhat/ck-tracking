@@ -2338,6 +2338,63 @@ body.is-offline {
   box-shadow: 0 0 8px rgba(41, 182, 246, 0.25);
 }
 /* ─── Performance dashboard ─── */
+
+/* Verdict card — rule-based honest scorecard */
+.perf-verdict {
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-left: 4px solid #888;
+  background: rgba(255, 255, 255, 0.03);
+}
+.perf-verdict.verdict-idle      { border-left-color: #ef5350; background: rgba(239, 83, 80, 0.08); }
+.perf-verdict.verdict-waiting   { border-left-color: #29b6f6; background: rgba(41, 182, 246, 0.08); }
+.perf-verdict.verdict-insufficient { border-left-color: #ab47bc; background: rgba(171, 71, 188, 0.06); }
+.perf-verdict.verdict-losing    { border-left-color: #ef5350; background: rgba(239, 83, 80, 0.10); }
+.perf-verdict.verdict-neutral   { border-left-color: #FFC107; background: rgba(255, 193, 7, 0.07); }
+.perf-verdict.verdict-winning   { border-left-color: #66bb6a; background: rgba(102, 187, 106, 0.08); }
+
+.verdict-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.verdict-emoji { font-size: 22px; line-height: 1; }
+.verdict-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+.verdict-body {
+  font-size: 13px;
+  color: #d0d6e2;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.verdict-actions {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #b8c0d0;
+  line-height: 1.55;
+}
+.verdict-actions li { margin-bottom: 4px; }
+.verdict-actions code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* Per-tier action labels in actual-vs-backtest table */
+.tier-action-stop    { color: #ef5350; font-weight: 700; }
+.tier-action-reduce  { color: #FFC107; font-weight: 600; }
+.tier-action-watch   { color: #29b6f6; }
+.tier-action-ok      { color: #66bb6a; font-weight: 600; }
+.tier-action-skip    { color: #888; font-style: italic; }
+
 .perf-summary {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
