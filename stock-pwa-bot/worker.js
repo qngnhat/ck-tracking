@@ -91,6 +91,15 @@ export default {
       ctx.waitUntil(sendMarketDigest(env));
       return new Response("Market digest triggered", { status: 200 });
     }
+    if (url.pathname === "/exit-alert-test" && request.method === "POST") {
+      // Manual trigger exit alert check (testing)
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(checkExitAlerts(env));
+      return new Response("Exit alert check triggered", { status: 200 });
+    }
     if (url.pathname === "/digest-test" && request.method === "POST") {
       // Same as climax-test but clearer name
       const secret = url.searchParams.get("secret");
@@ -443,10 +452,11 @@ export default {
       console.log("[cron] skip — outside VN trading session", new Date().toISOString());
       return;
     }
-    console.log("[cron] check triggers + spike alerts fired at", new Date().toISOString());
+    console.log("[cron] check triggers + spike + exit alerts fired at", new Date().toISOString());
     ctx.waitUntil(logHeartbeat(env, "intraday", { event_cron: cron }));
     ctx.waitUntil(checkAllWatches(env));
     ctx.waitUntil(checkSpikeAlerts(env));
+    ctx.waitUntil(checkExitAlerts(env));
   },
 };
 
@@ -1530,6 +1540,140 @@ async function checkSpikeAlerts(env) {
     }
     // else: no state change, no alert
   }
+}
+
+// ── Auto-exit alert: discipline enforcer ──────────────────────────────
+// Logic: cho mỗi active pick chưa exit-alert, check 3 conditions:
+//   1) SL hit       — cur ≤ entry × 0.92 (-8% from entry)
+//   2) Trail hit    — cur ≤ peak × 0.94  (-6% from peak post-entry)
+//   3) Timeout      — daysHeld ≥ 10      (T+10 calendar)
+// Mỗi pick chỉ alert 1 lần (dedupe qua exit_alerted_at). User tự quyết
+// định hold/sell sau đó — bot không tự bán.
+const EXIT_SL_PCT = -8;
+const EXIT_TRAIL_PCT = -6;
+const EXIT_TIMEOUT_DAYS = 10;
+
+async function checkExitAlerts(env) {
+  const sb = sbClient(env);
+  const picks = await sbQuery(sb, "climax_active_picks", {
+    select: "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at",
+  });
+  if (!picks?.length) return;
+
+  const candidates = picks.filter((p) => !p.exit_alerted_at);
+  if (!candidates.length) {
+    console.log("[exit-alert] all active picks already alerted");
+    return;
+  }
+  console.log(`[exit-alert] checking ${candidates.length} candidates`);
+
+  const todayDt = new Date();
+  const todayStr = todayDt.toISOString().slice(0, 10);
+
+  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  if (!chats.length) {
+    console.log("[exit-alert] no Telegram users linked");
+    return;
+  }
+
+  const results = await Promise.all(candidates.map(async (p) => {
+    try {
+      const bars = await fetchVndIntraday(p.symbol);
+      const n = bars.closes.length;
+      if (n === 0) return null;
+      const cur = bars.closes[n - 1];
+
+      const signalDt = new Date(p.signal_date);
+      const daysHeld = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
+
+      const entryPrice = parseFloat(p.entry_price);
+      const peakPrice = parseFloat(p.peak_price || 0);
+      const entryRet = ((cur - entryPrice) / entryPrice) * 100;
+
+      // Priority: SL > trail > timeout (worst-first)
+      if (entryRet <= EXIT_SL_PCT) {
+        return { pick: p, reason: "sl_hit", cur, daysHeld, entryRet, trailRet: null };
+      }
+      if (peakPrice > entryPrice) {
+        const trailRet = ((cur - peakPrice) / peakPrice) * 100;
+        if (trailRet <= EXIT_TRAIL_PCT) {
+          return { pick: p, reason: "trail_hit", cur, daysHeld, entryRet, trailRet };
+        }
+      }
+      if (daysHeld >= EXIT_TIMEOUT_DAYS) {
+        return { pick: p, reason: "timeout", cur, daysHeld, entryRet, trailRet: null };
+      }
+      return null;
+    } catch (e) {
+      console.warn(`[exit-alert] ${p.symbol} fail:`, e.message);
+      return null;
+    }
+  }));
+
+  let alerted = 0;
+  for (const r of results) {
+    if (!r) continue;
+    const msg = buildExitAlertMessage(r.pick, r);
+    for (const chatId of chats) {
+      try {
+        await tgSendMessage(env.BOT_TOKEN, chatId, msg);
+      } catch (e) {
+        console.warn(`[exit-alert] tg send fail chat=${chatId}:`, e.message);
+      }
+    }
+    await sbUpdate(sb, "climax_active_picks", {
+      eq: { id: r.pick.id },
+      data: {
+        exit_alerted_at: new Date().toISOString(),
+        exit_alert_reason: r.reason,
+      },
+    });
+    alerted++;
+  }
+  console.log(`[exit-alert] sent ${alerted} alerts to ${chats.length} chats`);
+}
+
+function buildExitAlertMessage(pick, r) {
+  const sym = pick.symbol;
+  const tier = pick.tier || "?";
+  const entryFmt = parseFloat(pick.entry_price).toFixed(2);
+  const curFmt = r.cur.toFixed(2);
+  const entryRetSign = r.entryRet >= 0 ? "+" : "";
+  const entryRetFmt = `${entryRetSign}${r.entryRet.toFixed(1)}`;
+  const timeStr = new Date().toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
+  });
+
+  if (r.reason === "sl_hit") {
+    return `⛔ *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
+           `📉 Hit Stop Loss *${entryRetFmt}%* (rule: ≤ −8%)\n` +
+           `• Entry: ${entryFmt} → Hiện: *${curFmt}*\n` +
+           `• Đã hold: ${r.daysHeld} ngày\n\n` +
+           `*👉 Cân nhắc BÁN ngay để cắt lỗ.*\n` +
+           `_Rule SL -8%: chấp nhận lỗ nhỏ, tránh hold mã thua quá lâu._\n` +
+           `⏰ ${timeStr} VN`;
+  }
+  if (r.reason === "trail_hit") {
+    const trailFmt = r.trailRet.toFixed(1);
+    const peakFmt = parseFloat(pick.peak_price).toFixed(2);
+    return `📉 *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
+           `📊 Trailing stop: rớt *${trailFmt}%* từ peak (rule: ≤ −6%)\n` +
+           `• Peak: ${peakFmt} → Hiện: *${curFmt}* (${entryRetFmt}% so entry)\n` +
+           `• Entry: ${entryFmt} · Đã hold: ${r.daysHeld} ngày\n\n` +
+           `*👉 Cân nhắc CHỐT lời — đã giảm > 6% từ đỉnh.*\n` +
+           `_Rule trailing 6%: khoá lãi, không để lãi thành lỗ._\n` +
+           `⏰ ${timeStr} VN`;
+  }
+  if (r.reason === "timeout") {
+    return `⏰ *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
+           `📅 Đã hold *T+${r.daysHeld}* (rule timeout: T+${EXIT_TIMEOUT_DAYS})\n` +
+           `• Entry: ${entryFmt} → Hiện: *${curFmt}* (${entryRetFmt}%)\n\n` +
+           `*👉 Cân nhắc BÁN theo plan — pattern Climax/Trend hết shelf-life.*\n` +
+           `_Rule T+${EXIT_TIMEOUT_DAYS}: short-term swing không nên hold quá 10 phiên._\n` +
+           `⏰ ${timeStr} VN`;
+  }
+  return `⚠️ *${sym}* — Exit reason không xác định: ${r.reason}`;
 }
 
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
