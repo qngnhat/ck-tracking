@@ -388,10 +388,13 @@ window.__SSI_RANKING__ = (function () {
     const dropThreshA = atrPct ? -3.0 * atrPct : -7;
     const dropThreshB = -5;  // Tier B keep fixed (ATR variants không cải thiện)
 
-    // Common requirements: day green + vol > 2× + sufficient drop (adaptive for A)
-    const baseConditions = dayGreen && volRatio > 2.0;
-    const matchedA = baseConditions && ret3d < dropThreshA && rsi < 35;
-    const matchedB = baseConditions && ret3d < dropThreshB && rsi < 50;
+    // Tier A: giữ dayGreen (Premium quality, high-precision).
+    // Tier B: bỏ dayGreen — backtest cross-val (run_climax_no_green.py):
+    //   Train 2022-24 Win 51% Sh 0.42 | Test 2025-26 Win 61% Sh 1.58.
+    //   Fire rate tăng 3.5× (110 → 378/year) — giải drought signal.
+    const baseVol = volRatio > 2.0;
+    const matchedA = baseVol && dayGreen && ret3d < dropThreshA && rsi < 35;
+    const matchedB = baseVol && ret3d < dropThreshB && rsi < 50;
 
     const tier = matchedA ? "A" : matchedB ? "B" : null;
     const matched = tier !== null;

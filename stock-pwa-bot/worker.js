@@ -898,9 +898,15 @@ function detectVolClimaxBounce(data) {
   const dropThreshA = atrPct ? -3.0 * atrPct : -7;
   const dropThreshB = -5;  // Tier B keep fixed (ATR variants không cải thiện)
 
-  const base = dayGreen && volRatio > 2.0;
-  const matchedA = base && ret3d < dropThreshA && rsi < 35;
-  const matchedB = base && ret3d < dropThreshB && rsi < 50;
+  // Tier A: high-precision, giữ dayGreen requirement (Premium quality)
+  // Tier B: relaxed, bỏ dayGreen — backtest cross-val verify (run_climax_no_green.py):
+  //   Train 2022-24: n=815 Win 50.8% Sharpe +0.42
+  //   Test  2025-26: n=515 Win 61.2% Sharpe +1.58 (Test > Train = không overfit)
+  // Fire rate ~378/year (3.5× tăng vs production V0 110/year) — giải bài toán
+  // "gần tháng app không sinh signal" do day_green filter quá strict.
+  const baseVol = volRatio > 2.0;
+  const matchedA = baseVol && dayGreen && ret3d < dropThreshA && rsi < 35;
+  const matchedB = baseVol && ret3d < dropThreshB && rsi < 50;
   const tier = matchedA ? "A" : matchedB ? "B" : null;
   if (!tier) return null;
 
