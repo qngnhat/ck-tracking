@@ -141,6 +141,50 @@ export default {
         },
       });
     }
+    if (url.pathname === "/mid-term-picks" && request.method === "GET") {
+      // Public read: mid-term active picks (Base Breakout hold ~30 phiên).
+      // PWA reads this to render Tab Trung hạn.
+      const sb = sbClient(env);
+      const picks = await sbQuery(sb, "mid_term_active_picks", {
+        select: "symbol,signal_date,entry_price,pattern_type,init_sl_price,trail_pct,max_hold_days,expires_at,peak_price,peak_date,ma200_at_signal,vol_ratio_at_signal,base_range_pct",
+      });
+      const active = (picks || []).filter((p) =>
+        !p.expires_at || new Date(p.expires_at) > new Date()
+      );
+      return new Response(JSON.stringify({ picks: active, fetched_at: new Date().toISOString() }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=300",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+    if (url.pathname === "/mid-term-dryrun" && request.method === "GET") {
+      // Scan + return Base Breakout matches as JSON (no persist) — debug only
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const matches = [];
+      const batchSize = 10;
+      for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
+        const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(async (sym) => {
+          try {
+            const data = await fetchVndHistory(sym, 220);
+            const r = detectBaseBreakout(data);
+            return r ? { symbol: sym, ...r } : null;
+          } catch { return null; }
+        }));
+        for (const r of results) if (r) matches.push(r);
+      }
+      matches.sort((a, b) => (b.breakStrength || 0) - (a.breakStrength || 0));
+      return new Response(JSON.stringify({ count: matches.length, matches }, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/spike-test" && request.method === "POST") {
       // Manual trigger spike alert check
       const secret = url.searchParams.get("secret");
@@ -922,6 +966,85 @@ function detectVolClimaxBounce(data) {
   };
 }
 
+// ── Base Breakout (Mid-term) ──────────────────────────────
+// Pattern verified Phase 1 backtest (run_midterm_phase1.py):
+//   Test 2025-26 Sharpe +1.13, PF 2.82, avg ret +6.95%/trade, Win 51.9%
+//   Best variant: max_hold=30, trail=10%, init_sl=10%
+// Mid-term hold ~1 tháng (avg actual 23 days) — không phải T+ swing.
+//
+// Logic (mirror backtest):
+//   1. Universe gate: close > MA200 + median turnover 60d ≥ 5 tỷ
+//   2. Base condition: 30-phiên range high/low < 10% (consolidation tight)
+//   3. Trigger: today close > max(high prev 30 days) — breakout above base
+//   4. Vol confirm: vol_ratio (today / avg20) > 1.5
+const BASE_BREAKOUT_TURNOVER_MIN = 5e9;      // 5 tỷ/ngày median 60d
+const BASE_BREAKOUT_HOLD_CAL_DAYS = 42;       // ~30 trading days
+const BASE_BREAKOUT_TRAIL_PCT = 10;
+const BASE_BREAKOUT_INIT_SL_PCT = 10;
+const BASE_BREAKOUT_MAX_HOLD_TRADING = 30;
+
+function detectBaseBreakout(data) {
+  const closes = data.closes;
+  const highs = data.highs;
+  const lows = data.lows;
+  const volumes = data.volumes;
+  const n = closes?.length || 0;
+  if (n < 200) return null;
+
+  const cur = closes[n - 1];
+  const curVol = volumes[n - 1];
+
+  // 1. MA200 gate (close > MA200)
+  let ma200Sum = 0;
+  for (let i = n - 200; i < n; i++) ma200Sum += closes[i];
+  const ma200 = ma200Sum / 200;
+  if (cur <= ma200) return null;
+
+  // 2. Liquidity gate (median turnover 60d ≥ 5 tỷ)
+  const turnovers = [];
+  const turnStart = Math.max(0, n - 61);
+  for (let i = turnStart; i < n - 1; i++) {
+    turnovers.push(closes[i] * volumes[i] * 1000);
+  }
+  turnovers.sort((a, b) => a - b);
+  const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+  if (!medianTurnover || medianTurnover < BASE_BREAKOUT_TURNOVER_MIN) return null;
+
+  // 3. Base range (30 phiên trước, không tính hôm nay) < 10%
+  let highMax = -Infinity;
+  let lowMin = Infinity;
+  for (let i = n - 31; i < n - 1; i++) {
+    if (highs[i] > highMax) highMax = highs[i];
+    if (lows[i] < lowMin) lowMin = lows[i];
+  }
+  if (lowMin <= 0) return null;
+  const baseRange = (highMax - lowMin) / lowMin;
+  if (baseRange >= 0.10) return null;
+
+  // 4. Today break above prev high
+  if (cur <= highMax) return null;
+
+  // 5. Vol confirm > 1.5× TB20
+  let volSum = 0;
+  for (let i = n - 21; i < n - 1; i++) volSum += volumes[i];
+  const volAvg20 = volSum / 20;
+  const volRatio = volAvg20 > 0 ? curVol / volAvg20 : 0;
+  if (volRatio < 1.5) return null;
+
+  return {
+    pattern: "base_breakout",
+    currentPrice: cur,
+    initSL: +(cur * (1 - BASE_BREAKOUT_INIT_SL_PCT / 100)).toFixed(4),
+    trailPct: BASE_BREAKOUT_TRAIL_PCT,
+    maxHoldDays: BASE_BREAKOUT_MAX_HOLD_TRADING,
+    ma200,
+    volRatio,
+    medianTurnover,
+    baseRangePct: baseRange * 100,
+    breakStrength: ((cur - highMax) / highMax) * 100,
+  };
+}
+
 // Compute per-stock daily stats (1 pass với climax detection để tiết kiệm API calls)
 function computeStockStats(data) {
   const closes = data.closes;
@@ -1106,6 +1229,7 @@ async function processScanChunk(env) {
       const data = await fetchVndHistory(sym, 220);
       const climax = detectVolClimaxBounce(data);
       const momentum = detectStrengthContinuation(data);
+      const baseBreakout = detectBaseBreakout(data);
       const stats = computeStockStats(data);
       // ENRICH climax matches với foreign flow (NN net buy filter).
       // Backtest 7.4y: Tier A + NN net>0 Sharpe 0.36 → 1.90 (5×).
@@ -1114,7 +1238,7 @@ async function processScanChunk(env) {
       if (climax) {
         foreign = await fetchForeignDaily(sym, 7).catch(() => null);
       }
-      return { symbol: sym, climax, momentum, stats, foreign };
+      return { symbol: sym, climax, momentum, baseBreakout, stats, foreign };
     } catch (e) {
       fetchFails++;
       return null;
@@ -1130,6 +1254,7 @@ async function processScanChunk(env) {
   // Merge into partial state
   const climaxPartial = JSON.parse(state.climax_partial || "[]");
   const momentumPartial = JSON.parse(state.momentum_partial || "[]");
+  const baseBreakoutPartial = JSON.parse(state.base_breakout_partial || "[]");
   const marketStats = JSON.parse(state.market_stats || "{}");
   let upCount = marketStats.upCount || 0;
   let downCount = marketStats.downCount || 0;
@@ -1157,6 +1282,7 @@ async function processScanChunk(env) {
       });
     }
     if (r.momentum) momentumPartial.push({ symbol: r.symbol, ...r.momentum });
+    if (r.baseBreakout) baseBreakoutPartial.push({ symbol: r.symbol, ...r.baseBreakout });
   }
 
   const newOffset = offset + chunk.length;
@@ -1164,11 +1290,12 @@ async function processScanChunk(env) {
     current_offset: newOffset,
     climax_partial: JSON.stringify(climaxPartial),
     momentum_partial: JSON.stringify(momentumPartial),
+    base_breakout_partial: JSON.stringify(baseBreakoutPartial),
     market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
     last_chunk_at: new Date().toISOString(),
   });
 
-  console.log(`[chunk] done ${offset}→${newOffset} · climax+${results.filter(r => r?.climax).length} momentum+${results.filter(r => r?.momentum).length}`);
+  console.log(`[chunk] done ${offset}→${newOffset} · climax+${results.filter(r => r?.climax).length} momentum+${results.filter(r => r?.momentum).length} base_breakout+${results.filter(r => r?.baseBreakout).length}`);
 
   if (newOffset >= total) {
     const finalState = {
@@ -1176,6 +1303,7 @@ async function processScanChunk(env) {
       current_offset: newOffset,
       climax_partial: JSON.stringify(climaxPartial),
       momentum_partial: JSON.stringify(momentumPartial),
+      base_breakout_partial: JSON.stringify(baseBreakoutPartial),
       market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
     };
     await finalizeScan(env, finalState);
@@ -1187,6 +1315,7 @@ async function finalizeScan(env, state) {
 
   const climaxRaw = JSON.parse(state.climax_partial || "[]");
   const momentumRaw = JSON.parse(state.momentum_partial || "[]");
+  const baseBreakoutRaw = JSON.parse(state.base_breakout_partial || "[]");
   const marketStats = JSON.parse(state.market_stats || "{}");
   const isEliteRegime = state.vni_regime === "correction";
   const isMomentumRegime = state.vni_regime === "bull" || state.vni_regime === "neutral";
@@ -1198,9 +1327,15 @@ async function finalizeScan(env, state) {
     ? momentumRaw.sort((a, b) => (b.momentumStrength || 0) - (a.momentumStrength || 0))
     : [];
 
+  // Sort base breakout by breakStrength (how far above prev high)
+  const baseBreakoutMatches = baseBreakoutRaw.sort(
+    (a, b) => (b.breakStrength || 0) - (a.breakStrength || 0)
+  );
+
   // Persist to active_picks
   await persistClimaxMatches(env, matches);
   await persistMomentumMatches(env, momentumMatches);
+  await persistMidTermMatches(env, baseBreakoutMatches);
 
   // Send full-coverage digest
   const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
@@ -1261,6 +1396,44 @@ async function persistMomentumMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} Momentum saved (expires ${expiresAt.slice(0, 10)})`);
+}
+
+// ── Mid-term (Base Breakout) persist ──────────────────────────
+// Bảng riêng mid_term_active_picks (sql/007). Khác Climax (hold T+5) — mid-term
+// hold T+30 trading (~42 calendar), trail 10%, init SL -10%.
+// Backtest Phase 1: Test 2025-26 Sharpe +1.13, PF 2.82, avg +6.95%.
+async function persistMidTermMatches(env, matches) {
+  const sb = sbClient(env);
+  // Cleanup expired
+  const nowIso = new Date().toISOString();
+  await sbDelete(sb, "mid_term_active_picks", { lt: { expires_at: nowIso } });
+
+  if (!matches || matches.length === 0) {
+    console.log("[mid-term persist] no matches");
+    return;
+  }
+
+  const expiresAt = new Date(
+    Date.now() + BASE_BREAKOUT_HOLD_CAL_DAYS * 24 * 3600 * 1000
+  ).toISOString();
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: today,
+    entry_price: m.currentPrice,
+    pattern_type: m.pattern || "base_breakout",
+    init_sl_price: m.initSL,
+    trail_pct: m.trailPct,
+    max_hold_days: m.maxHoldDays,
+    expires_at: expiresAt,
+    ma200_at_signal: m.ma200,
+    vol_ratio_at_signal: m.volRatio,
+    base_range_pct: m.baseRangePct,
+    above_threshold: false,
+    last_alert_at: null,
+  }));
+  const ok = await sbUpsert(sb, "mid_term_active_picks", rows, "symbol");
+  console.log(`[mid-term persist] ${ok ? "✓" : "✗"} ${rows.length} Base Breakout saved (expires ${expiresAt.slice(0, 10)})`);
 }
 
 async function persistClimaxMatches(env, matches) {
@@ -1404,11 +1577,16 @@ async function resolveExpiredPicks(env) {
 }
 
 async function updatePeakPrices(env) {
-  // For each active climax pick (signal_date < today, expires_at > today),
-  // fetch today's close price + update peak_price if higher.
-  // Sử dụng ở spike alert cron / EOD: hold T+1 → T+5 window có peak running.
+  // Update peak_price cho cả climax + mid_term active picks. Used by trailing
+  // stop check trong checkExitAlerts (peak từ entry day → now).
   const sb = sbClient(env);
-  const picks = await sbQuery(sb, "climax_active_picks", {
+  for (const table of ["climax_active_picks", "mid_term_active_picks"]) {
+    await updatePeakForTable(env, sb, table);
+  }
+}
+
+async function updatePeakForTable(env, sb, table) {
+  const picks = await sbQuery(sb, table, {
     select: "id,symbol,entry_price,peak_price,signal_date",
   });
   if (!picks || picks.length === 0) return;
@@ -1422,7 +1600,7 @@ async function updatePeakPrices(env) {
       if (!curHigh) continue;
       const newPeak = Math.max(p.peak_price || 0, curHigh);
       if (newPeak > (p.peak_price || 0)) {
-        await sbUpdate(sb, "climax_active_picks", {
+        await sbUpdate(sb, table, {
           eq: { id: p.id },
           data: { peak_price: newPeak, peak_date: today },
         });
@@ -1430,7 +1608,7 @@ async function updatePeakPrices(env) {
       }
     } catch {}
   }
-  console.log(`[peak] updated ${updated}/${picks.length} active picks`);
+  console.log(`[peak ${table}] updated ${updated}/${picks.length}`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
@@ -1551,39 +1729,57 @@ async function checkSpikeAlerts(env) {
 }
 
 // ── Auto-exit alert: discipline enforcer ──────────────────────────────
-// Logic: cho mỗi active pick chưa exit-alert, check 3 conditions:
-//   1) SL hit       — cur ≤ entry × 0.92 (-8% from entry)
-//   2) Trail hit    — cur ≤ peak × 0.94  (-6% from peak post-entry)
-//   3) Timeout      — daysHeld ≥ 10      (T+10 calendar)
-// Mỗi pick chỉ alert 1 lần (dedupe qua exit_alerted_at). User tự quyết
-// định hold/sell sau đó — bot không tự bán.
-const EXIT_SL_PCT = -8;
-const EXIT_TRAIL_PCT = -6;
-const EXIT_TIMEOUT_DAYS = 10;
+// Per-tier config:
+//   Climax (climax_active_picks):   SL -8%,  Trail -6%,  Timeout T+10 calendar
+//   Mid-term (mid_term_active_picks): SL -10%, Trail -10%, Timeout T+42 calendar
+//                                     (~30 trading days, backtest verified)
+// Mỗi pick chỉ alert 1 lần (dedupe qua exit_alerted_at).
+const EXIT_CONFIG = {
+  climax: {
+    table: "climax_active_picks",
+    label: "Climax",
+    sl_pct: -8,
+    trail_pct: -6,
+    timeout_days: 10,
+  },
+  mid_term: {
+    table: "mid_term_active_picks",
+    label: "Mid-term",
+    sl_pct: -10,
+    trail_pct: -10,
+    timeout_days: 42,
+  },
+};
 
 async function checkExitAlerts(env) {
   const sb = sbClient(env);
-  const picks = await sbQuery(sb, "climax_active_picks", {
-    select: "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at",
-  });
-  if (!picks?.length) return;
-
-  const candidates = picks.filter((p) => !p.exit_alerted_at);
-  if (!candidates.length) {
-    console.log("[exit-alert] all active picks already alerted");
-    return;
-  }
-  console.log(`[exit-alert] checking ${candidates.length} candidates`);
-
-  const todayDt = new Date();
-  const todayStr = todayDt.toISOString().slice(0, 10);
-
   const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
   const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
   if (!chats.length) {
     console.log("[exit-alert] no Telegram users linked");
     return;
   }
+  // Check each tier table với config riêng
+  for (const cfg of Object.values(EXIT_CONFIG)) {
+    await checkExitAlertsForTable(env, sb, cfg, chats);
+  }
+}
+
+async function checkExitAlertsForTable(env, sb, cfg, chats) {
+  const selectCols = cfg.table === "mid_term_active_picks"
+    ? "id,symbol,entry_price,signal_date,peak_price,pattern_type,exit_alerted_at"
+    : "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at";
+  const picks = await sbQuery(sb, cfg.table, { select: selectCols });
+  if (!picks?.length) return;
+
+  const candidates = picks.filter((p) => !p.exit_alerted_at);
+  if (!candidates.length) {
+    console.log(`[exit-alert ${cfg.label}] all alerted, skip`);
+    return;
+  }
+  console.log(`[exit-alert ${cfg.label}] checking ${candidates.length} candidates`);
+
+  const todayDt = new Date();
 
   const results = await Promise.all(candidates.map(async (p) => {
     try {
@@ -1591,30 +1787,28 @@ async function checkExitAlerts(env) {
       const n = bars.closes.length;
       if (n === 0) return null;
       const cur = bars.closes[n - 1];
-
       const signalDt = new Date(p.signal_date);
       const daysHeld = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
-
       const entryPrice = parseFloat(p.entry_price);
       const peakPrice = parseFloat(p.peak_price || 0);
       const entryRet = ((cur - entryPrice) / entryPrice) * 100;
 
-      // Priority: SL > trail > timeout (worst-first)
-      if (entryRet <= EXIT_SL_PCT) {
+      // Priority: SL > trail > timeout
+      if (entryRet <= cfg.sl_pct) {
         return { pick: p, reason: "sl_hit", cur, daysHeld, entryRet, trailRet: null };
       }
       if (peakPrice > entryPrice) {
         const trailRet = ((cur - peakPrice) / peakPrice) * 100;
-        if (trailRet <= EXIT_TRAIL_PCT) {
+        if (trailRet <= cfg.trail_pct) {
           return { pick: p, reason: "trail_hit", cur, daysHeld, entryRet, trailRet };
         }
       }
-      if (daysHeld >= EXIT_TIMEOUT_DAYS) {
+      if (daysHeld >= cfg.timeout_days) {
         return { pick: p, reason: "timeout", cur, daysHeld, entryRet, trailRet: null };
       }
       return null;
     } catch (e) {
-      console.warn(`[exit-alert] ${p.symbol} fail:`, e.message);
+      console.warn(`[exit-alert ${cfg.label}] ${p.symbol} fail:`, e.message);
       return null;
     }
   }));
@@ -1622,15 +1816,15 @@ async function checkExitAlerts(env) {
   let alerted = 0;
   for (const r of results) {
     if (!r) continue;
-    const msg = buildExitAlertMessage(r.pick, r);
+    const msg = buildExitAlertMessage(r.pick, r, cfg);
     for (const chatId of chats) {
       try {
         await tgSendMessage(env.BOT_TOKEN, chatId, msg);
       } catch (e) {
-        console.warn(`[exit-alert] tg send fail chat=${chatId}:`, e.message);
+        console.warn(`[exit-alert ${cfg.label}] tg send fail chat=${chatId}:`, e.message);
       }
     }
-    await sbUpdate(sb, "climax_active_picks", {
+    await sbUpdate(sb, cfg.table, {
       eq: { id: r.pick.id },
       data: {
         exit_alerted_at: new Date().toISOString(),
@@ -1639,46 +1833,49 @@ async function checkExitAlerts(env) {
     });
     alerted++;
   }
-  console.log(`[exit-alert] sent ${alerted} alerts to ${chats.length} chats`);
+  console.log(`[exit-alert ${cfg.label}] sent ${alerted} alerts`);
 }
 
-function buildExitAlertMessage(pick, r) {
+function buildExitAlertMessage(pick, r, cfg) {
   const sym = pick.symbol;
-  const tier = pick.tier || "?";
+  const tierLabel = cfg ? cfg.label : (pick.tier || "?");
   const entryFmt = parseFloat(pick.entry_price).toFixed(2);
   const curFmt = r.cur.toFixed(2);
   const entryRetSign = r.entryRet >= 0 ? "+" : "";
   const entryRetFmt = `${entryRetSign}${r.entryRet.toFixed(1)}`;
+  const slRule = cfg ? cfg.sl_pct : -8;
+  const trailRule = cfg ? cfg.trail_pct : -6;
+  const timeoutRule = cfg ? cfg.timeout_days : 10;
   const timeStr = new Date().toLocaleTimeString("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
   });
 
   if (r.reason === "sl_hit") {
-    return `⛔ *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
-           `📉 Hit Stop Loss *${entryRetFmt}%* (rule: ≤ −8%)\n` +
+    return `⛔ *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
+           `📉 Hit Stop Loss *${entryRetFmt}%* (rule: ≤ ${slRule}%)\n` +
            `• Entry: ${entryFmt} → Hiện: *${curFmt}*\n` +
            `• Đã hold: ${r.daysHeld} ngày\n\n` +
            `*👉 Cân nhắc BÁN ngay để cắt lỗ.*\n` +
-           `_Rule SL -8%: chấp nhận lỗ nhỏ, tránh hold mã thua quá lâu._\n` +
+           `_Rule SL ${slRule}%: chấp nhận lỗ nhỏ, tránh hold mã thua quá lâu._\n` +
            `⏰ ${timeStr} VN`;
   }
   if (r.reason === "trail_hit") {
     const trailFmt = r.trailRet.toFixed(1);
     const peakFmt = parseFloat(pick.peak_price).toFixed(2);
-    return `📉 *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
-           `📊 Trailing stop: rớt *${trailFmt}%* từ peak (rule: ≤ −6%)\n` +
+    return `📉 *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
+           `📊 Trailing stop: rớt *${trailFmt}%* từ peak (rule: ≤ ${trailRule}%)\n` +
            `• Peak: ${peakFmt} → Hiện: *${curFmt}* (${entryRetFmt}% so entry)\n` +
            `• Entry: ${entryFmt} · Đã hold: ${r.daysHeld} ngày\n\n` +
-           `*👉 Cân nhắc CHỐT lời — đã giảm > 6% từ đỉnh.*\n` +
-           `_Rule trailing 6%: khoá lãi, không để lãi thành lỗ._\n` +
+           `*👉 Cân nhắc CHỐT lời — đã giảm hơn ${Math.abs(trailRule)}% từ đỉnh.*\n` +
+           `_Rule trailing ${Math.abs(trailRule)}%: khoá lãi, không để lãi thành lỗ._\n` +
            `⏰ ${timeStr} VN`;
   }
   if (r.reason === "timeout") {
-    return `⏰ *EXIT ALERT — ${sym}* (Tier ${tier})\n\n` +
-           `📅 Đã hold *T+${r.daysHeld}* (rule timeout: T+${EXIT_TIMEOUT_DAYS})\n` +
+    return `⏰ *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
+           `📅 Đã hold *T+${r.daysHeld}* (rule timeout: T+${timeoutRule})\n` +
            `• Entry: ${entryFmt} → Hiện: *${curFmt}* (${entryRetFmt}%)\n\n` +
-           `*👉 Cân nhắc BÁN theo plan — pattern Climax/Trend hết shelf-life.*\n` +
-           `_Rule T+${EXIT_TIMEOUT_DAYS}: short-term swing không nên hold quá 10 phiên._\n` +
+           `*👉 Cân nhắc BÁN theo plan — pattern hết shelf-life.*\n` +
+           `_Rule T+${timeoutRule}: pattern không nên hold quá ngưỡng đã verify._\n` +
            `⏰ ${timeStr} VN`;
   }
   return `⚠️ *${sym}* — Exit reason không xác định: ${r.reason}`;
