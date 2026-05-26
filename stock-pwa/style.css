@@ -7215,3 +7215,171 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* ════════════════════════════════════════
+   RÀ SOÁT TRUNG HẠN — Phase 4 (Base Breakout)
+   ════════════════════════════════════════ */
+.midterm-sizing-helper {
+  background: rgba(255, 193, 7, 0.06);
+  border-left: 3px solid #FFC107;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.midterm-sizing-helper .sizing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.midterm-sizing-helper label {
+  font-size: 14px;
+  color: #d0d6e2;
+  font-weight: 600;
+}
+.midterm-sizing-helper input[type="number"] {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid #2a2a3e;
+  background: #0f0f1e;
+  color: #fff;
+  border-radius: 5px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.midterm-sizing-helper input[type="number"]:focus {
+  outline: none;
+  border-color: #FFC107;
+}
+.midterm-sizing-helper .sizing-unit {
+  font-size: 13px;
+  color: #aaa;
+}
+.midterm-sizing-helper .sizing-hint {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
+}
+@media (max-width: 480px) {
+  .midterm-sizing-helper .sizing-hint {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+.midterm-picks-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+}
+.midterm-count {
+  font-size: 15px;
+  color: #d0d6e2;
+}
+.midterm-count b {
+  color: #FFC107;
+  font-size: 18px;
+}
+.midterm-sub {
+  font-size: 12px;
+  color: #888;
+}
+
+.midterm-picks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.midterm-card {
+  background: linear-gradient(180deg, rgba(255, 193, 7, 0.03), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 193, 7, 0.15);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mt-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mt-symbol {
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+.mt-status {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.mt-status.status-profit { background: rgba(102, 187, 106, 0.15); color: #81c784; }
+.mt-status.status-new    { background: rgba(33, 150, 243, 0.15); color: #4fc3f7; }
+.mt-status.status-hold   { background: rgba(255, 193, 7, 0.12); color: #FFC107; }
+
+.mt-prices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.mt-price-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.mt-label { color: #888; }
+.mt-value { color: #d0d6e2; font-variant-numeric: tabular-nums; }
+.mt-value.mt-sl    { color: #ef5350; }
+.mt-value.mt-peak  { color: #81c784; }
+.mt-value.mt-trail { color: #FFC107; }
+.mt-value small    { color: #666; font-size: 11px; margin-left: 2px; }
+
+.mt-sizing {
+  font-size: 14px;
+  color: #d0d6e2;
+  padding: 8px 10px;
+  background: rgba(33, 150, 243, 0.06);
+  border-left: 3px solid #2196F3;
+  border-radius: 4px;
+}
+.mt-sizing b {
+  color: #fff;
+  font-weight: 700;
+}
+
+.mt-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mt-plan-row {
+  font-size: 12px;
+  color: #aaa;
+  line-height: 1.4;
+}
+.mt-plan-row small { color: #777; }
+
+.mt-days-held {
+  text-align: center;
+  font-size: 11px;
+  color: #888;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 480px) {
+  .midterm-picks-grid {
+    grid-template-columns: 1fr;
+  }
+}

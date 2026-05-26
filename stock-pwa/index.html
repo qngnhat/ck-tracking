@@ -34,7 +34,7 @@
     <div class="tab-nav">
       <button class="tab-btn" data-tab="home">🏠</button>
       <button class="tab-btn" data-tab="analyze">📊 Phân tích</button>
-      <button class="tab-btn active" data-tab="ranking">⚡ Lướt sóng</button>
+      <button class="tab-btn active" data-tab="ranking">🔍 Rà soát</button>
       <button class="tab-btn" data-tab="portfolio">💼 Danh mục</button>
       <button class="tab-btn" data-tab="perf">📈 Hiệu suất</button>
     </div>
@@ -352,39 +352,30 @@
   </main>
   </div>
 
-  <!-- Ranking tab -->
+  <!-- Ranking tab → Rà soát Trung hạn (Base Breakout pattern) -->
   <div class="tab-content tab-ranking active">
     <main id="ranking-container">
       <div class="ranking-header">
         <div>
-          <h2 class="ranking-title" id="ranking-title">Lướt sóng T+</h2>
-          <div class="ranking-meta" id="ranking-meta">Tải lần đầu để xem khuyến nghị</div>
+          <h2 class="ranking-title" id="ranking-title">🔍 Rà soát Trung hạn</h2>
+          <div class="ranking-meta" id="ranking-meta">Pattern Base Breakout · hold ~1 tháng · trail 10%</div>
         </div>
         <div class="ranking-actions">
           <button class="btn-icon" id="ranking-refresh" title="Cập nhật">↻</button>
         </div>
       </div>
 
-      <div class="ranking-controls">
-        <span class="ctrl-label">Phong cách:</span>
-        <div class="seg-toggle" id="seg-style">
-          <button class="seg-btn active" data-style="all" title="Tất cả tier">All</button>
-          <button class="seg-btn" data-style="bottom" title="Chỉ bắt đáy (Climax + Watch)">🔻 Bắt đáy</button>
-          <button class="seg-btn" data-style="momentum" title="Chỉ đà tăng (Momentum)">🚀 Đà tăng</button>
-          <button class="seg-btn" data-style="event" title="Vol anomaly / gap / thrust (experimental)">📰 Sự kiện</button>
-        </div>
-      </div>
-
-      <div id="regime-hint-banner" class="regime-hint-banner" style="display:none"></div>
+      <div id="midterm-sizing-helper" class="midterm-sizing-helper"></div>
       <div id="holiday-banner" class="holiday-banner" style="display:none"></div>
 
       <div id="ranking-content">
-        <div class="empty-state ranking-intro" id="intro-tplus">
-          <div class="empty-icon">⚡</div>
-          <h2>Lướt sóng T+</h2>
-          <p>Chọn phong cách quét rồi bấm <b>Quét pattern hôm nay</b>.</p>
-          <p><small>📊 Cross-validated 8.5 năm. Pattern selective — đa số ngày 0-2 picks là bình thường.</small></p>
-          <button class="btn-primary" id="ranking-load-btn">Quét pattern hôm nay</button>
+        <div class="empty-state ranking-intro" id="intro-midterm">
+          <div class="empty-icon">🔍</div>
+          <h2>Rà soát Trung hạn</h2>
+          <p>Pattern <b>Base Breakout</b>: mã tích lũy ≥30 phiên (range &lt;10%) + breakout above prev high + vol &gt;1.5× confirm.</p>
+          <p>Bot tự scan EOD mỗi ngày (14:50 VN). Mỗi pick hold ~1 tháng với trailing stop 10%.</p>
+          <p><small>📊 Cross-validated Test 2025-26: Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.</small></p>
+          <button class="btn-primary" id="ranking-load-btn">Tải picks hôm nay</button>
         </div>
       </div>
 

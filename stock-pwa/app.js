@@ -5374,53 +5374,166 @@
     banner.style.display = "block";
   }
 
+  // ── Mid-term (Rà soát Trung hạn) — Phase 4 migration ──
+  // Replace T+ swing scan với Base Breakout pattern (Phase 1 verified Sharpe +1.13).
+  // Pattern persist server-side qua EOD cron → app chỉ fetch /mid-term-picks.
+
+  const MID_TERM_DEFAULT_SIZE_VND = 10_000_000;  // 10M VND default (Phase 1 winner)
+  const MID_TERM_SIZE_KEY = "stock_pwa_midterm_size_vnd";
+  let midTermPicksCache = [];
+
+  function loadMidTermSize() {
+    try {
+      const v = parseFloat(localStorage.getItem(MID_TERM_SIZE_KEY));
+      return isFinite(v) && v > 0 ? v : MID_TERM_DEFAULT_SIZE_VND;
+    } catch { return MID_TERM_DEFAULT_SIZE_VND; }
+  }
+
+  function saveMidTermSize(vnd) {
+    try { localStorage.setItem(MID_TERM_SIZE_KEY, String(vnd)); } catch {}
+  }
+
+  function renderSizingHelper() {
+    const el = $("midterm-sizing-helper");
+    if (!el) return;
+    const size = loadMidTermSize();
+    el.innerHTML = `
+      <div class="sizing-row">
+        <label>💰 Vốn/pick:</label>
+        <input type="number" id="midterm-size-input" value="${Math.round(size / 1e6)}" min="1" step="1">
+        <span class="sizing-unit">triệu VND</span>
+        <small class="sizing-hint">Backtest: 10M/signal → +29.8%/năm</small>
+      </div>`;
+    const inp = document.getElementById("midterm-size-input");
+    if (inp) {
+      inp.addEventListener("change", (e) => {
+        const v = parseFloat(e.target.value) * 1e6;
+        if (isFinite(v) && v > 0) {
+          saveMidTermSize(v);
+          renderMidTermPicks(midTermPicksCache);
+        }
+      });
+    }
+  }
+
+  function renderMidTermCard(p, sizeVnd) {
+    const entryPrice = parseFloat(p.entry_price);
+    const initSL = parseFloat(p.init_sl_price);
+    const peakPrice = p.peak_price ? parseFloat(p.peak_price) : null;
+    // entry_price in nghìn VND. sizeVnd in VND. shares = sizeVnd / (entry × 1000)
+    const rawShares = sizeVnd / (entryPrice * 1000);
+    const shares = Math.max(100, Math.round(rawShares / 100) * 100);  // VN lot size = 100
+    const actualCost = shares * entryPrice * 1000;
+
+    const signalDate = p.signal_date;
+    const signalDt = new Date(signalDate);
+    const todayDt = new Date();
+    const daysSince = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
+    const maxHold = p.max_hold_days || 30;
+
+    let status, statusCls;
+    if (peakPrice && peakPrice > entryPrice) {
+      const peakRet = ((peakPrice - entryPrice) / entryPrice * 100).toFixed(1);
+      status = `📈 Peak +${peakRet}%`;
+      statusCls = "status-profit";
+    } else if (daysSince === 0) {
+      status = "🆕 Mới";
+      statusCls = "status-new";
+    } else {
+      status = `⏳ ${daysSince}d`;
+      statusCls = "status-hold";
+    }
+
+    const trailStopPrice = peakPrice ? (peakPrice * 0.9) : null;
+
+    return `
+      <div class="midterm-card">
+        <div class="mt-card-head">
+          <div class="mt-symbol">${p.symbol}</div>
+          <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="mt-prices">
+          <div class="mt-price-row">
+            <span class="mt-label">Entry:</span>
+            <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Init SL:</span>
+            <span class="mt-value mt-sl">${initSL.toFixed(2)}k <small>(−10%)</small></span>
+          </div>
+          ${peakPrice ? `
+          <div class="mt-price-row">
+            <span class="mt-label">Peak:</span>
+            <span class="mt-value mt-peak">${peakPrice.toFixed(2)}k</span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Trail stop:</span>
+            <span class="mt-value mt-trail">${trailStopPrice.toFixed(2)}k <small>(−10% từ peak)</small></span>
+          </div>` : ""}
+        </div>
+        <div class="mt-sizing">
+          <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
+        </div>
+        <div class="mt-plan">
+          <div class="mt-plan-row">📅 Hold tối đa T+${maxHold} (~${Math.round(maxHold * 1.4)} ngày)</div>
+          <div class="mt-plan-row">🎯 Bán khi: trail 10% từ peak HOẶC SL −10% HOẶC T+${maxHold}</div>
+          <div class="mt-plan-row"><small>Backtest base: range &lt;${p.base_range_pct ? p.base_range_pct.toFixed(1) : '10'}% × 30 phiên, vol ${p.vol_ratio_at_signal ? p.vol_ratio_at_signal.toFixed(1) : '1.5+'}× TB20</small></div>
+        </div>
+        ${daysSince > 0 ? `<div class="mt-days-held"><small>📊 ${daysSince}/${maxHold} phiên hold</small></div>` : ""}
+      </div>`;
+  }
+
+  function renderMidTermPicks(picks) {
+    const content = $("ranking-content");
+    if (!content) return;
+    midTermPicksCache = picks || [];
+    renderSizingHelper();
+
+    if (!picks || picks.length === 0) {
+      content.innerHTML = `
+        <div class="empty-state ranking-intro">
+          <div class="empty-icon">📭</div>
+          <h2>Hôm nay không có Base Breakout</h2>
+          <p>Pattern selective — đa số ngày 0-2 picks (fire rate ~80/năm = 0.3/ngày).</p>
+          <p>Bot quét lại EOD lúc 14:50 VN (T2-T6). Quay lại sau.</p>
+          <p><small>📊 Backtest Sharpe +1.13 — không phải money printer, edge realistic.</small></p>
+          <button class="btn-primary" id="ranking-load-btn">Tải lại</button>
+        </div>`;
+      return;
+    }
+
+    const sizeVnd = loadMidTermSize();
+    const cards = picks.map((p) => renderMidTermCard(p, sizeVnd)).join("");
+    content.innerHTML = `
+      <div class="midterm-picks-header">
+        <span class="midterm-count"><b>${picks.length}</b> mã active</span>
+        <span class="midterm-sub">Pattern Base Breakout · trail 10% từ peak</span>
+      </div>
+      <div class="midterm-picks-grid">${cards}</div>`;
+  }
+
+  async function fetchMidTermPicks(forceFresh = false) {
+    const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/mid-term-picks", {
+      cache: forceFresh ? "no-store" : "default",
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const json = await r.json();
+    return json.picks || [];
+  }
+
   function showRankingIntro() {
     const content = $("ranking-content");
-    const style = loadStyle();
-    let icon, title, body;
-    if (style === "bottom") {
-      icon = "🔻"; title = "Bắt đáy T+ (Mean-Reversion)";
-      body = `
-        <p>Quét mã Large+Mid match pattern <b>Vol Climax Bounce</b>: 3 phiên giảm sâu + volume bùng + nến xanh + RSI oversold.</p>
-        <p><b>4 tiers</b>: 💎 Premium (Climax + NN net mua) · ⚡ Elite (Climax + VNI correction) · 🟢 Tier A · 🔵 Tier B.</p>
-        <p style="color:#4CAF50"><b>Backtest 8.5y:</b> Premium Win 61% Sharpe 1.90 · Tier A 56% Sharpe 1.09. Hold T+3-T+5 target +3%, SL -8%.</p>
-        <p style="color:#FF9800"><b>Lưu ý:</b> pattern hiếm trong bull market. Đợi correction để fire nhiều.</p>`;
-    } else if (style === "momentum") {
-      icon = "🚀"; title = "Đà tăng (Continuation)";
-      body = `
-        <p>Quét mã đang trong uptrend mạnh, ride momentum với trailing stop.</p>
-        <p><b>2 tiers</b>: 🚀 Strength Continuation (MA stack + consolidation breakout) · 📈 Trend HH/HL (3 higher highs/lows).</p>
-        <p style="color:#4CAF50"><b>Backtest 8.5y:</b> Strength Win 60% Sharpe 0.60 · Trend Win 45% Sharpe 0.75 PF 1.44.</p>
-        <p style="color:#FF9800"><b>Đặc tính</b>: Win &lt;50% nhưng PF cao — chấp nhận thua nhiều, đợi 1-2 winner LỚN che hết losers.</p>`;
-    } else if (style === "event") {
-      icon = "📰"; title = "Sự kiện / Event tier";
-      body = `
-        <p>Detect mã có "động tĩnh bất thường" — vol > 3× / gap > 2.5% / thrust ±4%.</p>
-        <p>Có thể là news/event không có public API. App chỉ flag — user research news ngoài app trước khi trade.</p>
-        <p style="color:#ff5252"><b>⚠️ Experimental</b> — backtest standalone FAIL. INFORMATIONAL only, không phải buy signal.</p>`;
-    } else {
-      // All styles
-      icon = "⚡"; title = "Lướt sóng T+";
-      body = `
-        <p>App quét 1411 mã (HOSE + HNX + UPCOM) với <b>3 phong cách</b>:</p>
-        <p>🔻 <b>Bắt đáy</b>: Climax oversold + bounce (4 tiers, Sharpe đến 1.90)<br>
-        🚀 <b>Đà tăng</b>: Trend continuation (2 tiers, Sharpe đến 0.75)<br>
-        📰 <b>Sự kiện</b>: Vol anomaly proxy (experimental)</p>
-        <p style="color:#4CAF50"><b>Backtest 8.5 năm cross-val</b>. Đa số ngày 0-2 picks — pattern by design selective.</p>
-        <p style="color:#FF9800"><b>Lưu ý</b>: Chọn phong cách tab trên + bấm Quét. Hold theo plan tier, đừng FOMO.</p>`;
-    }
+    if (!content) return;
     content.innerHTML = `
       <div class="empty-state ranking-intro">
-        <div class="empty-icon">${icon}</div>
-        <h2>${title}</h2>
-        ${body}
-        <button class="btn-primary" id="ranking-load-btn">Quét pattern hôm nay</button>
-      </div>
-    `;
-    document.getElementById("ranking-load-btn").addEventListener("click", () => {
-      RANKING.clearCache();
-      loadRanking(true);
-    });
+        <div class="empty-icon">🔍</div>
+        <h2>Rà soát Trung hạn</h2>
+        <p>Pattern <b>Base Breakout</b>: mã tích lũy ≥30 phiên (range &lt;10%) + breakout above prev high + vol &gt;1.5× confirm.</p>
+        <p>Bot tự scan EOD mỗi ngày (14:50 VN). Mỗi pick hold ~1 tháng với trailing stop 10%.</p>
+        <p><small>📊 Cross-validated Test 2025-26: Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.</small></p>
+        <button class="btn-primary" id="ranking-load-btn">Tải picks hôm nay</button>
+      </div>`;
+    renderSizingHelper();
   }
 
   async function loadRanking(forceFresh = false) {
@@ -5431,42 +5544,31 @@
     content.innerHTML = `
       <div class="ranking-loading">
         <div class="spinner"></div>
-        <div id="ranking-progress">Đang quét toàn HOSE+HNX...</div>
+        <div id="ranking-progress">Đang tải picks Rà soát Trung hạn...</div>
       </div>
     `;
 
+    // Phase 4 migration: fetch mid-term picks từ worker (Base Breakout pattern,
+    // pre-scanned EOD). KHÔNG còn client-side scan T+ swing.
     try {
-      const result = await RANKING.loadTopPicksTPlus({
-        topN: 15,
-        useCache: !forceFresh,
-        onProgress: (done, total) => {
-          const el = document.getElementById("ranking-progress");
-          if (el) el.textContent = `Đang quét ${done}/${total} mã...`;
-        },
-      });
-
-      const s = curState();
-      s.picks = result.picks;
-      s.loaded = true;
-      s.lastResult = result;
-      renderRanking();
-      updateRankingMeta(result);
-      renderRegimeHint();
-      renderHolidayBanner();
-
-      // Auto-snapshot for paper tracker
-      if (result.picks.length > 0 && !result.fromCache) {
-        const tracker = RANKING.loadTracker();
-        if (RANKING.shouldSnapshot("tplus", tracker)) {
-          RANKING.takeSnapshot("tplus", result.picks, result.regime);
-        }
-      }
-      renderTrackerSection();
+      const picks = await fetchMidTermPicks(forceFresh);
+      renderMidTermPicks(picks);
+      updateMidTermMeta(picks);
     } catch (e) {
-      content.innerHTML = `<div class="error"><h3>Lỗi tải dữ liệu</h3><p>${e.message}</p><button class="btn-primary" onclick="document.getElementById('ranking-refresh').click()">Thử lại</button></div>`;
+      content.innerHTML = `<div class="error"><h3>Lỗi tải picks</h3><p>${e.message}</p><button class="btn-primary" id="ranking-load-btn">Thử lại</button></div>`;
     } finally {
       rankingState.loading = false;
     }
+  }
+
+  function updateMidTermMeta(picks) {
+    const meta = $("ranking-meta");
+    if (!meta) return;
+    const now = new Date();
+    const time = now.toLocaleString("vi-VN", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+    meta.textContent = `Cập nhật ${time} · ${picks.length} pick active · hold ~1 tháng · trail 10%`;
   }
 
   function updateRankingMeta(result) {
@@ -6577,7 +6679,13 @@
     return html;
   }
 
+  // Phase 4 migration: renderRanking → renderMidTermPicks(cache).
+  // Old T+ swing renderRanking body kept below (unreachable) for reference.
   function renderRanking() {
+    renderMidTermPicks(midTermPicksCache);
+  }
+
+  function _renderRankingLegacy_DORMANT() {
     const content = $("ranking-content");
     const s = curState();
     sectorExposureCache = null;  // recompute fresh per render
@@ -6899,31 +7007,8 @@
   function saveStyle(style) {
     localStorage.setItem(STYLE_KEY, style);
   }
-  function initStyleToggle() {
-    const current = loadStyle();
-    document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.style === current);
-    });
-    // Refresh intro to match selected style nếu chưa có result
-    if (!curState().lastResult && curState().picks.length === 0) {
-      // Defer để DOM sẵn sàng
-      setTimeout(() => showRankingIntro(), 0);
-    }
-  }
-  initStyleToggle();
-  document.querySelectorAll("#seg-style .seg-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#seg-style .seg-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      saveStyle(btn.dataset.style);
-      // Re-render dù có result hay không (intro cũng đổi theo style)
-      if (curState().picks.length > 0 || curState().lastResult) {
-        renderRanking();
-      } else {
-        showRankingIntro();
-      }
-    });
-  });
+  // Phase 4: style toggle removed (chỉ Base Breakout pattern). Init intro:
+  setTimeout(() => showRankingIntro(), 0);
 
   $("ranking-refresh").addEventListener("click", () => {
     RANKING.clearCache();
