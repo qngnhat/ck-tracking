@@ -1342,6 +1342,7 @@ async function finalizeScan(env, state) {
   const fullDigestResult = {
     matches,
     momentumMatches,
+    baseBreakoutMatches,
     market: {
       avgChange,
       upCount: marketStats.upCount || 0,
@@ -1349,7 +1350,7 @@ async function finalizeScan(env, state) {
       totalTurnover: marketStats.totalTurnover || 0,
       totalScanned: marketStats.totalScanned || 0,
     },
-    gainers: [],   // chunked scan không track per-mã, skip top gainers
+    gainers: [],
     losers: [],
     topVol: [],
     vniRegime: state.vni_regime,
@@ -1364,7 +1365,7 @@ async function finalizeScan(env, state) {
     status: "completed",
     completed_at: new Date().toISOString(),
   });
-  console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, sent digest`);
+  console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, ${baseBreakoutMatches.length} base_breakout, sent digest`);
 }
 
 // ── Spike-alert state: persist climax matches to climax_active_picks ──
@@ -1434,6 +1435,9 @@ async function persistMidTermMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "mid_term_active_picks", rows, "symbol");
   console.log(`[mid-term persist] ${ok ? "✓" : "✗"} ${rows.length} Base Breakout saved (expires ${expiresAt.slice(0, 10)})`);
+
+  // ALSO log to trade_log for forward-test tracker (resolve sau T+30 trading)
+  await logMidTermInitialTrades(env, matches, today);
 }
 
 async function persistClimaxMatches(env, matches) {
@@ -1483,97 +1487,193 @@ async function logInitialTrades(env, matches, signalDate) {
     sl_price: +(m.currentPrice * 0.92).toFixed(4),
     nn_net_5d_bn: m.nn_net_5d_bn ?? null,
     is_premium: !!m.is_premium,
+    pattern_type: "vol_climax",
+    max_hold_days: 5,
   }));
-  // Use UPSERT với on_conflict=symbol,signal_date để re-scan cùng day không lỗi
   const ok = await sbUpsert(sb, "trade_log", rows, "symbol,signal_date");
-  console.log(`[trade-log] ${ok ? "✓" : "✗"} ${rows.length} initial trades logged`);
+  console.log(`[trade-log climax] ${ok ? "✓" : "✗"} ${rows.length} logged`);
+}
+
+// Mid-term (Base Breakout) — pattern khác Climax: trail stop thay vì fix target,
+// hold T+30 trading. Log với tier='MidTerm', pattern_type='base_breakout'.
+async function logMidTermInitialTrades(env, matches, signalDate) {
+  if (!matches || matches.length === 0) return;
+  const sb = sbClient(env);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: signalDate,
+    tier: "MidTerm",
+    entry_price: m.currentPrice,
+    // Target_price + sl_price NOT NULL trong schema cũ — đặt target = entry × 1.07
+    // (backtest avg ret) để satisfy constraint, nhưng logic exit là trail/SL/timeout
+    // thực tế qua resolve.
+    target_price: +(m.currentPrice * 1.07).toFixed(4),
+    sl_price: +(m.currentPrice * (1 - BASE_BREAKOUT_INIT_SL_PCT / 100)).toFixed(4),
+    pattern_type: m.pattern || "base_breakout",
+    max_hold_days: BASE_BREAKOUT_MAX_HOLD_TRADING,
+    trail_pct: BASE_BREAKOUT_TRAIL_PCT,
+    init_sl_pct: BASE_BREAKOUT_INIT_SL_PCT,
+  }));
+  const ok = await sbUpsert(sb, "trade_log", rows, "symbol,signal_date");
+  console.log(`[trade-log midterm] ${ok ? "✓" : "✗"} ${rows.length} logged`);
 }
 
 async function resolveExpiredPicks(env) {
-  // Find unresolved trade_log entries where signal_date <= today - 7 calendar days
+  // 2 tier groups:
+  //   Climax/Trend/Momentum: T+5 hold, target +3% / SL -8% / force exit T+5
+  //   MidTerm: T+30 trading hold, trail 10% từ peak / init SL -10% / force exit T+30
+  await resolveClassicalPicks(env);
+  await resolveMidTermPicksResolver(env);
+}
+
+async function fetchOhlcvForResolve(symbol, sigTs, daysBuffer) {
+  const to = Math.floor((sigTs + daysBuffer * 24 * 3600 * 1000) / 1000);
+  const from = Math.floor((sigTs - 5 * 24 * 3600 * 1000) / 1000);
+  const url = `${VND_HISTORY_URL}?resolution=D&symbol=${symbol}&from=${from}&to=${to}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json",
+      "Origin": "https://dchart.vndirect.com.vn",
+      "Referer": "https://dchart.vndirect.com.vn/",
+    },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.s !== "ok" || !data.c?.length) return null;
+  return data;
+}
+
+// Classical picks (Climax/Trend/Momentum) — T+5 hold, target/SL fix
+async function resolveClassicalPicks(env) {
   const sb = sbClient(env);
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const r = await fetch(
-    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=neq.MidTerm&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
     { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
   );
   if (!r.ok) {
-    console.warn("[resolve] fetch unresolved fail");
+    console.warn("[resolve classical] fetch fail");
     return;
   }
   const pending = await r.json();
-  console.log(`[resolve] ${pending.length} trades to resolve (signal_date <= ${cutoff})`);
+  console.log(`[resolve classical] ${pending.length} trades (signal_date <= ${cutoff})`);
   if (pending.length === 0) return;
 
   let resolved = 0;
   for (const t of pending) {
     try {
-      // Fetch OHLCV days surrounding signal_date (15 calendar days buffer)
       const sigTs = new Date(t.signal_date).getTime();
-      const to = Math.floor((sigTs + 15 * 24 * 3600 * 1000) / 1000);
-      const from = Math.floor((sigTs - 5 * 24 * 3600 * 1000) / 1000);
-      const url = `${VND_HISTORY_URL}?resolution=D&symbol=${t.symbol}&from=${from}&to=${to}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json",
-          "Origin": "https://dchart.vndirect.com.vn",
-          "Referer": "https://dchart.vndirect.com.vn/",
-        },
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data.s !== "ok" || !data.c?.length) continue;
-
-      // Find idx of signal_date
+      const data = await fetchOhlcvForResolve(t.symbol, sigTs, 15);
+      if (!data) continue;
       const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
       const sigIdx = times.indexOf(t.signal_date);
       if (sigIdx < 0 || sigIdx + 6 >= times.length) continue;
 
-      // T+ simulate: entry = open(sigIdx+1), check close T+3..T+5
       const entryPrice = data.o[sigIdx + 1];
       if (!entryPrice || entryPrice <= 0) continue;
       const slPrice = entryPrice * 0.92;
       const targetPrice = entryPrice * 1.03;
 
-      let exitPrice = null;
-      let exitDay = null;
-      let exitReason = null;
+      let exitPrice = null, exitDay = null, exitReason = null;
       for (let h = 1; h <= 5; h++) {
         const idx = sigIdx + 1 + h;
         if (idx >= data.c.length) break;
         const cl = data.c[idx];
-        if (cl <= slPrice) {
-          exitPrice = cl; exitDay = h; exitReason = "sl"; break;
-        }
-        if (h >= 3 && cl >= targetPrice) {
-          exitPrice = cl; exitDay = h; exitReason = "target"; break;
-        }
-        if (h === 5) {
-          exitPrice = cl; exitDay = h; exitReason = "force";
-        }
+        if (cl <= slPrice) { exitPrice = cl; exitDay = h; exitReason = "sl"; break; }
+        if (h >= 3 && cl >= targetPrice) { exitPrice = cl; exitDay = h; exitReason = "target"; break; }
+        if (h === 5) { exitPrice = cl; exitDay = h; exitReason = "force"; }
       }
       if (exitPrice === null) continue;
-
       const netRet = (exitPrice - entryPrice) / entryPrice - 0.004;
-      const updateData = {
-        resolved_at: new Date().toISOString(),
-        exit_price: +exitPrice.toFixed(4),
-        exit_day: exitDay,
-        exit_reason: exitReason,
-        net_ret: +netRet.toFixed(6),
-        is_win: netRet > 0,
-        // Update entry_price (actual T+1 open) to overwrite signal-day price
-        entry_price: +entryPrice.toFixed(4),
-      };
-      await sbUpdate(sb, "trade_log", { eq: { id: t.id }, data: updateData });
+      await sbUpdate(sb, "trade_log", {
+        eq: { id: t.id },
+        data: {
+          resolved_at: new Date().toISOString(),
+          exit_price: +exitPrice.toFixed(4), exit_day: exitDay, exit_reason: exitReason,
+          net_ret: +netRet.toFixed(6), is_win: netRet > 0,
+          entry_price: +entryPrice.toFixed(4),
+        },
+      });
       resolved++;
-      console.log(`[resolve] ${t.symbol} ${t.signal_date} ${t.tier}: ${exitReason} day=${exitDay} ret=${(netRet*100).toFixed(2)}%`);
+      console.log(`[resolve classical] ${t.symbol} ${t.signal_date} ${t.tier}: ${exitReason} day=${exitDay} ret=${(netRet*100).toFixed(2)}%`);
     } catch (e) {
-      console.warn(`[resolve] ${t.symbol}: ${e.message}`);
+      console.warn(`[resolve classical] ${t.symbol}: ${e.message}`);
     }
   }
-  console.log(`[resolve] ${resolved}/${pending.length} resolved`);
+  console.log(`[resolve classical] ${resolved}/${pending.length}`);
+}
+
+// Mid-term picks (Base Breakout) — T+30 trading hold (~44 calendar), trail 10% peak / SL -10%
+async function resolveMidTermPicksResolver(env) {
+  const sb = sbClient(env);
+  // Wait 44 calendar days (= 30 trading + buffer) trước khi resolve
+  const cutoff = new Date(Date.now() - 44 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=eq.MidTerm&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  if (!r.ok) {
+    console.warn("[resolve midterm] fetch fail");
+    return;
+  }
+  const pending = await r.json();
+  console.log(`[resolve midterm] ${pending.length} trades (signal_date <= ${cutoff})`);
+  if (pending.length === 0) return;
+
+  let resolved = 0;
+  for (const t of pending) {
+    try {
+      const sigTs = new Date(t.signal_date).getTime();
+      // Need ~50 calendar days buffer for T+30 trading data
+      const data = await fetchOhlcvForResolve(t.symbol, sigTs, 55);
+      if (!data) continue;
+      const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
+      const sigIdx = times.indexOf(t.signal_date);
+      if (sigIdx < 0 || sigIdx + 32 >= times.length) continue;
+
+      const entryPrice = data.o[sigIdx + 1];
+      if (!entryPrice || entryPrice <= 0) continue;
+      const initSlPct = (t.init_sl_pct || 10) / 100;
+      const trailPct = (t.trail_pct || 10) / 100;
+      const maxHold = t.max_hold_days || 30;
+      const initSl = entryPrice * (1 - initSlPct);
+
+      let peak = entryPrice;
+      let exitPrice = null, exitDay = null, exitReason = null;
+      for (let h = 1; h <= maxHold; h++) {
+        const idx = sigIdx + 1 + h;
+        if (idx >= data.c.length) break;
+        const cl = data.c[idx];
+        const hi = data.h[idx];
+        if (hi && hi > peak) peak = hi;
+        const trailSl = peak * (1 - trailPct);
+        const effSl = Math.max(initSl, trailSl);
+        if (cl <= effSl) {
+          exitPrice = cl; exitDay = h;
+          exitReason = (effSl === initSl) ? "sl" : "trail";
+          break;
+        }
+        if (h === maxHold) { exitPrice = cl; exitDay = h; exitReason = "force"; }
+      }
+      if (exitPrice === null) continue;
+      const netRet = (exitPrice - entryPrice) / entryPrice - 0.005;  // 0.5% round-trip cost for mid-term
+      await sbUpdate(sb, "trade_log", {
+        eq: { id: t.id },
+        data: {
+          resolved_at: new Date().toISOString(),
+          exit_price: +exitPrice.toFixed(4), exit_day: exitDay, exit_reason: exitReason,
+          net_ret: +netRet.toFixed(6), is_win: netRet > 0,
+          entry_price: +entryPrice.toFixed(4),
+        },
+      });
+      resolved++;
+      console.log(`[resolve midterm] ${t.symbol} ${t.signal_date}: ${exitReason} day=${exitDay} ret=${(netRet*100).toFixed(2)}%`);
+    } catch (e) {
+      console.warn(`[resolve midterm] ${t.symbol}: ${e.message}`);
+    }
+  }
+  console.log(`[resolve midterm] ${resolved}/${pending.length}`);
 }
 
 async function updatePeakPrices(env) {
@@ -2173,6 +2273,27 @@ async function sendMarketDigest(env, precomputedResult = null) {
     }
     text += `💰 Size: 12% NAV/Momentum (hold ~20 phiên trailing). Max 1-2 lệnh.\n`;
     text += `⚠️ Khi VNI chuyển correction → cắt sớm Momentum, switch sang Climax Elite.\n`;
+  }
+
+  // ── Mid-term (Base Breakout) section ──
+  // Phase 1 verified: Test 2025-26 Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.
+  // App pivoted sang mid-term — focus pattern này, T+ swing dormant.
+  const baseBreakoutMatches = result.baseBreakoutMatches || [];
+  if (baseBreakoutMatches.length > 0) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `🔍 *Rà soát Trung hạn (Base Breakout)*\n`;
+    text += `${baseBreakoutMatches.length} mã tích lũy ≥30 phiên + breakout + vol confirm\n`;
+    text += `_Backtest Test 2025-26: Win 52%, Sharpe +1.13, PF 2.82, avg +6.95%/trade._\n\n`;
+    const showMidTerm = baseBreakoutMatches.slice(0, 5);
+    for (const m of showMidTerm) {
+      const cur = m.currentPrice;
+      const initSL = m.initSL;
+      const breakStr = m.breakStrength ? `${m.breakStrength.toFixed(1)}%` : "?";
+      text += `🔍 *${m.symbol}* @ ${cur.toFixed(2)} · break +${breakStr} above prev high · vol ${m.volRatio.toFixed(1)}×\n`;
+      text += `  Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
+    }
+    text += `💰 Backtest sizing 10M VND/signal → +29.8%/năm trên 200M vốn.\n`;
+    text += `⏰ Hold ~1 tháng calendar. Edge từ asymmetric R:R (Win 52% nhưng PF 2.82).\n`;
   }
 
   text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;

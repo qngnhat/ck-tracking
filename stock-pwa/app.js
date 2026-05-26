@@ -7991,13 +7991,17 @@
     }
   }
 
-  // Backtest expectations per tier (from backtest scripts)
+  // Backtest expectations per tier
   const TIER_BACKTEST = {
     "Premium":  { win: 61, avg: 2.62, sharpe: 1.90 },
     "Elite":    { win: 61, avg: 2.05, sharpe: 1.71 },
     "A":        { win: 56, avg: 0.81, sharpe: 0.67 },
     "B":        { win: 56, avg: 0.81, sharpe: 0.70 },
     "Momentum": { win: 60, avg: 0.78, sharpe: 0.60 },
+    // Phase 1 verified: run_midterm_phase1.py + run_midterm_portfolio_100shares.py
+    // Test 2025-26 (out-sample): Win 51.9%, avg +6.95% per trade, Sharpe +1.13,
+    // PF 2.82. Annualized +29.8%/năm với 10M VND/signal trên 200M vốn.
+    "MidTerm":  { win: 52, avg: 6.95, sharpe: 1.13 },
   };
 
   // Rule-based verdict — KHÔNG cảm tính, chỉ dựa số liệu
@@ -8116,12 +8120,15 @@
     if (!content) return;
     content.innerHTML = `<div class="empty-state ranking-intro"><div class="empty-icon">⏳</div><p>Đang tải trade log...</p></div>`;
 
-    // Fetch parallel: trade log + active picks (để verdict chính xác)
-    const [trades] = await Promise.all([
+    // Fetch parallel: trade log + Climax + Mid-term active picks (verdict full picture)
+    const [trades, midTermPicks] = await Promise.all([
       fetchTradeLog(true),
+      fetchMidTermPicks(true).catch(() => []),
       fetchActiveClimaxPicks(true).catch(() => {}),
     ]);
-    const activeCount = activeClimaxPicks?.size || 0;
+    const climaxCount = activeClimaxPicks?.size || 0;
+    const midTermCount = Array.isArray(midTermPicks) ? midTermPicks.length : 0;
+    const activeCount = climaxCount + midTermCount;
     const verdict = computeVerdict(trades, activeCount);
 
     // No trades AND no active → render verdict only (idle state)
@@ -8131,8 +8138,8 @@
         <div class="empty-state ranking-intro" style="margin-top: 20px;">
           <div class="empty-icon">📊</div>
           <p><b>Chưa có forward-test data</b></p>
-          <p>Mỗi lần app fire signal (Premium/Elite/A/B/Momentum), trade log ghi nhận.</p>
-          <p>Sau 7 phiên, worker resolve outcome (target/SL/force) và tính actual return.</p>
+          <p>Mỗi lần app fire signal (Premium/Elite/A/B/Momentum/MidTerm), trade log ghi nhận.</p>
+          <p>Mid-term resolve sau T+30 trading (~44 ngày). Classical resolve sau T+5 (~7 ngày).</p>
         </div>`;
       return;
     }
