@@ -185,6 +185,34 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/mid-term-quick-scan" && request.method === "POST") {
+      // User-triggered scan: 35 mã large cap (VOL_CLIMAX_UNIVERSE), persist matches.
+      // Full 1411 scan vẫn auto qua EOD cron — đây là quick refresh ngoài giờ EOD.
+      // No secret (single-user app, low abuse risk).
+      const matches = [];
+      const batchSize = 10;
+      for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
+        const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(async (sym) => {
+          try {
+            const data = await fetchVndHistory(sym, 220);
+            const r = detectBaseBreakout(data);
+            return r ? { symbol: sym, ...r } : null;
+          } catch { return null; }
+        }));
+        for (const r of results) if (r) matches.push(r);
+      }
+      matches.sort((a, b) => (b.breakStrength || 0) - (a.breakStrength || 0));
+      await persistMidTermMatches(env, matches);
+      return new Response(JSON.stringify({
+        scanned: VOL_CLIMAX_UNIVERSE.length,
+        matched: matches.length,
+        symbols: matches.map((m) => m.symbol),
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
     if (url.pathname === "/spike-test" && request.method === "POST") {
       // Manual trigger spike alert check
       const secret = url.searchParams.get("secret");

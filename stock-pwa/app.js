@@ -5521,19 +5521,29 @@
     return json.picks || [];
   }
 
+  async function triggerMidTermQuickScan() {
+    // Public endpoint: scan 35 mã large cap, persist matches. Returns scan summary.
+    // Full 1411 scan vẫn auto qua EOD cron — đây là quick refresh in-session.
+    const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/mid-term-quick-scan", {
+      method: "POST",
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  }
+
   function showRankingIntro() {
+    // Phase 4 update: auto-load picks instead of static intro. Intro only shown
+    // briefly while initial fetch happening, then replaced by renderMidTermPicks.
     const content = $("ranking-content");
     if (!content) return;
     content.innerHTML = `
-      <div class="empty-state ranking-intro">
-        <div class="empty-icon">🔍</div>
-        <h2>Rà soát Trung hạn</h2>
-        <p>Pattern <b>Base Breakout</b>: mã tích lũy ≥30 phiên (range &lt;10%) + breakout above prev high + vol &gt;1.5× confirm.</p>
-        <p>Bot tự scan EOD mỗi ngày (14:50 VN). Mỗi pick hold ~1 tháng với trailing stop 10%.</p>
-        <p><small>📊 Cross-validated Test 2025-26: Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.</small></p>
-        <button class="btn-primary" id="ranking-load-btn">Tải picks hôm nay</button>
+      <div class="ranking-loading">
+        <div class="spinner"></div>
+        <div>Đang tải picks Rà soát Trung hạn...</div>
       </div>`;
     renderSizingHelper();
+    // Trigger load immediately (auto)
+    loadRanking(false);
   }
 
   async function loadRanking(forceFresh = false) {
@@ -7010,15 +7020,34 @@
   // Phase 4: style toggle removed (chỉ Base Breakout pattern). Init intro:
   setTimeout(() => showRankingIntro(), 0);
 
-  $("ranking-refresh").addEventListener("click", () => {
-    RANKING.clearCache();
-    loadRanking(true);
+  // Refresh button: trigger server quick-scan (35 mã large cap) + persist + reload
+  $("ranking-refresh").addEventListener("click", async () => {
+    const btn = $("ranking-refresh");
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    const content = $("ranking-content");
+    content.innerHTML = `
+      <div class="ranking-loading">
+        <div class="spinner"></div>
+        <div>Đang quét 35 mã large cap + persist server...</div>
+        <small style="color:#888;margin-top:8px">Full 1411 mã scan tự động qua EOD cron 14:50 VN.</small>
+      </div>`;
+    try {
+      const summary = await triggerMidTermQuickScan();
+      console.log(`[mid-term scan] scanned ${summary.scanned}, matched ${summary.matched}: ${summary.symbols.join(", ")}`);
+      // Reload picks after scan complete
+      await loadRanking(true);
+    } catch (e) {
+      content.innerHTML = `<div class="error"><h3>Lỗi quét</h3><p>${e.message}</p><button class="btn-primary" onclick="document.getElementById('ranking-refresh').click()">Thử lại</button></div>`;
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("spinning");
+    }
   });
 
-  // Initial intro load button (delegated since it may be re-rendered)
+  // Legacy intro button (kept as no-op listener for any leftover refs)
   document.addEventListener("click", (e) => {
     if (e.target && e.target.id === "ranking-load-btn") {
-      RANKING.clearCache();
       loadRanking(true);
     }
   });
