@@ -186,13 +186,13 @@ export default {
       });
     }
     if (url.pathname === "/mid-term-quick-scan" && request.method === "POST") {
-      // User-triggered scan: 35 mã large cap (VOL_CLIMAX_UNIVERSE), persist matches.
-      // Full 1411 scan vẫn auto qua EOD cron — đây là quick refresh ngoài giờ EOD.
+      // User-triggered scan: large+mid cap (~150 mã) - khớp với Phase 1 backtest
+      // universe. Persist matches. Full 1411 scan vẫn auto qua EOD cron.
       // No secret (single-user app, low abuse risk).
       const matches = [];
-      const batchSize = 10;
-      for (let i = 0; i < VOL_CLIMAX_UNIVERSE.length; i += batchSize) {
-        const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
+      const batchSize = 15;
+      for (let i = 0; i < MID_TERM_QUICK_UNIVERSE.length; i += batchSize) {
+        const batch = MID_TERM_QUICK_UNIVERSE.slice(i, i + batchSize);
         const results = await Promise.all(batch.map(async (sym) => {
           try {
             const data = await fetchVndHistory(sym, 220);
@@ -205,7 +205,7 @@ export default {
       matches.sort((a, b) => (b.breakStrength || 0) - (a.breakStrength || 0));
       await persistMidTermMatches(env, matches);
       return new Response(JSON.stringify({
-        scanned: VOL_CLIMAX_UNIVERSE.length,
+        scanned: MID_TERM_QUICK_UNIVERSE.length,
         matched: matches.length,
         symbols: matches.map((m) => m.symbol),
       }), {
@@ -833,6 +833,17 @@ const VOL_CLIMAX_UNIVERSE = [
   "MBB", "TCB", "VND", "DIG", "VNM", "SHS", "CTG", "ACB", "DGC", "GEX",
   "HCM", "DXG", "VRE", "VCI", "GEL", "PDR", "HDB", "NVL", "EIB", "DBC",
   "TPB", "CEO", "KBC", "CII", "PVS",
+];
+
+// Universe cho /mid-term-quick-scan — top large+mid cap HOSE, 45 mã.
+// Cloudflare Workers Free subrequest limit = 50/request → keep < 50.
+// Full 1411 mã scan vẫn auto qua EOD cron (chunked, không hit limit).
+const MID_TERM_QUICK_UNIVERSE = [
+  "HPG", "FPT", "SSI", "MWG", "STB", "VHM", "SHB", "VIX", "MSN", "VPB",
+  "MBB", "TCB", "VND", "DIG", "VNM", "SHS", "CTG", "ACB", "DGC", "GEX",
+  "HCM", "DXG", "VRE", "VCI", "HDB", "PDR", "TPB", "CEO", "KBC", "PVS",
+  "VCB", "VIC", "GMD", "BID", "GVR", "VIB", "VHC", "GAS", "PLX", "PNJ",
+  "REE", "SAB", "SSB", "BCM", "VCS",
 ];
 
 function calcRsi(closes, period = 14) {

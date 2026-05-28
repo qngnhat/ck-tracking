@@ -7383,3 +7383,15 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
     grid-template-columns: 1fr;
   }
 }
+
+.scan-summary-banner {
+  background: rgba(102, 187, 106, 0.08);
+  border-left: 3px solid #66bb6a;
+  border-radius: 4px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #d0d6e2;
+  line-height: 1.5;
+}
+.scan-summary-banner b { color: #fff; }

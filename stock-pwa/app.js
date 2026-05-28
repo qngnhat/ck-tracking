@@ -5495,9 +5495,9 @@
           <div class="empty-icon">📭</div>
           <h2>Hôm nay không có Base Breakout</h2>
           <p>Pattern selective — đa số ngày 0-2 picks (fire rate ~80/năm = 0.3/ngày).</p>
-          <p>Bot quét lại EOD lúc 14:50 VN (T2-T6). Quay lại sau.</p>
+          <p>Bot quét full 1411 mã EOD lúc 14:50 VN (T2-T6).</p>
           <p><small>📊 Backtest Sharpe +1.13 — không phải money printer, edge realistic.</small></p>
-          <button class="btn-primary" id="ranking-load-btn">Tải lại</button>
+          <button class="btn-primary" id="ranking-load-btn">🔄 Quét lại 45 mã large+mid cap</button>
         </div>`;
       return;
     }
@@ -7020,7 +7020,8 @@
   // Phase 4: style toggle removed (chỉ Base Breakout pattern). Init intro:
   setTimeout(() => showRankingIntro(), 0);
 
-  // Refresh button: trigger server quick-scan (35 mã large cap) + persist + reload
+  // Refresh button: trigger server quick-scan (150 mã large+mid cap) + persist + reload
+  let lastScanSummary = null;
   $("ranking-refresh").addEventListener("click", async () => {
     const btn = $("ranking-refresh");
     btn.disabled = true;
@@ -7029,26 +7030,36 @@
     content.innerHTML = `
       <div class="ranking-loading">
         <div class="spinner"></div>
-        <div>Đang quét 35 mã large cap + persist server...</div>
-        <small style="color:#888;margin-top:8px">Full 1411 mã scan tự động qua EOD cron 14:50 VN.</small>
+        <div>Đang quét 45 mã large+mid cap (Cloudflare limit)...</div>
+        <small style="color:#888;margin-top:8px">~10-15 giây. Full 1411 mã scan tự động qua EOD cron 14:50 VN.</small>
       </div>`;
     try {
       const summary = await triggerMidTermQuickScan();
+      lastScanSummary = summary;
       console.log(`[mid-term scan] scanned ${summary.scanned}, matched ${summary.matched}: ${summary.symbols.join(", ")}`);
-      // Reload picks after scan complete
       await loadRanking(true);
+      // Show scan result banner above picks
+      const banner = document.createElement("div");
+      banner.className = "scan-summary-banner";
+      banner.innerHTML = `
+        ✅ <b>Quét xong</b>: ${summary.scanned} mã large+mid cap →
+        <b>${summary.matched} match</b> Base Breakout
+        ${summary.matched > 0 ? `(${summary.symbols.slice(0, 8).join(", ")}${summary.symbols.length > 8 ? "..." : ""})` : ""}
+        · ⏱️ ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}`;
+      content.insertBefore(banner, content.firstChild);
     } catch (e) {
-      content.innerHTML = `<div class="error"><h3>Lỗi quét</h3><p>${e.message}</p><button class="btn-primary" onclick="document.getElementById('ranking-refresh').click()">Thử lại</button></div>`;
+      content.innerHTML = `<div class="error"><h3>Lỗi quét</h3><p>${e.message}</p><button class="btn-primary" id="ranking-load-btn">Thử lại</button></div>`;
     } finally {
       btn.disabled = false;
       btn.classList.remove("spinning");
     }
   });
 
-  // Legacy intro button (kept as no-op listener for any leftover refs)
+  // "Tải lại" button (in empty state or anywhere) — same action as refresh:
+  // trigger server quick-scan + reload picks.
   document.addEventListener("click", (e) => {
     if (e.target && e.target.id === "ranking-load-btn") {
-      loadRanking(true);
+      $("ranking-refresh").click();  // delegate to refresh handler
     }
   });
 
