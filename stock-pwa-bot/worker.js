@@ -300,6 +300,60 @@ export default {
       ctx.waitUntil(initScan(env));
       return new Response("Scan restart initiated", { status: 200 });
     }
+    if (url.pathname === "/scan-full-init" && request.method === "POST") {
+      // Public: PWA user-trigger full 1411 scan. Await initScan trả về state.
+      await initScan(env);
+      const state = await getScanState(env);
+      return new Response(JSON.stringify({
+        status: state?.status || "unknown",
+        total_universe: state?.total_universe || 0,
+        current_offset: state?.current_offset || 0,
+        started_at: state?.started_at,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    if (url.pathname === "/scan-full-step" && request.method === "POST") {
+      // Public: PWA loops calling this to advance scan 1 chunk (35 mã).
+      // Await processScanChunk + trả về current state. PWA poll cho đến done.
+      await processScanChunk(env);
+      const state = await getScanState(env);
+      const climaxCount = JSON.parse(state?.climax_partial || "[]").length;
+      const momentumCount = JSON.parse(state?.momentum_partial || "[]").length;
+      const baseBreakoutCount = JSON.parse(state?.base_breakout_partial || "[]").length;
+      return new Response(JSON.stringify({
+        status: state?.status || "unknown",
+        current_offset: state?.current_offset || 0,
+        total_universe: state?.total_universe || 0,
+        climax_count: climaxCount,
+        momentum_count: momentumCount,
+        base_breakout_count: baseBreakoutCount,
+        completed: state?.status === "completed",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    if (url.pathname === "/scan-full-status" && request.method === "GET") {
+      // Public: read current scan state cho PWA progress bar
+      const state = await getScanState(env);
+      if (!state) {
+        return new Response(JSON.stringify({ status: "idle" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: state.status,
+        current_offset: state.current_offset,
+        total_universe: state.total_universe,
+        completed: state.status === "completed",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
     if (url.pathname === "/chunk-step" && request.method === "POST") {
       // Manually advance scan by one chunk (for debug when chunked cron stalled)
       const secret = url.searchParams.get("secret");

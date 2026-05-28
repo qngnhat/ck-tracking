@@ -7395,3 +7395,19 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   line-height: 1.5;
 }
 .scan-summary-banner b { color: #fff; }
+
+/* Full-scan progress bar */
+.full-scan-progress-bar {
+  width: 100%;
+  max-width: 400px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 8px auto 0;
+}
+.full-scan-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2196F3, #FFC107);
+  transition: width 0.3s ease;
+}

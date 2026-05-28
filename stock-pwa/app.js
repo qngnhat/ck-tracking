@@ -5497,7 +5497,7 @@
           <p>Pattern selective — đa số ngày 0-2 picks (fire rate ~80/năm = 0.3/ngày).</p>
           <p>Bot quét full 1411 mã EOD lúc 14:50 VN (T2-T6).</p>
           <p><small>📊 Backtest Sharpe +1.13 — không phải money printer, edge realistic.</small></p>
-          <button class="btn-primary" id="ranking-load-btn">🔄 Quét lại 45 mã large+mid cap</button>
+          <button class="btn-primary" id="ranking-load-btn">🔄 Quét full 1411 mã ngay</button>
         </div>`;
       return;
     }
@@ -5522,13 +5522,36 @@
   }
 
   async function triggerMidTermQuickScan() {
-    // Public endpoint: scan 35 mã large cap, persist matches. Returns scan summary.
-    // Full 1411 scan vẫn auto qua EOD cron — đây là quick refresh in-session.
+    // Public endpoint: scan 45 mã large+mid cap subset, persist matches.
     const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/mid-term-quick-scan", {
       method: "POST",
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
+  }
+
+  // Full 1411 mã scan: PWA-driven chunked loop. Init scan state, then call
+  // /scan-full-step lặp lại cho đến khi done (~41 chunks × ~5s = ~3-5 phút).
+  // onProgress callback nhận {offset, total, climax, momentum, base_breakout}.
+  async function triggerFullScan(onProgress) {
+    const BASE = "https://stock-pwa-bot.qngnhat.workers.dev";
+    // 1. Init scan state
+    const initRes = await fetch(`${BASE}/scan-full-init`, { method: "POST" });
+    if (!initRes.ok) throw new Error(`Init failed HTTP ${initRes.status}`);
+    const initState = await initRes.json();
+    if (onProgress) onProgress({ ...initState, current_offset: 0, base_breakout_count: 0 });
+
+    // 2. Loop chunks until completed
+    let safetyCounter = 0;
+    while (safetyCounter < 100) {  // max 100 iterations (3500 mã, safety)
+      safetyCounter++;
+      const stepRes = await fetch(`${BASE}/scan-full-step`, { method: "POST" });
+      if (!stepRes.ok) throw new Error(`Step failed HTTP ${stepRes.status}`);
+      const state = await stepRes.json();
+      if (onProgress) onProgress(state);
+      if (state.completed) return state;
+    }
+    throw new Error("Scan loop exceeded safety limit");
   }
 
   function showRankingIntro() {
@@ -7020,35 +7043,53 @@
   // Phase 4: style toggle removed (chỉ Base Breakout pattern). Init intro:
   setTimeout(() => showRankingIntro(), 0);
 
-  // Refresh button: trigger server quick-scan (150 mã large+mid cap) + persist + reload
+  // Refresh button: trigger FULL 1411 mã chunked scan + progress bar UI + reload
   let lastScanSummary = null;
   $("ranking-refresh").addEventListener("click", async () => {
     const btn = $("ranking-refresh");
     btn.disabled = true;
     btn.classList.add("spinning");
     const content = $("ranking-content");
+    const startTime = Date.now();
     content.innerHTML = `
       <div class="ranking-loading">
         <div class="spinner"></div>
-        <div>Đang quét 45 mã large+mid cap (Cloudflare limit)...</div>
-        <small style="color:#888;margin-top:8px">~10-15 giây. Full 1411 mã scan tự động qua EOD cron 14:50 VN.</small>
+        <div id="full-scan-progress">Khởi tạo scan full 1411 mã...</div>
+        <div class="full-scan-progress-bar"><div class="full-scan-progress-fill" id="full-scan-fill" style="width:0%"></div></div>
+        <div id="full-scan-stats" style="color:#888;margin-top:4px;font-size:12px">Climax: 0 · Momentum: 0 · Base Breakout: 0</div>
+        <small style="color:#888;margin-top:4px">Estimated ~3-5 phút. Đừng đóng tab.</small>
       </div>`;
     try {
-      const summary = await triggerMidTermQuickScan();
-      lastScanSummary = summary;
-      console.log(`[mid-term scan] scanned ${summary.scanned}, matched ${summary.matched}: ${summary.symbols.join(", ")}`);
+      const finalState = await triggerFullScan((state) => {
+        const offset = state.current_offset || 0;
+        const total = state.total_universe || 1411;
+        const pct = total > 0 ? Math.min(100, (offset / total) * 100) : 0;
+        const progressEl = document.getElementById("full-scan-progress");
+        const fillEl = document.getElementById("full-scan-fill");
+        const statsEl = document.getElementById("full-scan-stats");
+        if (progressEl) progressEl.textContent = state.completed
+          ? `✅ Scan xong! ${offset}/${total} mã.`
+          : `Đang quét... ${offset}/${total} mã (${pct.toFixed(0)}%)`;
+        if (fillEl) fillEl.style.width = pct + "%";
+        if (statsEl) statsEl.innerHTML =
+          `Climax: <b>${state.climax_count || 0}</b> · ` +
+          `Momentum: <b>${state.momentum_count || 0}</b> · ` +
+          `Base Breakout: <b style="color:#FFC107">${state.base_breakout_count || 0}</b>`;
+      });
+      lastScanSummary = finalState;
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+      console.log(`[full-scan] done in ${elapsed}s: climax=${finalState.climax_count}, momentum=${finalState.momentum_count}, base_breakout=${finalState.base_breakout_count}`);
       await loadRanking(true);
-      // Show scan result banner above picks
       const banner = document.createElement("div");
       banner.className = "scan-summary-banner";
       banner.innerHTML = `
-        ✅ <b>Quét xong</b>: ${summary.scanned} mã large+mid cap →
-        <b>${summary.matched} match</b> Base Breakout
-        ${summary.matched > 0 ? `(${summary.symbols.slice(0, 8).join(", ")}${summary.symbols.length > 8 ? "..." : ""})` : ""}
+        ✅ <b>Scan full 1411 mã xong</b> (${elapsed}s) →
+        <b style="color:#FFC107">${finalState.base_breakout_count || 0} match</b> Base Breakout
+        · Climax: ${finalState.climax_count || 0} · Momentum: ${finalState.momentum_count || 0}
         · ⏱️ ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}`;
       content.insertBefore(banner, content.firstChild);
     } catch (e) {
-      content.innerHTML = `<div class="error"><h3>Lỗi quét</h3><p>${e.message}</p><button class="btn-primary" id="ranking-load-btn">Thử lại</button></div>`;
+      content.innerHTML = `<div class="error"><h3>Lỗi scan</h3><p>${e.message}</p><button class="btn-primary" id="ranking-load-btn">Thử lại</button></div>`;
     } finally {
       btn.disabled = false;
       btn.classList.remove("spinning");
