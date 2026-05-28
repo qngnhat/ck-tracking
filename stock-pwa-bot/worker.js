@@ -360,14 +360,19 @@ export default {
       });
     }
     if (url.pathname === "/scan-full-step" && request.method === "POST") {
-      // Public: PWA loops calling this to advance scan 1 chunk (35 mã).
+      // Public: PWA loops calling this to advance scan 1 chunk.
+      const safeJsonLen = (s) => {
+        if (!s || s === "" || s === "null") return 0;
+        try { return JSON.parse(s).length; } catch { return 0; }
+      };
       const stateBefore = await getScanState(env);
       const offsetBefore = stateBefore?.current_offset || 0;
       await processScanChunk(env);
       const state = await getScanState(env);
-      const climaxCount = JSON.parse(state?.climax_partial || "[]").length;
-      const momentumCount = JSON.parse(state?.momentum_partial || "[]").length;
-      const baseBreakoutCount = JSON.parse(state?.base_breakout_partial || "[]").length;
+      const climaxCount = safeJsonLen(state?.climax_partial);
+      const momentumCount = safeJsonLen(state?.momentum_partial);
+      const baseBreakoutCount = safeJsonLen(state?.base_breakout_partial);
+      const fboCount = safeJsonLen(state?.fbo_partial);
       const offsetAfter = state?.current_offset || 0;
       // Diagnostic: nếu offset không advance + status vẫn in_progress → setScanState
       // có thể fail silently (column missing trong scan_state). Báo PWA biết.
@@ -379,9 +384,10 @@ export default {
         climax_count: climaxCount,
         momentum_count: momentumCount,
         base_breakout_count: baseBreakoutCount,
+        fbo_count: fboCount,
         completed: state?.status === "completed",
         stuck: stuck,
-        error: stuck ? "Offset không advance — có thể column base_breakout_partial chưa tồn tại trong scan_state (chạy SQL 009)." : null,
+        error: stuck ? "Offset không advance — có thể column base_breakout_partial/fbo_partial chưa tồn tại trong scan_state (chạy SQL 009 + 010)." : null,
       }), {
         status: stuck ? 500 : 200,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
@@ -1347,7 +1353,9 @@ async function scanVolClimaxMatches() {
 // Free tier 50 subreq/invocation → chunk 35 mã. 1411/35 = ~41 chunks × 1 min = ~41 min.
 // Schedule: EOD 14:50 init → process chunks 15:00-15:59 → finalize sau chunk cuối.
 
-const CHUNK_SIZE = 35;
+// Cloudflare Workers Free subrequest limit = 50/request.
+// Budget per /scan-full-step: history (25) + foreign cap (10) + state/heartbeat (~5) = ~40.
+const CHUNK_SIZE = 25;
 
 async function getScanState(env) {
   const sb = sbClient(env);
@@ -1415,7 +1423,10 @@ async function processScanChunk(env) {
   const chunkStartMs = Date.now();
 
   let fetchFails = 0;
-  const results = await Promise.all(chunk.map(async (sym) => {
+  // Phase 1: fetch history + run detectors WITHOUT foreign (bounded subrequests).
+  // FBO requires foreign filter — defer to phase 2 (chỉ fetch foreign cho top
+  // candidates) để tránh exceed Cloudflare 50 subrequest/request limit.
+  const phase1 = await Promise.all(chunk.map(async (sym) => {
     try {
       const data = await fetchVndHistory(sym, 220);
       const climax = detectVolClimaxBounce(data);
@@ -1423,27 +1434,38 @@ async function processScanChunk(env) {
       const baseBreakout = detectBaseBreakout(data);
       const fboBase = detectForeignBackedOversoldBase(data);
       const stats = computeStockStats(data);
-      // ENRICH climax + FBO matches với foreign flow.
-      // Climax: tier A + NN net>0 = Premium (Sharpe 1.90 vs base 0.36).
-      // FBO: requires NN net 5d > 0 (mandatory filter).
-      let foreign = null;
-      if (climax || fboBase) {
-        foreign = await fetchForeignDaily(sym, 7).catch(() => null);
-      }
-      // Apply NN filter for FBO
-      let fbo = null;
-      if (fboBase && foreign) {
-        const nnNet5d = computeNnNet5d(foreign);
-        if (nnNet5d != null && nnNet5d > 0) {
-          fbo = { ...fboBase, nn_net_5d_bn: +(nnNet5d / 1e9).toFixed(2) };
-        }
-      }
-      return { symbol: sym, climax, momentum, baseBreakout, fbo, stats, foreign };
+      return { symbol: sym, climax, momentum, baseBreakout, fboBase, stats };
     } catch (e) {
       fetchFails++;
       return null;
     }
   }));
+
+  // Phase 2: fetch foreign only for candidates needing it (climax + fboBase).
+  // Cap total foreign fetches để stay within 50 subrequest budget.
+  // CHUNK_SIZE = 35 history fetches → còn ~13 budget for foreign.
+  const candidates = phase1.filter((r) => r && (r.climax || r.fboBase));
+  const MAX_FOREIGN_PER_CHUNK = 10;
+  const toFetchForeign = candidates.slice(0, MAX_FOREIGN_PER_CHUNK);
+  const foreignResults = await Promise.all(toFetchForeign.map(async (r) => {
+    const foreign = await fetchForeignDaily(r.symbol, 7).catch(() => null);
+    return { symbol: r.symbol, foreign };
+  }));
+  const foreignBySymbol = new Map(foreignResults.map((x) => [x.symbol, x.foreign]));
+
+  // Merge: attach foreign to results + apply FBO filter
+  const results = phase1.map((r) => {
+    if (!r) return null;
+    const foreign = foreignBySymbol.get(r.symbol) || null;
+    let fbo = null;
+    if (r.fboBase && foreign) {
+      const nnNet5d = computeNnNet5d(foreign);
+      if (nnNet5d != null && nnNet5d > 0) {
+        fbo = { ...r.fboBase, nn_net_5d_bn: +(nnNet5d / 1e9).toFixed(2) };
+      }
+    }
+    return { ...r, fbo, foreign };
+  });
   const chunkMs = Date.now() - chunkStartMs;
   await logHeartbeat(env, "chunk-processed", {
     offset, total, chunk_size: chunk.length,
@@ -1451,12 +1473,16 @@ async function processScanChunk(env) {
     fetch_fails: fetchFails,
   });
 
-  // Merge into partial state
-  const climaxPartial = JSON.parse(state.climax_partial || "[]");
-  const momentumPartial = JSON.parse(state.momentum_partial || "[]");
-  const baseBreakoutPartial = JSON.parse(state.base_breakout_partial || "[]");
-  const fboPartial = JSON.parse(state.fbo_partial || "[]");
-  const marketStats = JSON.parse(state.market_stats || "{}");
+  // Merge into partial state (safe parse — column có thể empty string sau migration)
+  const safeParse = (s, fallback) => {
+    if (!s || s === "" || s === "null") return fallback;
+    try { return JSON.parse(s); } catch { return fallback; }
+  };
+  const climaxPartial = safeParse(state.climax_partial, []);
+  const momentumPartial = safeParse(state.momentum_partial, []);
+  const baseBreakoutPartial = safeParse(state.base_breakout_partial, []);
+  const fboPartial = safeParse(state.fbo_partial, []);
+  const marketStats = safeParse(state.market_stats, {});
   let upCount = marketStats.upCount || 0;
   let downCount = marketStats.downCount || 0;
   let totalTurnover = marketStats.totalTurnover || 0;
@@ -1517,11 +1543,15 @@ async function processScanChunk(env) {
 async function finalizeScan(env, state) {
   console.log(`[finalize] scan complete, building digest`);
 
-  const climaxRaw = JSON.parse(state.climax_partial || "[]");
-  const momentumRaw = JSON.parse(state.momentum_partial || "[]");
-  const baseBreakoutRaw = JSON.parse(state.base_breakout_partial || "[]");
-  const fboRaw = JSON.parse(state.fbo_partial || "[]");
-  const marketStats = JSON.parse(state.market_stats || "{}");
+  const safeParse = (s, fallback) => {
+    if (!s || s === "" || s === "null") return fallback;
+    try { return JSON.parse(s); } catch { return fallback; }
+  };
+  const climaxRaw = safeParse(state.climax_partial, []);
+  const momentumRaw = safeParse(state.momentum_partial, []);
+  const baseBreakoutRaw = safeParse(state.base_breakout_partial, []);
+  const fboRaw = safeParse(state.fbo_partial, []);
+  const marketStats = safeParse(state.market_stats, {});
   const isEliteRegime = state.vni_regime === "correction";
   const isMomentumRegime = state.vni_regime === "bull" || state.vni_regime === "neutral";
 
