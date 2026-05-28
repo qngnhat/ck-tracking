@@ -301,8 +301,35 @@ export default {
       return new Response("Scan restart initiated", { status: 200 });
     }
     if (url.pathname === "/scan-full-init" && request.method === "POST") {
-      // Public: PWA user-trigger full 1411 scan. Await initScan trả về state.
-      await initScan(env);
+      // Public: PWA user-trigger full 1411 scan.
+      // KHÔNG dùng initScan() (vì nó auto-step → 40+ subrequests trong 1 call).
+      // Chỉ init state, PWA loop /scan-full-step để process chunks.
+      const sb = sbClient(env);
+      let vniRegime = "neutral", vniRet20 = null;
+      try {
+        const vni = await fetchVndHistory("VNINDEX", 35);
+        const cs = vni.closes;
+        if (cs.length >= 21) {
+          vniRet20 = ((cs[cs.length - 1] - cs[cs.length - 21]) / cs[cs.length - 21]) * 100;
+          if (vniRet20 < -5) vniRegime = "correction";
+          else if (vniRet20 > 3) vniRegime = "bull";
+        }
+      } catch {}
+      await setScanState(env, {
+        status: "in_progress",
+        scan_date: new Date().toISOString().slice(0, 10),
+        current_offset: 0,
+        total_universe: FULL_UNIVERSE.length,
+        climax_partial: "[]",
+        momentum_partial: "[]",
+        base_breakout_partial: "[]",
+        market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
+        vni_regime: vniRegime,
+        vni_ret20: vniRet20,
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        error_count: 0,
+      });
       const state = await getScanState(env);
       return new Response(JSON.stringify({
         status: state?.status || "unknown",
@@ -316,22 +343,29 @@ export default {
     }
     if (url.pathname === "/scan-full-step" && request.method === "POST") {
       // Public: PWA loops calling this to advance scan 1 chunk (35 mã).
-      // Await processScanChunk + trả về current state. PWA poll cho đến done.
+      const stateBefore = await getScanState(env);
+      const offsetBefore = stateBefore?.current_offset || 0;
       await processScanChunk(env);
       const state = await getScanState(env);
       const climaxCount = JSON.parse(state?.climax_partial || "[]").length;
       const momentumCount = JSON.parse(state?.momentum_partial || "[]").length;
       const baseBreakoutCount = JSON.parse(state?.base_breakout_partial || "[]").length;
+      const offsetAfter = state?.current_offset || 0;
+      // Diagnostic: nếu offset không advance + status vẫn in_progress → setScanState
+      // có thể fail silently (column missing trong scan_state). Báo PWA biết.
+      const stuck = offsetAfter === offsetBefore && state?.status === "in_progress";
       return new Response(JSON.stringify({
         status: state?.status || "unknown",
-        current_offset: state?.current_offset || 0,
+        current_offset: offsetAfter,
         total_universe: state?.total_universe || 0,
         climax_count: climaxCount,
         momentum_count: momentumCount,
         base_breakout_count: baseBreakoutCount,
         completed: state?.status === "completed",
+        stuck: stuck,
+        error: stuck ? "Offset không advance — có thể column base_breakout_partial chưa tồn tại trong scan_state (chạy SQL 009)." : null,
       }), {
-        status: 200,
+        status: stuck ? 500 : 200,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }

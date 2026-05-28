@@ -5546,9 +5546,12 @@
     while (safetyCounter < 100) {  // max 100 iterations (3500 mã, safety)
       safetyCounter++;
       const stepRes = await fetch(`${BASE}/scan-full-step`, { method: "POST" });
-      if (!stepRes.ok) throw new Error(`Step failed HTTP ${stepRes.status}`);
-      const state = await stepRes.json();
+      const state = await stepRes.json().catch(() => ({}));
       if (onProgress) onProgress(state);
+      if (state.stuck && state.error) {
+        throw new Error(`Scan stuck: ${state.error}`);
+      }
+      if (!stepRes.ok) throw new Error(`Step failed HTTP ${stepRes.status}: ${state.error || "?"}`);
       if (state.completed) return state;
     }
     throw new Error("Scan loop exceeded safety limit");
