@@ -5483,11 +5483,80 @@
       </div>`;
   }
 
+  // Render 1 FBO card (Climax T+5 schema)
+  function renderFBOCard(p, sizeVnd) {
+    const entryPrice = parseFloat(p.entry_price);
+    const target = parseFloat(p.target_price);
+    const nnBn = p.nn_net_5d_bn != null ? parseFloat(p.nn_net_5d_bn) : null;
+    const rawShares = sizeVnd / (entryPrice * 1000);
+    const shares = Math.max(100, Math.round(rawShares / 100) * 100);
+    const actualCost = shares * entryPrice * 1000;
+
+    const signalDate = p.signal_date;
+    const signalDt = new Date(signalDate);
+    const todayDt = new Date();
+    const daysSince = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
+
+    let status, statusCls;
+    if (daysSince === 0) {
+      status = "🆕 Mới"; statusCls = "status-new";
+    } else if (daysSince <= 5) {
+      status = `⏳ T+${daysSince}`; statusCls = "status-hold";
+    } else {
+      status = `⏰ Quá T+5`; statusCls = "status-expired";
+    }
+
+    const slPrice = entryPrice * 0.92;
+
+    return `
+      <div class="midterm-card fbo-card">
+        <div class="mt-card-head">
+          <div class="mt-symbol">${p.symbol} <span class="fbo-badge">🌊 FBO</span></div>
+          <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="mt-prices">
+          <div class="mt-price-row">
+            <span class="mt-label">Entry signal:</span>
+            <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Target +3%:</span>
+            <span class="mt-value mt-peak">${target.toFixed(2)}k</span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">SL −8%:</span>
+            <span class="mt-value mt-sl">${slPrice.toFixed(2)}k</span>
+          </div>
+          ${nnBn != null ? `
+          <div class="mt-price-row">
+            <span class="mt-label">NN 5d:</span>
+            <span class="mt-value mt-peak">+${nnBn.toFixed(1)} tỷ ✓</span>
+          </div>` : ""}
+        </div>
+        <div class="mt-sizing">
+          <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
+        </div>
+        <div class="mt-plan">
+          <div class="mt-plan-row">📅 Hold T+3 đến T+5 phiên</div>
+          <div class="mt-plan-row">🎯 Bán nếu hit target +3% HOẶC SL −8% HOẶC T+5</div>
+          <div class="mt-plan-row"><small>Pattern: drop −5% + day green + RSI<50 + NN mua (5d>0). <b>⚠️ Sample nhỏ Test n=14, monitor real.</b></small></div>
+        </div>
+      </div>`;
+  }
+
+  let fboPicksCache = [];
+
   function renderMidTermPicks(picks) {
     const content = $("ranking-content");
     if (!content) return;
     midTermPicksCache = picks || [];
     renderSizingHelper();
+
+    // Fetch FBO picks parallel (non-blocking)
+    fetchFBOPicks(false).then((fboPicks) => {
+      fboPicksCache = fboPicks || [];
+      renderFBOSection();
+    }).catch(() => {});
 
     if (!picks || picks.length === 0) {
       content.innerHTML = `
@@ -5498,7 +5567,8 @@
           <p>Bot quét full 1411 mã EOD lúc 14:50 VN (T2-T6).</p>
           <p><small>📊 Backtest Sharpe +1.13 — không phải money printer, edge realistic.</small></p>
           <button class="btn-primary" id="ranking-load-btn">🔄 Quét full 1411 mã ngay</button>
-        </div>`;
+        </div>
+        <div id="fbo-section"></div>`;
       return;
     }
 
@@ -5508,6 +5578,24 @@
       <div class="midterm-picks-header">
         <span class="midterm-count"><b>${picks.length}</b> mã active</span>
         <span class="midterm-sub">Pattern Base Breakout · trail 10% từ peak</span>
+      </div>
+      <div class="midterm-picks-grid">${cards}</div>
+      <div id="fbo-section"></div>`;
+  }
+
+  function renderFBOSection() {
+    const slot = document.getElementById("fbo-section");
+    if (!slot) return;
+    if (!fboPicksCache.length) {
+      slot.innerHTML = "";
+      return;
+    }
+    const sizeVnd = loadMidTermSize();
+    const cards = fboPicksCache.map((p) => renderFBOCard(p, sizeVnd)).join("");
+    slot.innerHTML = `
+      <div class="fbo-section-header">
+        <h3>🌊 Bắt đáy ngắn hạn T+5 — Foreign-Backed Oversold</h3>
+        <span class="fbo-section-sub">${fboPicksCache.length} mã · Backtest Sharpe +1.42 (sample nhỏ n=14)</span>
       </div>
       <div class="midterm-picks-grid">${cards}</div>`;
   }
@@ -5519,6 +5607,16 @@
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const json = await r.json();
     return json.picks || [];
+  }
+
+  // FBO picks fetched từ /active-picks (climax_active_picks table), filter tier='FBO'
+  async function fetchFBOPicks(forceFresh = false) {
+    const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/active-picks", {
+      cache: forceFresh ? "no-store" : "default",
+    });
+    if (!r.ok) return [];
+    const json = await r.json();
+    return (json.picks || []).filter((p) => p.tier === "FBO");
   }
 
   async function triggerMidTermQuickScan() {

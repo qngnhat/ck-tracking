@@ -186,28 +186,46 @@ export default {
       });
     }
     if (url.pathname === "/mid-term-quick-scan" && request.method === "POST") {
-      // User-triggered scan: large+mid cap (~150 mã) - khớp với Phase 1 backtest
-      // universe. Persist matches. Full 1411 scan vẫn auto qua EOD cron.
-      // No secret (single-user app, low abuse risk).
-      const matches = [];
+      // User-triggered scan: large+mid cap (~45 mã) - subset Phase 1 backtest
+      // universe. Detect cả Base Breakout (mid-term) + FBO (oversold + NN buy).
+      // Persist matches. Full 1411 scan vẫn auto qua EOD cron.
+      const bbMatches = [];
+      const fboMatches = [];
       const batchSize = 15;
       for (let i = 0; i < MID_TERM_QUICK_UNIVERSE.length; i += batchSize) {
         const batch = MID_TERM_QUICK_UNIVERSE.slice(i, i + batchSize);
         const results = await Promise.all(batch.map(async (sym) => {
           try {
             const data = await fetchVndHistory(sym, 220);
-            const r = detectBaseBreakout(data);
-            return r ? { symbol: sym, ...r } : null;
+            const baseBreakout = detectBaseBreakout(data);
+            const fboBase = detectForeignBackedOversoldBase(data);
+            let fbo = null;
+            if (fboBase) {
+              const foreign = await fetchForeignDaily(sym, 7).catch(() => null);
+              const nnNet5d = foreign ? computeNnNet5d(foreign) : null;
+              if (nnNet5d != null && nnNet5d > 0) {
+                fbo = { ...fboBase, nn_net_5d_bn: +(nnNet5d / 1e9).toFixed(2) };
+              }
+            }
+            return { symbol: sym, baseBreakout, fbo };
           } catch { return null; }
         }));
-        for (const r of results) if (r) matches.push(r);
+        for (const r of results) {
+          if (!r) continue;
+          if (r.baseBreakout) bbMatches.push({ symbol: r.symbol, ...r.baseBreakout });
+          if (r.fbo) fboMatches.push({ symbol: r.symbol, ...r.fbo });
+        }
       }
-      matches.sort((a, b) => (b.breakStrength || 0) - (a.breakStrength || 0));
-      await persistMidTermMatches(env, matches);
+      bbMatches.sort((a, b) => (b.breakStrength || 0) - (a.breakStrength || 0));
+      fboMatches.sort((a, b) => (a.ret3d || 0) - (b.ret3d || 0));
+      await persistMidTermMatches(env, bbMatches);
+      await persistFBOMatches(env, fboMatches);
       return new Response(JSON.stringify({
         scanned: MID_TERM_QUICK_UNIVERSE.length,
-        matched: matches.length,
-        symbols: matches.map((m) => m.symbol),
+        matched: bbMatches.length + fboMatches.length,
+        base_breakout: bbMatches.map((m) => m.symbol),
+        fbo: fboMatches.map((m) => m.symbol),
+        symbols: [...bbMatches.map((m) => m.symbol), ...fboMatches.map((m) => m.symbol)],
       }), {
         status: 200,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
@@ -934,6 +952,52 @@ const MID_TERM_QUICK_UNIVERSE = [
   "REE", "SAB", "SSB", "BCM", "VCS",
 ];
 
+// ── Foreign-Backed Oversold (FBO) — V1 verified Sharpe +1.42 Test 2026 ──
+// Backtest run_foreign_flow_deep.py:
+//   Train 2024-25: n=38, Win 63%, avg +1.61%, Sharpe +1.62, PF 1.81
+//   Test  2026   : n=14, Win 71%, avg +1.28%, Sharpe +1.42, PF 1.61
+// Pattern: drop 3d <-5% + day green + RSI<50 + NN net buy 5d > 0.
+// Hold T+5, target +3%, SL -8% (same Climax flow).
+// Smaller sample → flag experimental, monitor forward perf.
+//
+// Note: Worker phải call AFTER fetching foreign flow data. Detector return
+// signal flags WITHOUT NN check — caller must add nn_5d > 0 filter.
+function detectForeignBackedOversoldBase(data) {
+  const closes = data.closes;
+  const opens = data.opens;
+  const volumes = data.volumes;
+  const n = closes?.length || 0;
+  if (n < 25) return null;
+
+  // Turnover filter (≥3 tỷ — match production Climax)
+  const turnovers = [];
+  for (let i = n - 21; i < n - 1; i++) turnovers.push(closes[i] * volumes[i] * 1000);
+  turnovers.sort((a, b) => a - b);
+  const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+  if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+  const cur = closes[n - 1];
+  const curOpen = opens[n - 1];
+  const prev3 = closes[n - 4];
+  const ret3d = ((cur - prev3) / prev3) * 100;
+  const dayGreen = cur > curOpen;
+  const rsi = calcRsi(closes, 14);
+  if (rsi == null) return null;
+
+  // V1 conditions (no vol filter — différentiate from Climax)
+  const matched = dayGreen && ret3d < -5 && rsi < 50;
+  if (!matched) return null;
+
+  return {
+    tier: "FBO",
+    ret3d, rsi,
+    currentPrice: cur,
+    medianTurnover,
+    dayGreen,
+    // NN net 5d filter applied later (after fetchForeignDaily)
+  };
+}
+
 function calcRsi(closes, period = 14) {
   if (closes.length < period + 1) return null;
   let gains = 0, losses = 0;
@@ -1357,15 +1421,24 @@ async function processScanChunk(env) {
       const climax = detectVolClimaxBounce(data);
       const momentum = detectStrengthContinuation(data);
       const baseBreakout = detectBaseBreakout(data);
+      const fboBase = detectForeignBackedOversoldBase(data);
       const stats = computeStockStats(data);
-      // ENRICH climax matches với foreign flow (NN net buy filter).
-      // Backtest 7.4y: Tier A + NN net>0 Sharpe 0.36 → 1.90 (5×).
-      // Chỉ fetch khi mã match → tránh subrequest pressure (matches hiếm).
+      // ENRICH climax + FBO matches với foreign flow.
+      // Climax: tier A + NN net>0 = Premium (Sharpe 1.90 vs base 0.36).
+      // FBO: requires NN net 5d > 0 (mandatory filter).
       let foreign = null;
-      if (climax) {
+      if (climax || fboBase) {
         foreign = await fetchForeignDaily(sym, 7).catch(() => null);
       }
-      return { symbol: sym, climax, momentum, baseBreakout, stats, foreign };
+      // Apply NN filter for FBO
+      let fbo = null;
+      if (fboBase && foreign) {
+        const nnNet5d = computeNnNet5d(foreign);
+        if (nnNet5d != null && nnNet5d > 0) {
+          fbo = { ...fboBase, nn_net_5d_bn: +(nnNet5d / 1e9).toFixed(2) };
+        }
+      }
+      return { symbol: sym, climax, momentum, baseBreakout, fbo, stats, foreign };
     } catch (e) {
       fetchFails++;
       return null;
@@ -1382,6 +1455,7 @@ async function processScanChunk(env) {
   const climaxPartial = JSON.parse(state.climax_partial || "[]");
   const momentumPartial = JSON.parse(state.momentum_partial || "[]");
   const baseBreakoutPartial = JSON.parse(state.base_breakout_partial || "[]");
+  const fboPartial = JSON.parse(state.fbo_partial || "[]");
   const marketStats = JSON.parse(state.market_stats || "{}");
   let upCount = marketStats.upCount || 0;
   let downCount = marketStats.downCount || 0;
@@ -1410,6 +1484,7 @@ async function processScanChunk(env) {
     }
     if (r.momentum) momentumPartial.push({ symbol: r.symbol, ...r.momentum });
     if (r.baseBreakout) baseBreakoutPartial.push({ symbol: r.symbol, ...r.baseBreakout });
+    if (r.fbo) fboPartial.push({ symbol: r.symbol, ...r.fbo });
   }
 
   const newOffset = offset + chunk.length;
@@ -1418,11 +1493,12 @@ async function processScanChunk(env) {
     climax_partial: JSON.stringify(climaxPartial),
     momentum_partial: JSON.stringify(momentumPartial),
     base_breakout_partial: JSON.stringify(baseBreakoutPartial),
+    fbo_partial: JSON.stringify(fboPartial),
     market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
     last_chunk_at: new Date().toISOString(),
   });
 
-  console.log(`[chunk] done ${offset}→${newOffset} · climax+${results.filter(r => r?.climax).length} momentum+${results.filter(r => r?.momentum).length} base_breakout+${results.filter(r => r?.baseBreakout).length}`);
+  console.log(`[chunk] done ${offset}→${newOffset} · climax+${results.filter(r => r?.climax).length} momentum+${results.filter(r => r?.momentum).length} base_breakout+${results.filter(r => r?.baseBreakout).length} fbo+${results.filter(r => r?.fbo).length}`);
 
   if (newOffset >= total) {
     const finalState = {
@@ -1431,6 +1507,7 @@ async function processScanChunk(env) {
       climax_partial: JSON.stringify(climaxPartial),
       momentum_partial: JSON.stringify(momentumPartial),
       base_breakout_partial: JSON.stringify(baseBreakoutPartial),
+      fbo_partial: JSON.stringify(fboPartial),
       market_stats: JSON.stringify({ upCount, downCount, totalTurnover, totalChange, totalScanned }),
     };
     await finalizeScan(env, finalState);
@@ -1443,6 +1520,7 @@ async function finalizeScan(env, state) {
   const climaxRaw = JSON.parse(state.climax_partial || "[]");
   const momentumRaw = JSON.parse(state.momentum_partial || "[]");
   const baseBreakoutRaw = JSON.parse(state.base_breakout_partial || "[]");
+  const fboRaw = JSON.parse(state.fbo_partial || "[]");
   const marketStats = JSON.parse(state.market_stats || "{}");
   const isEliteRegime = state.vni_regime === "correction";
   const isMomentumRegime = state.vni_regime === "bull" || state.vni_regime === "neutral";
@@ -1458,11 +1536,14 @@ async function finalizeScan(env, state) {
   const baseBreakoutMatches = baseBreakoutRaw.sort(
     (a, b) => (b.breakStrength || 0) - (a.breakStrength || 0)
   );
+  // Sort FBO by drop magnitude (more oversold first)
+  const fboMatches = fboRaw.sort((a, b) => (a.ret3d || 0) - (b.ret3d || 0));
 
   // Persist to active_picks
   await persistClimaxMatches(env, matches);
   await persistMomentumMatches(env, momentumMatches);
   await persistMidTermMatches(env, baseBreakoutMatches);
+  await persistFBOMatches(env, fboMatches);
 
   // Send full-coverage digest
   const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
@@ -1524,6 +1605,33 @@ async function persistMomentumMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} Momentum saved (expires ${expiresAt.slice(0, 10)})`);
+}
+
+// ── FBO (Foreign-Backed Oversold) persist ──────────────────────
+// Reuse climax_active_picks schema. Hold T+5, target +3%, SL -8% (Climax-like).
+// V1 backtest: Test 2026 Sharpe +1.42, Win 71%, PF 1.61 (n=14 small sample).
+async function persistFBOMatches(env, matches) {
+  if (!matches || matches.length === 0) {
+    console.log("[fbo persist] no matches");
+    return;
+  }
+  const sb = sbClient(env);
+  const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: today,
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * 1.03).toFixed(4),
+    tier: "FBO",
+    nn_net_5d_bn: m.nn_net_5d_bn ?? null,
+    is_premium: false,
+    expires_at: expiresAt,
+    above_threshold: false,
+    last_alert_at: null,
+  }));
+  const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
+  console.log(`[fbo persist] ${ok ? "✓" : "✗"} ${rows.length} FBO saved`);
 }
 
 // ── Mid-term (Base Breakout) persist ──────────────────────────

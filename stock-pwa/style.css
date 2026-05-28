@@ -7411,3 +7411,41 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   background: linear-gradient(90deg, #2196F3, #FFC107);
   transition: width 0.3s ease;
 }
+
+/* FBO (Foreign-Backed Oversold) section */
+.fbo-section-header {
+  margin-top: 24px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, rgba(0, 188, 212, 0.08), rgba(255, 255, 255, 0.02));
+  border-left: 3px solid #00BCD4;
+  border-radius: 6px;
+}
+.fbo-section-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 4px 0;
+}
+.fbo-section-sub {
+  font-size: 12px;
+  color: #80deea;
+}
+.midterm-card.fbo-card {
+  border-color: rgba(0, 188, 212, 0.25);
+  background: linear-gradient(180deg, rgba(0, 188, 212, 0.03), rgba(255, 255, 255, 0.02));
+}
+.fbo-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: rgba(0, 188, 212, 0.15);
+  color: #80deea;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.mt-status.status-expired {
+  background: rgba(255, 152, 0, 0.15);
+  color: #FFA726;
+}
