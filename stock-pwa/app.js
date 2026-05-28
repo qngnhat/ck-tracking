@@ -8181,9 +8181,13 @@
     "B":        { win: 56, avg: 0.81, sharpe: 0.70 },
     "Momentum": { win: 60, avg: 0.78, sharpe: 0.60 },
     // Phase 1 verified: run_midterm_phase1.py + run_midterm_portfolio_100shares.py
-    // Test 2025-26 (out-sample): Win 51.9%, avg +6.95% per trade, Sharpe +1.13,
-    // PF 2.82. Annualized +29.8%/năm với 10M VND/signal trên 200M vốn.
+    // Test 2025-26: Win 51.9%, avg +6.95%/trade, Sharpe +1.13, PF 2.82.
+    // Annualized +29.8%/năm với 10M VND/signal trên 200M vốn.
     "MidTerm":  { win: 52, avg: 6.95, sharpe: 1.13 },
+    // V1 verified: run_foreign_flow_deep.py.
+    // Test 2026: Win 71.4%, avg +1.28%/trade, Sharpe +1.42, PF 1.61 (n=14 small).
+    // Pattern: drop 3d<-5% + day green + RSI<50 + NN net 5d > 0.
+    "FBO":      { win: 71, avg: 1.28, sharpe: 1.42 },
   };
 
   // Rule-based verdict — KHÔNG cảm tính, chỉ dựa số liệu
