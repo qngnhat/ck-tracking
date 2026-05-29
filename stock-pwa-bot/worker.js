@@ -68,7 +68,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/webhook" && request.method === "POST") {
-      return handleTelegramWebhook(request, env);
+      return handleTelegramWebhook(request, env, ctx);
     }
     if (url.pathname === "/health") {
       return new Response("OK", { status: 200 });
@@ -746,7 +746,7 @@ async function tgSendMessage(token, chatId, text, parseMode = "Markdown", replyM
 
 // ── Webhook handler: process /start command ─────────────
 
-async function handleTelegramWebhook(request, env) {
+async function handleTelegramWebhook(request, env, ctx) {
   const update = await request.json().catch(() => ({}));
 
   // Callback query (inline button tap)
