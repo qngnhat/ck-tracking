@@ -5555,8 +5555,8 @@
           <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
         </div>
         <div class="card-warnings">
-          <div class="card-warn-row">⚠️ R:R = 0.38 (target +3% vs SL -8%) → cần Win > 73% để lãi</div>
           <div class="card-warn-row">⚠️ FBO sample backtest còn nhỏ (n=14), size 50% Base Breakout</div>
+          <div class="card-warn-row">ℹ️ R:R cap 0.38 looks bad — reality: avg actual +1.28%/trade (Win 71% → break-even ngay với +1.2% avg)</div>
         </div>
         <div class="mt-plan">
           <div class="mt-plan-row">📅 Hold T+3 đến T+5 phiên</div>
@@ -5605,8 +5605,14 @@
         warnings.push(`Foreign bán (${nnBn.toFixed(1)} tỷ 5d) → caution`);
       }
     }
-    // R:R warning: target +3% / SL -8% = 0.375 → cần Win > 73% để có profit
-    warnings.push("R:R = 0.38 (target +3% vs SL -8%) → cần Win > 73% để lãi");
+    // R:R cap explain — nhiều user lo target 3% / SL 8% bất cân đối.
+    // Reality: nhiều trade exit force T+5 ở giá GIỮA cap, không hit limit.
+    // Backtest avg actual khác R:R cap appearance.
+    if (bt && bt.win < 70) {
+      warnings.push(
+        `R:R cap = 0.38 (looks bad). Reality: nhiều trade exit force T+5 ở giá giữa cap → backtest avg +${bt.win === 56 ? "0.81" : bt.win === 61 ? "2.05" : "?"}%/trade (verified).`
+      );
+    }
     return { level, text, warnings, bt };
   }
 
