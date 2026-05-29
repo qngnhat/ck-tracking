@@ -7449,3 +7449,59 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   background: rgba(255, 152, 0, 0.15);
   color: #FFA726;
 }
+
+/* Climax tier cards (T+5 Bắt đáy in Rà soát tab) */
+.climax-section-header {
+  background: linear-gradient(90deg, rgba(239, 83, 80, 0.08), rgba(255, 255, 255, 0.02));
+  border-left-color: #ef5350;
+}
+.climax-section-header h3 { color: #fff; }
+.midterm-card.climax-card-mt {
+  border-color: rgba(239, 83, 80, 0.20);
+  background: linear-gradient(180deg, rgba(239, 83, 80, 0.03), rgba(255, 255, 255, 0.02));
+}
+.midterm-card.tier-premium {
+  border-color: rgba(255, 215, 0, 0.3);
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.05), rgba(255, 255, 255, 0.02));
+}
+.midterm-card.tier-elite {
+  border-color: rgba(255, 193, 7, 0.3);
+}
+.climax-tier-pill {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: rgba(239, 83, 80, 0.15);
+  color: #ff8a80;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.midterm-card.tier-premium .climax-tier-pill {
+  background: rgba(255, 215, 0, 0.15);
+  color: #ffd700;
+}
+.midterm-card.tier-elite .climax-tier-pill {
+  background: rgba(255, 193, 7, 0.15);
+  color: #FFC107;
+}
+
+/* Momentum tier cards */
+.momentum-section-header {
+  background: linear-gradient(90deg, rgba(33, 150, 243, 0.08), rgba(255, 255, 255, 0.02));
+  border-left-color: #2196F3;
+}
+.midterm-card.momentum-card-mt {
+  border-color: rgba(33, 150, 243, 0.20);
+  background: linear-gradient(180deg, rgba(33, 150, 243, 0.03), rgba(255, 255, 255, 0.02));
+}
+.momentum-pill {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: rgba(33, 150, 243, 0.15);
+  color: #4fc3f7;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 6px;
+  vertical-align: middle;
+}

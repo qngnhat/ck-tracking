@@ -5545,6 +5545,124 @@
   }
 
   let fboPicksCache = [];
+  let climaxPicksCache = [];
+  let momentumPicksCache = [];
+
+  // Render 1 Climax tier card (T+5 schema, similar to FBO)
+  function renderClimaxCard(p, sizeVnd) {
+    const entryPrice = parseFloat(p.entry_price);
+    const target = parseFloat(p.target_price);
+    const tier = p.tier || "?";
+    const nnBn = p.nn_net_5d_bn != null ? parseFloat(p.nn_net_5d_bn) : null;
+    const rawShares = sizeVnd / (entryPrice * 1000);
+    const shares = Math.max(100, Math.round(rawShares / 100) * 100);
+    const actualCost = shares * entryPrice * 1000;
+    const signalDate = p.signal_date;
+    const signalDt = new Date(signalDate);
+    const todayDt = new Date();
+    const daysSince = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
+
+    let status, statusCls;
+    if (daysSince === 0) {
+      status = "🆕 Mới"; statusCls = "status-new";
+    } else if (daysSince <= 5) {
+      status = `⏳ T+${daysSince}`; statusCls = "status-hold";
+    } else {
+      status = `⏰ Quá T+5`; statusCls = "status-expired";
+    }
+
+    const tierBadge = {
+      Premium: "💎 Premium",
+      Elite: "⚡ Elite",
+      A: "🟢 Tier A",
+      B: "🔵 Tier B",
+    }[tier] || tier;
+
+    const slPrice = entryPrice * 0.92;
+
+    return `
+      <div class="midterm-card climax-card-mt tier-${tier.toLowerCase()}">
+        <div class="mt-card-head">
+          <div class="mt-symbol">${p.symbol} <span class="climax-tier-pill">${tierBadge}</span></div>
+          <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="mt-prices">
+          <div class="mt-price-row">
+            <span class="mt-label">Entry signal:</span>
+            <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Target +3%:</span>
+            <span class="mt-value mt-peak">${target.toFixed(2)}k</span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">SL −8%:</span>
+            <span class="mt-value mt-sl">${slPrice.toFixed(2)}k</span>
+          </div>
+          ${nnBn != null ? `
+          <div class="mt-price-row">
+            <span class="mt-label">NN 5d:</span>
+            <span class="mt-value mt-peak">${nnBn >= 0 ? "+" : ""}${nnBn.toFixed(1)} tỷ</span>
+          </div>` : ""}
+        </div>
+        <div class="mt-sizing">
+          <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
+        </div>
+        <div class="mt-plan">
+          <div class="mt-plan-row">📅 Hold T+3 đến T+5 phiên</div>
+          <div class="mt-plan-row">🎯 Bán nếu hit target +3% HOẶC SL −8% HOẶC T+5</div>
+          <div class="mt-plan-row"><small>Pattern: Vol Climax Bounce (drop sâu + vol spike + day green + RSI oversold)</small></div>
+        </div>
+      </div>`;
+  }
+
+  // Render Momentum tier card (T+20 trailing)
+  function renderMomentumCard(p, sizeVnd) {
+    const entryPrice = parseFloat(p.entry_price);
+    const target = parseFloat(p.target_price);
+    const rawShares = sizeVnd / (entryPrice * 1000);
+    const shares = Math.max(100, Math.round(rawShares / 100) * 100);
+    const actualCost = shares * entryPrice * 1000;
+    const signalDate = p.signal_date;
+    const signalDt = new Date(signalDate);
+    const todayDt = new Date();
+    const daysSince = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
+
+    let status, statusCls;
+    if (daysSince === 0) { status = "🆕 Mới"; statusCls = "status-new"; }
+    else if (daysSince <= 20) { status = `⏳ T+${daysSince}`; statusCls = "status-hold"; }
+    else { status = `⏰ Quá T+20`; statusCls = "status-expired"; }
+
+    const initSL = entryPrice * 0.92;
+    return `
+      <div class="midterm-card momentum-card-mt">
+        <div class="mt-card-head">
+          <div class="mt-symbol">${p.symbol} <span class="momentum-pill">🚀 Momentum</span></div>
+          <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="mt-prices">
+          <div class="mt-price-row">
+            <span class="mt-label">Entry:</span>
+            <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Init SL:</span>
+            <span class="mt-value mt-sl">${initSL.toFixed(2)}k <small>(−8%)</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">Expected:</span>
+            <span class="mt-value mt-peak">${target.toFixed(2)}k <small>(+3.5%)</small></span>
+          </div>
+        </div>
+        <div class="mt-sizing">
+          <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
+        </div>
+        <div class="mt-plan">
+          <div class="mt-plan-row">📅 Hold T+20 max, trailing 7% từ peak</div>
+          <div class="mt-plan-row"><small>Pattern: Strength Continuation (MA stack + consolidation + vol confirm)</small></div>
+        </div>
+      </div>`;
+  }
 
   function renderMidTermPicks(picks) {
     const content = $("ranking-content");
@@ -5552,10 +5670,15 @@
     midTermPicksCache = picks || [];
     renderSizingHelper();
 
-    // Fetch FBO picks parallel (non-blocking)
+    // Fetch FBO + Climax + Momentum picks parallel (non-blocking)
     fetchFBOPicks(false).then((fboPicks) => {
       fboPicksCache = fboPicks || [];
       renderFBOSection();
+    }).catch(() => {});
+    fetchClimaxAndMomentumPicks(false).then(({ climax, momentum }) => {
+      climaxPicksCache = climax || [];
+      momentumPicksCache = momentum || [];
+      renderClimaxAndMomentumSections();
     }).catch(() => {});
 
     if (!picks || picks.length === 0) {
@@ -5568,7 +5691,9 @@
           <p><small>📊 Backtest Sharpe +1.13 — không phải money printer, edge realistic.</small></p>
           <button class="btn-primary" id="ranking-load-btn">🔄 Quét full 1411 mã ngay</button>
         </div>
-        <div id="fbo-section"></div>`;
+        <div id="fbo-section"></div>
+        <div id="climax-section"></div>
+        <div id="momentum-section"></div>`;
       return;
     }
 
@@ -5580,7 +5705,41 @@
         <span class="midterm-sub">Pattern Base Breakout · trail 10% từ peak</span>
       </div>
       <div class="midterm-picks-grid">${cards}</div>
-      <div id="fbo-section"></div>`;
+      <div id="fbo-section"></div>
+      <div id="climax-section"></div>
+      <div id="momentum-section"></div>`;
+  }
+
+  function renderClimaxAndMomentumSections() {
+    const sizeVnd = loadMidTermSize();
+    const climaxSlot = document.getElementById("climax-section");
+    if (climaxSlot) {
+      if (!climaxPicksCache.length) {
+        climaxSlot.innerHTML = "";
+      } else {
+        const cards = climaxPicksCache.map((p) => renderClimaxCard(p, sizeVnd)).join("");
+        climaxSlot.innerHTML = `
+          <div class="fbo-section-header climax-section-header">
+            <h3>🔻 Bắt đáy T+ — Vol Climax Bounce</h3>
+            <span class="fbo-section-sub">${climaxPicksCache.length} mã · drop sâu + vol spike + bounce confirm</span>
+          </div>
+          <div class="midterm-picks-grid">${cards}</div>`;
+      }
+    }
+    const momSlot = document.getElementById("momentum-section");
+    if (momSlot) {
+      if (!momentumPicksCache.length) {
+        momSlot.innerHTML = "";
+      } else {
+        const cards = momentumPicksCache.map((p) => renderMomentumCard(p, sizeVnd)).join("");
+        momSlot.innerHTML = `
+          <div class="fbo-section-header momentum-section-header">
+            <h3>🚀 Momentum Swing — Strength Continuation</h3>
+            <span class="fbo-section-sub">${momentumPicksCache.length} mã · trend mạnh + MA stack</span>
+          </div>
+          <div class="midterm-picks-grid">${cards}</div>`;
+      }
+    }
   }
 
   function renderFBOSection() {
@@ -5617,6 +5776,20 @@
     if (!r.ok) return [];
     const json = await r.json();
     return (json.picks || []).filter((p) => p.tier === "FBO");
+  }
+
+  // Climax + Momentum picks (T+5 short-term Bắt đáy + T+20 Momentum)
+  async function fetchClimaxAndMomentumPicks(forceFresh = false) {
+    const r = await fetch("https://stock-pwa-bot.qngnhat.workers.dev/active-picks", {
+      cache: forceFresh ? "no-store" : "default",
+    });
+    if (!r.ok) return { climax: [], momentum: [] };
+    const json = await r.json();
+    const picks = json.picks || [];
+    return {
+      climax: picks.filter((p) => ["A", "B", "Elite", "Premium"].includes(p.tier)),
+      momentum: picks.filter((p) => p.tier === "Momentum"),
+    };
   }
 
   async function triggerMidTermQuickScan() {
@@ -7179,14 +7352,22 @@
       });
       lastScanSummary = finalState;
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-      console.log(`[full-scan] done in ${elapsed}s: climax=${finalState.climax_count}, momentum=${finalState.momentum_count}, base_breakout=${finalState.base_breakout_count}`);
+      console.log(`[full-scan] done in ${elapsed}s: climax=${finalState.climax_count}, momentum=${finalState.momentum_count}, base_breakout=${finalState.base_breakout_count}, fbo=${finalState.fbo_count}`);
       await loadRanking(true);
+      const bb = finalState.base_breakout_count || 0;
+      const fbo = finalState.fbo_count || 0;
+      const cl = finalState.climax_count || 0;
+      const mo = finalState.momentum_count || 0;
+      const total = bb + fbo + cl + mo;
       const banner = document.createElement("div");
       banner.className = "scan-summary-banner";
       banner.innerHTML = `
         ✅ <b>Scan full 1411 mã xong</b> (${elapsed}s) →
-        <b style="color:#FFC107">${finalState.base_breakout_count || 0} match</b> Base Breakout
-        · Climax: ${finalState.climax_count || 0} · Momentum: ${finalState.momentum_count || 0}
+        <b style="color:#FFC107">${total} match</b> tổng
+        · 🔍 Base Breakout: <b>${bb}</b>
+        · 🌊 FBO: <b>${fbo}</b>
+        · 🔻 Climax: <b>${cl}</b>
+        · 🚀 Momentum: <b>${mo}</b>
         · ⏱️ ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}`;
       content.insertBefore(banner, content.firstChild);
     } catch (e) {
