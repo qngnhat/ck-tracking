@@ -7505,3 +7505,41 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   margin-left: 6px;
   vertical-align: middle;
 }
+
+/* Verdict line trong picks card */
+.verdict-line {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.verdict-line.verdict-strong  { background: rgba(102, 187, 106, 0.10); border-left: 3px solid #66bb6a; }
+.verdict-line.verdict-buy     { background: rgba(255, 193, 7, 0.10);  border-left: 3px solid #FFC107; }
+.verdict-line.verdict-caution { background: rgba(255, 152, 0, 0.10);  border-left: 3px solid #FFA726; }
+.verdict-line .verdict-text {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+}
+.verdict-line .verdict-bt {
+  font-size: 11px;
+  color: #aaa;
+}
+
+/* Card warnings (R:R, foreign bán, etc) */
+.card-warnings {
+  padding: 6px 10px;
+  background: rgba(255, 152, 0, 0.06);
+  border-radius: 4px;
+  margin: 8px 0;
+}
+.card-warn-row {
+  font-size: 11px;
+  color: #FFA726;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+.card-warn-row:last-child { margin-bottom: 0; }

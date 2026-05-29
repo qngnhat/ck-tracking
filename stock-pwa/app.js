@@ -5446,11 +5446,16 @@
 
     const trailStopPrice = peakPrice ? (peakPrice * 0.9) : null;
 
+    const buyZoneMax = entryPrice * 1.02;
     return `
-      <div class="midterm-card">
+      <div class="midterm-card verdict-strong">
         <div class="mt-card-head">
           <div class="mt-symbol">${p.symbol}</div>
           <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="verdict-line verdict-strong">
+          <span class="verdict-text">🟢 STRONG BUY</span>
+          <span class="verdict-bt">Backtest: Win 52% · Sharpe 1.13 · avg +6.95%/trade</span>
         </div>
         <div class="mt-prices">
           <div class="mt-price-row">
@@ -5458,16 +5463,20 @@
             <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">Init SL:</span>
+            <span class="mt-label">Buy zone tối đa:</span>
+            <span class="mt-value">≤ ${buyZoneMax.toFixed(2)}k <small>(cap +2% gap)</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">⛔ Init SL:</span>
             <span class="mt-value mt-sl">${initSL.toFixed(2)}k <small>(−10%)</small></span>
           </div>
           ${peakPrice ? `
           <div class="mt-price-row">
-            <span class="mt-label">Peak:</span>
+            <span class="mt-label">📈 Peak:</span>
             <span class="mt-value mt-peak">${peakPrice.toFixed(2)}k</span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">Trail stop:</span>
+            <span class="mt-label">📊 Trail stop:</span>
             <span class="mt-value mt-trail">${trailStopPrice.toFixed(2)}k <small>(−10% từ peak)</small></span>
           </div>` : ""}
         </div>
@@ -5476,8 +5485,8 @@
         </div>
         <div class="mt-plan">
           <div class="mt-plan-row">📅 Hold tối đa T+${maxHold} (~${Math.round(maxHold * 1.4)} ngày)</div>
-          <div class="mt-plan-row">🎯 Bán khi: trail 10% từ peak HOẶC SL −10% HOẶC T+${maxHold}</div>
-          <div class="mt-plan-row"><small>Backtest base: range &lt;${p.base_range_pct ? p.base_range_pct.toFixed(1) : '10'}% × 30 phiên, vol ${p.vol_ratio_at_signal ? p.vol_ratio_at_signal.toFixed(1) : '1.5+'}× TB20</small></div>
+          <div class="mt-plan-row">🎯 Bán khi: trail 10% từ peak / SL −10% / T+${maxHold} timeout</div>
+          <div class="mt-plan-row"><small>Pattern: tích lũy &lt;${p.base_range_pct ? p.base_range_pct.toFixed(1) : '10'}% × 30 phiên + break + vol ${p.vol_ratio_at_signal ? p.vol_ratio_at_signal.toFixed(1) : '1.5+'}× TB20</small></div>
         </div>
         ${daysSince > 0 ? `<div class="mt-days-held"><small>📊 ${daysSince}/${maxHold} phiên hold</small></div>` : ""}
       </div>`;
@@ -5507,12 +5516,17 @@
     }
 
     const slPrice = entryPrice * 0.92;
+    const buyZoneMax = entryPrice * 1.02;
 
     return `
-      <div class="midterm-card fbo-card">
+      <div class="midterm-card fbo-card verdict-strong">
         <div class="mt-card-head">
           <div class="mt-symbol">${p.symbol} <span class="fbo-badge">🌊 FBO</span></div>
           <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="verdict-line verdict-strong">
+          <span class="verdict-text">🟢 STRONG BUY</span>
+          <span class="verdict-bt">Backtest: Win 71% · Sharpe 1.42 (sample n=14 ⚠️)</span>
         </div>
         <div class="mt-prices">
           <div class="mt-price-row">
@@ -5520,26 +5534,34 @@
             <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">Target +3%:</span>
+            <span class="mt-label">Buy zone tối đa:</span>
+            <span class="mt-value">≤ ${buyZoneMax.toFixed(2)}k <small>(cap +2% gap)</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">🎯 Target +3%:</span>
             <span class="mt-value mt-peak">${target.toFixed(2)}k</span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">SL −8%:</span>
+            <span class="mt-label">⛔ SL −8%:</span>
             <span class="mt-value mt-sl">${slPrice.toFixed(2)}k</span>
           </div>
           ${nnBn != null ? `
           <div class="mt-price-row">
             <span class="mt-label">NN 5d:</span>
-            <span class="mt-value mt-peak">+${nnBn.toFixed(1)} tỷ ✓</span>
+            <span class="mt-value mt-peak">+${nnBn.toFixed(1)} tỷ <small>✓ Foreign confirm</small></span>
           </div>` : ""}
         </div>
         <div class="mt-sizing">
           <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
         </div>
+        <div class="card-warnings">
+          <div class="card-warn-row">⚠️ R:R = 0.38 (target +3% vs SL -8%) → cần Win > 73% để lãi</div>
+          <div class="card-warn-row">⚠️ FBO sample backtest còn nhỏ (n=14), size 50% Base Breakout</div>
+        </div>
         <div class="mt-plan">
           <div class="mt-plan-row">📅 Hold T+3 đến T+5 phiên</div>
-          <div class="mt-plan-row">🎯 Bán nếu hit target +3% HOẶC SL −8% HOẶC T+5</div>
-          <div class="mt-plan-row"><small>Pattern: drop −5% + day green + RSI<50 + NN mua (5d>0). <b>⚠️ Sample nhỏ Test n=14, monitor real.</b></small></div>
+          <div class="mt-plan-row">🎯 Bán nếu hit target +3% / SL −8% / T+5 timeout</div>
+          <div class="mt-plan-row"><small>Pattern: drop -5% + day green + RSI<50 + NN net 5d > 0 (institutional confirm)</small></div>
         </div>
       </div>`;
   }
@@ -5547,6 +5569,46 @@
   let fboPicksCache = [];
   let climaxPicksCache = [];
   let momentumPicksCache = [];
+
+  // Backtest baseline per Climax tier (verified 7.4y)
+  const TIER_BACKTEST_SHORT = {
+    Premium: { win: 61, sharpe: 1.90, label: "💎 Premium", desc: "Climax + NN mua → strongest" },
+    Elite:   { win: 61, sharpe: 1.71, label: "⚡ Elite",   desc: "Climax + VNI correction regime" },
+    A:       { win: 56, sharpe: 0.67, label: "🟢 Tier A",  desc: "Climax strict (drop -7% + vol >2× + RSI <35)" },
+    B:       { win: 56, sharpe: 0.70, label: "🔵 Tier B",  desc: "Climax relaxed (drop -5% + vol >2× + RSI <50)" },
+    Momentum:{ win: 60, sharpe: 0.60, label: "🚀 Momentum",desc: "Strength continuation" },
+  };
+
+  // Verdict logic — rule-based per tier + foreign flow
+  function climaxVerdict(tier, nnBn) {
+    const bt = TIER_BACKTEST_SHORT[tier];
+    if (!bt) return { level: "unknown", text: "Tier không xác định", warnings: [] };
+    const warnings = [];
+    let level, text;
+    if (tier === "Premium") {
+      level = "strong"; text = "🟢 STRONG BUY";
+    } else if (tier === "Elite") {
+      level = "buy"; text = "🟡 BUY";
+    } else if (tier === "A") {
+      if (nnBn != null && nnBn > 0) {
+        level = "buy"; text = "🟡 BUY";
+      } else if (nnBn != null && nnBn < -5) {
+        level = "caution"; text = "⚠️ CONSIDER";
+        warnings.push(`Foreign bán mạnh (${nnBn.toFixed(1)} tỷ 5d) → institutional KHÔNG xác nhận`);
+      } else {
+        level = "buy"; text = "🟡 BUY";
+      }
+    } else if (tier === "B") {
+      level = "caution"; text = "⚠️ CONSIDER";
+      warnings.push("Tier B = baseline relax, size nhỏ hơn Tier A");
+      if (nnBn != null && nnBn < 0) {
+        warnings.push(`Foreign bán (${nnBn.toFixed(1)} tỷ 5d) → caution`);
+      }
+    }
+    // R:R warning: target +3% / SL -8% = 0.375 → cần Win > 73% để có profit
+    warnings.push("R:R = 0.38 (target +3% vs SL -8%) → cần Win > 73% để lãi");
+    return { level, text, warnings, bt };
+  }
 
   // Render 1 Climax tier card (T+5 schema, similar to FBO)
   function renderClimaxCard(p, sizeVnd) {
@@ -5571,20 +5633,30 @@
       status = `⏰ Quá T+5`; statusCls = "status-expired";
     }
 
-    const tierBadge = {
-      Premium: "💎 Premium",
-      Elite: "⚡ Elite",
-      A: "🟢 Tier A",
-      B: "🔵 Tier B",
-    }[tier] || tier;
-
+    const verdict = climaxVerdict(tier, nnBn);
+    const tierLabel = verdict.bt?.label || tier;
     const slPrice = entryPrice * 0.92;
+    const buyZoneMax = entryPrice * 1.02;  // cap +2% gap
+    const entryRet = nnBn;  // placeholder
+
+    // NN context badge
+    let nnContext = "";
+    if (nnBn != null) {
+      if (nnBn > 5) nnContext = "✓ Foreign mua mạnh";
+      else if (nnBn > 0) nnContext = "✓ Foreign mua nhẹ";
+      else if (nnBn > -5) nnContext = "− Foreign bán nhẹ";
+      else nnContext = "⚠️ Foreign bán MẠNH";
+    }
 
     return `
-      <div class="midterm-card climax-card-mt tier-${tier.toLowerCase()}">
+      <div class="midterm-card climax-card-mt tier-${tier.toLowerCase()} verdict-${verdict.level}">
         <div class="mt-card-head">
-          <div class="mt-symbol">${p.symbol} <span class="climax-tier-pill">${tierBadge}</span></div>
+          <div class="mt-symbol">${p.symbol} <span class="climax-tier-pill">${tierLabel}</span></div>
           <div class="mt-status ${statusCls}">${status}</div>
+        </div>
+        <div class="verdict-line verdict-${verdict.level}">
+          <span class="verdict-text">${verdict.text}</span>
+          <span class="verdict-bt">Backtest: Win ${verdict.bt?.win}% · Sharpe ${verdict.bt?.sharpe}</span>
         </div>
         <div class="mt-prices">
           <div class="mt-price-row">
@@ -5592,26 +5664,34 @@
             <span class="mt-value">${entryPrice.toFixed(2)}k <small>(${signalDate})</small></span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">Target +3%:</span>
+            <span class="mt-label">Buy zone tối đa:</span>
+            <span class="mt-value">≤ ${buyZoneMax.toFixed(2)}k <small>(cap +2% gap)</small></span>
+          </div>
+          <div class="mt-price-row">
+            <span class="mt-label">🎯 Target +3%:</span>
             <span class="mt-value mt-peak">${target.toFixed(2)}k</span>
           </div>
           <div class="mt-price-row">
-            <span class="mt-label">SL −8%:</span>
+            <span class="mt-label">⛔ SL −8%:</span>
             <span class="mt-value mt-sl">${slPrice.toFixed(2)}k</span>
           </div>
           ${nnBn != null ? `
           <div class="mt-price-row">
             <span class="mt-label">NN 5d:</span>
-            <span class="mt-value mt-peak">${nnBn >= 0 ? "+" : ""}${nnBn.toFixed(1)} tỷ</span>
+            <span class="mt-value ${nnBn >= 0 ? "mt-peak" : "mt-sl"}">${nnBn >= 0 ? "+" : ""}${nnBn.toFixed(1)} tỷ <small>${nnContext}</small></span>
           </div>` : ""}
         </div>
         <div class="mt-sizing">
           <b>${shares.toLocaleString("vi-VN")} CP</b> × ${entryPrice.toFixed(2)}k = <b>${(actualCost / 1e6).toFixed(2)}M VND</b>
         </div>
+        ${verdict.warnings.length > 0 ? `
+        <div class="card-warnings">
+          ${verdict.warnings.map((w) => `<div class="card-warn-row">⚠️ ${w}</div>`).join("")}
+        </div>` : ""}
         <div class="mt-plan">
           <div class="mt-plan-row">📅 Hold T+3 đến T+5 phiên</div>
-          <div class="mt-plan-row">🎯 Bán nếu hit target +3% HOẶC SL −8% HOẶC T+5</div>
-          <div class="mt-plan-row"><small>Pattern: Vol Climax Bounce (drop sâu + vol spike + day green + RSI oversold)</small></div>
+          <div class="mt-plan-row">🎯 Bán nếu hit target +3% / SL −8% / T+5 timeout</div>
+          <div class="mt-plan-row"><small>${verdict.bt?.desc || "Vol Climax Bounce"}</small></div>
         </div>
       </div>`;
   }
