@@ -361,6 +361,9 @@ export default {
     }
     if (url.pathname === "/scan-full-step" && request.method === "POST") {
       // Public: PWA loops calling this to advance scan 1 chunk.
+      // Try/catch wrapping để CORS header luôn set khi error (PWA fetch không
+      // báo "Failed to fetch").
+      try {
       const safeJsonLen = (s) => {
         if (!s || s === "" || s === "null") return 0;
         try { return JSON.parse(s).length; } catch { return 0; }
@@ -392,6 +395,17 @@ export default {
         status: stuck ? 500 : 200,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
+      } catch (err) {
+        console.warn("[scan-full-step] exception:", err.message);
+        return new Response(JSON.stringify({
+          error: `Worker exception: ${err.message}`,
+          completed: false,
+          stuck: true,
+        }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
     }
     if (url.pathname === "/scan-orchestrator" && request.method === "POST") {
       // Internal: chained orchestrator. Process 1 chunk + self-spawn next.
@@ -2042,11 +2056,28 @@ async function finalizeScan(env, state) {
   // Sort FBO by drop magnitude (more oversold first)
   const fboMatches = fboRaw.sort((a, b) => (a.ret3d || 0) - (b.ret3d || 0));
 
-  // Persist to active_picks
-  await persistClimaxMatches(env, matches);
-  await persistMomentumMatches(env, momentumMatches);
-  await persistMidTermMatches(env, baseBreakoutMatches);
-  await persistFBOMatches(env, fboMatches);
+  // CRITICAL: set status=completed FIRST, before downstream tasks. If digest
+  // or persist throws (subrequest limit, network error), state vẫn flip
+  // completed → PWA loop kết thúc, không stuck.
+  await setScanState(env, {
+    status: "completed",
+    completed_at: new Date().toISOString(),
+  });
+  console.log(`[finalize] status set to completed early`);
+
+  // Now run persist + digest with error tolerance
+  try {
+    await persistClimaxMatches(env, matches);
+  } catch (e) { console.warn("[finalize] persistClimax fail:", e.message); }
+  try {
+    await persistMomentumMatches(env, momentumMatches);
+  } catch (e) { console.warn("[finalize] persistMomentum fail:", e.message); }
+  try {
+    await persistMidTermMatches(env, baseBreakoutMatches);
+  } catch (e) { console.warn("[finalize] persistMidTerm fail:", e.message); }
+  try {
+    await persistFBOMatches(env, fboMatches);
+  } catch (e) { console.warn("[finalize] persistFBO fail:", e.message); }
 
   // Send full-coverage digest
   const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
@@ -2070,13 +2101,12 @@ async function finalizeScan(env, state) {
     isMomentumRegime,
     fullCoverage: true,
   };
-  await sendMarketDigest(env, fullDigestResult);
-
-  await setScanState(env, {
-    status: "completed",
-    completed_at: new Date().toISOString(),
-  });
-  console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, ${baseBreakoutMatches.length} base_breakout, sent digest`);
+  try {
+    await sendMarketDigest(env, fullDigestResult);
+  } catch (e) {
+    console.warn("[finalize] sendDigest fail:", e.message);
+  }
+  console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, ${baseBreakoutMatches.length} base_breakout, ${fboMatches.length} fbo`);
 }
 
 // ── Spike-alert state: persist climax matches to climax_active_picks ──
