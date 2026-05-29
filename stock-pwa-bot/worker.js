@@ -2165,6 +2165,23 @@ async function persistFBOMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   console.log(`[fbo persist] ${ok ? "✓" : "✗"} ${rows.length} FBO saved`);
+
+  // ALSO log to trade_log for forward-test tracker (resolve sau T+5)
+  // tier='FBO', pattern_type='fbo_oversold' — phân biệt với Climax classic
+  const logRows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: today,
+    tier: "FBO",
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * 1.03).toFixed(4),
+    sl_price: +(m.currentPrice * 0.92).toFixed(4),
+    nn_net_5d_bn: m.nn_net_5d_bn ?? null,
+    is_premium: false,
+    pattern_type: "fbo_oversold",
+    max_hold_days: 5,
+  }));
+  const okLog = await sbUpsert(sb, "trade_log", logRows, "symbol,signal_date");
+  console.log(`[trade-log fbo] ${okLog ? "✓" : "✗"} ${logRows.length} FBO logged`);
 }
 
 // ── Mid-term (Base Breakout) persist ──────────────────────────
