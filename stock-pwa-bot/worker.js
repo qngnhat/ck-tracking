@@ -393,6 +393,75 @@ export default {
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }
+    if (url.pathname === "/scan-orchestrator" && request.method === "POST") {
+      // Internal: chained orchestrator. Process 1 chunk + self-spawn next.
+      // Each invocation = ~40 subreq within Cloudflare 50 limit.
+      // Total: ~57 chunks chained = ~3-5 phút real time.
+      const chatId = url.searchParams.get("chat");
+      const iter = parseInt(url.searchParams.get("iter") || "0");
+
+      // Safety stop after 100 iterations (sanity)
+      if (iter > 100) {
+        if (chatId) {
+          await tgSendMessage(env.BOT_TOKEN, chatId,
+            `⚠️ Scan orchestrator hit safety limit (iter ${iter}). Có thể chunk stuck. Check /scan-full-status manually.`);
+        }
+        return new Response("safety limit", { status: 200 });
+      }
+
+      // Process 1 chunk
+      try {
+        await processScanChunk(env);
+      } catch (e) {
+        console.warn(`[orchestrator iter=${iter}] processChunk failed:`, e.message);
+        if (chatId) {
+          await tgSendMessage(env.BOT_TOKEN, chatId,
+            `❌ Scan orchestrator lỗi iter ${iter}: ${e.message}`);
+        }
+        return new Response("error", { status: 500 });
+      }
+
+      // Check state
+      const state = await getScanState(env);
+      const offset = state?.current_offset || 0;
+      const total = state?.total_universe || 0;
+      const completed = state?.status === "completed";
+
+      // Progress update every 10 iterations
+      if (chatId && iter > 0 && iter % 10 === 0) {
+        const pct = total > 0 ? Math.round((offset / total) * 100) : 0;
+        await tgSendMessage(env.BOT_TOKEN, chatId,
+          `⏳ Scan progress: ${offset}/${total} (${pct}%)`);
+      }
+
+      if (completed) {
+        // Send completion notification
+        const safeJsonLen = (s) => {
+          if (!s || s === "" || s === "null") return 0;
+          try { return JSON.parse(s).length; } catch { return 0; }
+        };
+        const bbCount = safeJsonLen(state?.base_breakout_partial);
+        const fboCount = safeJsonLen(state?.fbo_partial);
+        const climaxCount = safeJsonLen(state?.climax_partial);
+        const momentumCount = safeJsonLen(state?.momentum_partial);
+        if (chatId) {
+          await tgSendMessage(env.BOT_TOKEN, chatId,
+            `✅ *Scan full 1411 mã xong* (${iter} chunks)\n\n` +
+            `🔍 Base Breakout: *${bbCount}*\n` +
+            `🌊 FBO: *${fboCount}*\n` +
+            `🔻 Climax: *${climaxCount}*\n` +
+            `🚀 Momentum: *${momentumCount}*\n\n` +
+            `Gõ /picks để xem chi tiết.`);
+        }
+        return new Response("done", { status: 200 });
+      }
+
+      // Spawn next iteration (fire and forget)
+      const workerUrl = new URL(request.url).origin;
+      ctx.waitUntil(fetch(`${workerUrl}/scan-orchestrator?chat=${chatId || ""}&iter=${iter + 1}`,
+        { method: "POST" }));
+      return new Response(`iter ${iter} done, spawned next`, { status: 200 });
+    }
     if (url.pathname === "/scan-full-status" && request.method === "GET") {
       // Public: read current scan state cho PWA progress bar
       const state = await getScanState(env);
@@ -631,6 +700,19 @@ export default {
       ctx.waitUntil(sendMorningBriefing(env));
       return;
     }
+    if (cron === "*/2 * * * 1-5") {
+      // Bot-triggered /scan continuation: process chunk only if scan in_progress.
+      // No-op khi state idle/completed (cheap query check).
+      ctx.waitUntil((async () => {
+        const state = await getScanState(env);
+        if (state?.status === "in_progress") {
+          console.log(`[cron-scan-cont] state in_progress offset=${state.current_offset}, processing chunk`);
+          await processScanChunk(env);
+        }
+        // else: silent no-op
+      })());
+      return;
+    }
     // Default: */3 intraday check triggers + spike
     if (!isVnTradingNow()) {
       console.log("[cron] skip — outside VN trading session", new Date().toISOString());
@@ -766,8 +848,71 @@ async function handleTelegramWebhook(request, env) {
     return new Response("ok");
   }
 
-  // /scan — trigger quick scan 45 mã large+mid cap
-  if (text === "/scan" || text === "/s") {
+  // /scan — trigger FULL 1411 mã chunked scan (background via cron)
+  // Cloudflare Worker không cho phép self-spawn unlimited → chunks process qua
+  // cron `*/2 * * * 1-5` (every 2 min weekdays). 57 chunks × 2 min ≈ 2 giờ total.
+  // EOD slot `* 8 * * 1-5` (15:00-15:59 VN) chạy mỗi 1 phút → faster (~57 min).
+  if (text === "/scan") {
+    await setScanState(env, {
+      status: "in_progress",
+      scan_date: new Date().toISOString().slice(0, 10),
+      current_offset: 0,
+      total_universe: FULL_UNIVERSE.length,
+      climax_partial: "[]",
+      momentum_partial: "[]",
+      base_breakout_partial: "[]",
+      fbo_partial: "[]",
+      market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
+      started_at: new Date().toISOString(),
+      completed_at: null,
+      error_count: 0,
+    });
+    // Kick off first chunk immediately để start progress
+    ctx.waitUntil(processScanChunk(env));
+    // Estimate time based on current UTC hour
+    const utcHour = new Date().getUTCHours();
+    const inEodWindow = utcHour === 8;  // 15:00-15:59 VN
+    const eta = inEodWindow ? "~1 phút/chunk × 57 chunks = ~1 giờ" : "~2 phút/chunk × 57 chunks = ~2 giờ";
+    await tgSendMessage(env.BOT_TOKEN, chatId,
+      `🔍 *Đã trigger scan full 1411 mã*\n\n` +
+      `Chunks process qua cron — ${eta} (vì Cloudflare Free limit chỉ ~25 mã/invocation).\n\n` +
+      `📊 Theo dõi: gõ /scan-status để check progress.\n` +
+      `🔔 Bot tự gửi digest khi xong (qua sendMarketDigest auto).\n\n` +
+      `_Nếu cần kết quả ngay: gõ /quick (45 mã large+mid, ~10s)._`);
+    return new Response("ok");
+  }
+  // /scan-status — check current scan progress
+  if (text === "/scan-status" || text === "/ss") {
+    const state = await getScanState(env);
+    if (!state || state.status === "idle") {
+      await tgSendMessage(env.BOT_TOKEN, chatId, "📊 Không có scan đang chạy. Gõ /scan để trigger full scan.");
+      return new Response("ok");
+    }
+    const offset = state.current_offset || 0;
+    const total = state.total_universe || 0;
+    const pct = total > 0 ? Math.round((offset / total) * 100) : 0;
+    const safeJsonLen = (s) => {
+      if (!s || s === "" || s === "null") return 0;
+      try { return JSON.parse(s).length; } catch { return 0; }
+    };
+    const bb = safeJsonLen(state.base_breakout_partial);
+    const fbo = safeJsonLen(state.fbo_partial);
+    const climax = safeJsonLen(state.climax_partial);
+    const mom = safeJsonLen(state.momentum_partial);
+    await tgSendMessage(env.BOT_TOKEN, chatId,
+      `📊 *Scan progress*\n\n` +
+      `Status: ${state.status}\n` +
+      `Progress: ${offset}/${total} (${pct}%)\n` +
+      `Started: ${state.started_at?.slice(0, 19) || "?"}\n\n` +
+      `*Partial matches (so far)*:\n` +
+      `🔍 Base Breakout: ${bb}\n` +
+      `🌊 FBO: ${fbo}\n` +
+      `🔻 Climax: ${climax}\n` +
+      `🚀 Momentum: ${mom}`);
+    return new Response("ok");
+  }
+  if (text === "/quick" || text === "/q" || text === "/s") {
+    // Quick scan 45 mã large+mid cap (instant feedback)
     await tgSendMessage(env.BOT_TOKEN, chatId, "🔍 Đang quét 45 mã large+mid cap...");
     const summary = await runQuickScan(env);
     await tgSendMessage(env.BOT_TOKEN, chatId, buildScanResultMessage(summary));
@@ -810,8 +955,10 @@ async function handleTelegramWebhook(request, env) {
 function buildHelpMessage() {
   return `🤖 *Bonggnez Bot Commands*\n\n` +
     `*Quét + Picks:*\n` +
+    `/scan — Quét FULL 1411 mã background (~1-2 giờ qua cron)\n` +
+    `/scan-status (/ss) — Check progress full scan\n` +
+    `/quick (/q, /s) — Quét nhanh 45 mã large+mid cap (instant ~10s)\n` +
     `/picks (/p) — Show active picks (Base Breakout + FBO + Climax)\n` +
-    `/scan (/s) — Quét 45 mã large+mid cap ngay\n` +
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
     `\n*Stats + Regime:*\n` +
     `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
@@ -820,7 +967,7 @@ function buildHelpMessage() {
     `/status — Trạng thái kết nối + watches\n` +
     `/start <token> — Kết nối account (lấy token từ app)\n` +
     `/help (/?) — Show menu này\n` +
-    `\n_Tip: dùng shortcut 1 ký tự cho nhanh_`;
+    `\n_Tip: /scan chậm vì Cloudflare limit. Nếu cần nhanh → /quick (45 mã)._`;
 }
 
 async function buildPicksMessage(env) {

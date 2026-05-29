@@ -13,10 +13,14 @@ crons = [
   # EOD digest 14:50 VN (7:50 UTC) — gửi summary cuối phiên + init multi-stage scan
   "50 7 * * 1-5",
   # Multi-stage scan chunks mỗi 1 phút từ 08:00 → 08:59 UTC (~ 15:00-15:59 VN)
-  # Process 35 mã/chunk × 41 chunks = full universe (1411 mã) sau ~41 min
+  # 25 mã/chunk × 57 chunks = full universe (1411 mã) sau ~57 min
   "* 8 * * 1-5",
   # Daily morning briefing 8:30 VN (1:30 UTC) — Telegram summary tuần qua + active picks
-  "30 1 * * 1-5"
+  "30 1 * * 1-5",
+  # Manual /scan continuation: every 2 min UTC 0-23 weekdays. No-op nếu state
+  # !== in_progress (cheap check). Khi user /scan ngoài giờ EOD → chunks vẫn
+  # process steadily, ~57 chunks × 2 min = ~2 giờ total cho full 1411.
+  "*/2 * * * 1-5"
 ]
 
 # Notes:
