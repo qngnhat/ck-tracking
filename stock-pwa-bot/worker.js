@@ -754,11 +754,337 @@ async function handleTelegramWebhook(request, env) {
     return new Response("ok");
   }
 
+  // /help — list available commands
+  if (text === "/help" || text === "/?") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, buildHelpMessage());
+    return new Response("ok");
+  }
+
+  // /picks — show active picks (Mid-term + FBO + Climax)
+  if (text === "/picks" || text === "/p") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildPicksMessage(env));
+    return new Response("ok");
+  }
+
+  // /scan — trigger quick scan 45 mã large+mid cap
+  if (text === "/scan" || text === "/s") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, "🔍 Đang quét 45 mã large+mid cap...");
+    const summary = await runQuickScan(env);
+    await tgSendMessage(env.BOT_TOKEN, chatId, buildScanResultMessage(summary));
+    return new Response("ok");
+  }
+
+  // /stats — recent forward-test stats
+  if (text === "/stats" || text === "/st") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildStatsMessage(env));
+    return new Response("ok");
+  }
+
+  // /check <SYMBOL> — check pattern + tier 1 mã cụ thể
+  if (text.startsWith("/check ") || text.startsWith("/c ")) {
+    const sym = text.split(/\s+/)[1]?.toUpperCase();
+    if (!sym) {
+      await tgSendMessage(env.BOT_TOKEN, chatId, "Usage: `/check <SYMBOL>` — vd `/check VHM`");
+      return new Response("ok");
+    }
+    await tgSendMessage(env.BOT_TOKEN, chatId, `🔍 Đang check ${sym}...`);
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildCheckSymbolMessage(env, sym));
+    return new Response("ok");
+  }
+
+  // /regime — show current VNI volatility regime
+  if (text === "/regime" || text === "/r") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildRegimeMessage(env));
+    return new Response("ok");
+  }
+
   // Unknown command
   await tgSendMessage(env.BOT_TOKEN, chatId,
-    "Commands: `/start <token>` để kết nối, `/status` xem trạng thái."
+    "Không hiểu lệnh. Gõ `/help` xem danh sách commands."
   );
   return new Response("ok");
+}
+
+// ── Bot command handlers ──────────────────────────────
+
+function buildHelpMessage() {
+  return `🤖 *Bonggnez Bot Commands*\n\n` +
+    `*Quét + Picks:*\n` +
+    `/picks (/p) — Show active picks (Base Breakout + FBO + Climax)\n` +
+    `/scan (/s) — Quét 45 mã large+mid cap ngay\n` +
+    `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
+    `\n*Stats + Regime:*\n` +
+    `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
+    `/regime (/r) — VNI volatility regime hiện tại\n` +
+    `\n*Account:*\n` +
+    `/status — Trạng thái kết nối + watches\n` +
+    `/start <token> — Kết nối account (lấy token từ app)\n` +
+    `/help (/?) — Show menu này\n` +
+    `\n_Tip: dùng shortcut 1 ký tự cho nhanh_`;
+}
+
+async function buildPicksMessage(env) {
+  const sb = sbClient(env);
+  const climax = await sbQuery(sb, "climax_active_picks", {
+    select: "symbol,signal_date,entry_price,tier,nn_net_5d_bn,peak_price",
+  }) || [];
+  const midterm = await sbQuery(sb, "mid_term_active_picks", {
+    select: "symbol,signal_date,entry_price,peak_price",
+  }) || [];
+
+  // Filter active (expires_at > now)
+  const now = new Date();
+  const activeClimax = climax.filter((p) => true);  // sbQuery không support gte trên timestamp
+  const activeMidterm = midterm.filter((p) => true);
+
+  if (activeClimax.length === 0 && activeMidterm.length === 0) {
+    return `📭 *Không có active picks*\n\nBot quét EOD 14:50 VN (T2-T6). Hoặc gõ /scan để quét ngay.`;
+  }
+
+  const fmtPick = (p, tag) => {
+    const peakStr = p.peak_price
+      ? ` · peak ${parseFloat(p.peak_price).toFixed(2)}`
+      : "";
+    const nnStr = p.nn_net_5d_bn != null
+      ? ` · NN +${parseFloat(p.nn_net_5d_bn).toFixed(1)}B`
+      : "";
+    return `${tag} *${p.symbol}* @${parseFloat(p.entry_price).toFixed(2)} (${p.signal_date})${peakStr}${nnStr}`;
+  };
+
+  let text = `📋 *Active Picks*\n\n`;
+
+  // Mid-term (Base Breakout) — primary pattern
+  if (activeMidterm.length > 0) {
+    text += `🔍 *Trung hạn (Base Breakout)* — hold T+30, trail 10%\n`;
+    activeMidterm.slice(0, 15).forEach((p) => {
+      text += fmtPick(p, "🔹") + "\n";
+    });
+    text += "\n";
+  }
+
+  // FBO
+  const fboPicks = activeClimax.filter((p) => p.tier === "FBO");
+  if (fboPicks.length > 0) {
+    text += `🌊 *FBO (oversold + NN mua)* — T+5, target +3% / SL -8%\n`;
+    fboPicks.slice(0, 10).forEach((p) => {
+      text += fmtPick(p, "🔸") + "\n";
+    });
+    text += "\n";
+  }
+
+  // Climax tiers (Premium + Elite + A + B)
+  const climaxTiers = activeClimax.filter((p) =>
+    ["Premium", "Elite", "A", "B"].includes(p.tier)
+  );
+  if (climaxTiers.length > 0) {
+    text += `🔻 *Bắt đáy T+5 (Climax)*\n`;
+    climaxTiers.slice(0, 10).forEach((p) => {
+      const tierIcon = { Premium: "💎", Elite: "⚡", A: "🟢", B: "🔵" }[p.tier] || "•";
+      text += `${tierIcon} *${p.symbol}* @${parseFloat(p.entry_price).toFixed(2)} (${p.tier}, ${p.signal_date})\n`;
+    });
+    text += "\n";
+  }
+
+  // Momentum
+  const momPicks = activeClimax.filter((p) => p.tier === "Momentum");
+  if (momPicks.length > 0) {
+    text += `🚀 *Momentum* — hold T+20, trail 7%\n`;
+    momPicks.slice(0, 5).forEach((p) => {
+      text += fmtPick(p, "⚡") + "\n";
+    });
+  }
+
+  text += `\n_Reload PWA tab Rà soát để xem chi tiết._`;
+  return text;
+}
+
+async function runQuickScan(env) {
+  // Reuse quick-scan endpoint logic — scan 45 mã + persist
+  const bbMatches = [];
+  const fboMatches = [];
+  const batchSize = 15;
+  for (let i = 0; i < MID_TERM_QUICK_UNIVERSE.length; i += batchSize) {
+    const batch = MID_TERM_QUICK_UNIVERSE.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(async (sym) => {
+      try {
+        const data = await fetchVndHistory(sym, 220);
+        const baseBreakout = detectBaseBreakout(data);
+        const fboBase = detectForeignBackedOversoldBase(data);
+        let fbo = null;
+        if (fboBase) {
+          const foreign = await fetchForeignDaily(sym, 7).catch(() => null);
+          const nnNet5d = foreign ? computeNnNet5d(foreign) : null;
+          if (nnNet5d != null && nnNet5d > 0) {
+            fbo = { ...fboBase, nn_net_5d_bn: +(nnNet5d / 1e9).toFixed(2) };
+          }
+        }
+        return { symbol: sym, baseBreakout, fbo };
+      } catch { return null; }
+    }));
+    for (const r of results) {
+      if (!r) continue;
+      if (r.baseBreakout) bbMatches.push({ symbol: r.symbol, ...r.baseBreakout });
+      if (r.fbo) fboMatches.push({ symbol: r.symbol, ...r.fbo });
+    }
+  }
+  await persistMidTermMatches(env, bbMatches);
+  await persistFBOMatches(env, fboMatches);
+  return {
+    scanned: MID_TERM_QUICK_UNIVERSE.length,
+    bb: bbMatches.map((m) => m.symbol),
+    fbo: fboMatches.map((m) => m.symbol),
+  };
+}
+
+function buildScanResultMessage(summary) {
+  const total = summary.bb.length + summary.fbo.length;
+  let text = `✅ *Quét xong ${summary.scanned} mã*\n\n`;
+  if (total === 0) {
+    text += `📭 0 match. Pattern selective — đa số ngày 0-2 picks.\n_Full 1411 mã scan tự động qua EOD cron._`;
+    return text;
+  }
+  if (summary.bb.length > 0) {
+    text += `🔍 *Base Breakout (${summary.bb.length}):* ${summary.bb.join(", ")}\n\n`;
+  }
+  if (summary.fbo.length > 0) {
+    text += `🌊 *FBO (${summary.fbo.length}):* ${summary.fbo.join(", ")}\n\n`;
+  }
+  text += `_Mở PWA tab Rà soát xem entry/SL/target chi tiết._`;
+  return text;
+}
+
+async function buildStatsMessage(env) {
+  const sb = sbClient(env);
+  const sinceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=*&signal_date=gte.${sinceDate}&order=signal_date.desc&limit=200`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  if (!r.ok) return "❌ Lỗi fetch stats";
+  const trades = await r.json();
+  if (trades.length === 0) {
+    return `📊 *Stats 30 ngày*\n\nChưa có trade nào được resolve trong window. Bot scan EOD T2-T6 — đợi sau khi có signal + T+5 hoặc T+30 resolve.`;
+  }
+  const resolved = trades.filter((t) => t.resolved_at);
+  const active = trades.filter((t) => !t.resolved_at);
+  const wins = resolved.filter((t) => t.is_win).length;
+  const winRate = resolved.length > 0 ? (wins / resolved.length) * 100 : 0;
+  const totalRet = resolved.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
+  const avgRet = resolved.length > 0 ? (totalRet / resolved.length) * 100 : 0;
+
+  // Per-tier breakdown
+  const tiers = {};
+  for (const t of resolved) {
+    if (!tiers[t.tier]) tiers[t.tier] = { n: 0, wins: 0, sumRet: 0 };
+    tiers[t.tier].n++;
+    if (t.is_win) tiers[t.tier].wins++;
+    tiers[t.tier].sumRet += parseFloat(t.net_ret || 0);
+  }
+
+  let text = `📊 *Stats 30 ngày qua*\n\n`;
+  text += `*Resolved:* ${resolved.length}/${trades.length} (${active.length} đang chờ)\n`;
+  text += `*Win rate:* ${winRate.toFixed(1)}% (${wins}/${resolved.length})\n`;
+  text += `*Avg return:* ${avgRet >= 0 ? "+" : ""}${avgRet.toFixed(2)}%/trade\n`;
+  text += `*Cumulative:* ${totalRet >= 0 ? "+" : ""}${(totalRet * 100).toFixed(1)}%\n`;
+
+  if (Object.keys(tiers).length > 0) {
+    text += `\n*Per tier:*\n`;
+    for (const [tier, s] of Object.entries(tiers)) {
+      const tWin = (s.wins / s.n) * 100;
+      const tAvg = (s.sumRet / s.n) * 100;
+      text += `• ${tier}: ${s.n} trade · ${tWin.toFixed(0)}% win · ${tAvg >= 0 ? "+" : ""}${tAvg.toFixed(2)}%/trade\n`;
+    }
+  }
+  return text;
+}
+
+async function buildCheckSymbolMessage(env, symbol) {
+  try {
+    const data = await fetchVndHistory(symbol, 220);
+    if (!data || !data.closes?.length) return `❌ Không fetch được data ${symbol}`;
+
+    const climax = detectVolClimaxBounce(data);
+    const momentum = detectStrengthContinuation(data);
+    const baseBreakout = detectBaseBreakout(data);
+    const fboBase = detectForeignBackedOversoldBase(data);
+
+    const n = data.closes.length;
+    const cur = data.closes[n - 1];
+
+    let text = `🔍 *Check ${symbol}*\n\nGiá hiện tại: ${cur.toFixed(2)}\n\n`;
+
+    const matches = [];
+    if (climax) matches.push(`🔻 Climax Tier ${climax.tier} (drop ${climax.ret3d.toFixed(1)}%, vol ${climax.volRatio.toFixed(1)}×, RSI ${climax.rsi.toFixed(0)})`);
+    if (momentum) matches.push(`🚀 Momentum (vol ${momentum.volRatio?.toFixed(1)}×)`);
+    if (baseBreakout) matches.push(`🔍 Base Breakout (break +${baseBreakout.breakStrength.toFixed(1)}% above prev high, vol ${baseBreakout.volRatio.toFixed(1)}×)`);
+
+    if (fboBase) {
+      // Need foreign check
+      const foreign = await fetchForeignDaily(symbol, 7).catch(() => null);
+      const nnNet5d = foreign ? computeNnNet5d(foreign) : null;
+      if (nnNet5d != null && nnNet5d > 0) {
+        matches.push(`🌊 FBO (drop ${fboBase.ret3d.toFixed(1)}%, RSI ${fboBase.rsi.toFixed(0)}, NN 5d +${(nnNet5d/1e9).toFixed(1)}B)`);
+      } else {
+        matches.push(`🌊 FBO base match (drop ${fboBase.ret3d.toFixed(1)}%, RSI ${fboBase.rsi.toFixed(0)}) NHƯNG NN 5d ${nnNet5d != null ? (nnNet5d/1e9).toFixed(1) + "B" : "?"} (cần >0) ✗`);
+      }
+    }
+
+    if (matches.length === 0) {
+      text += `📭 Không match pattern nào (Climax / Momentum / Base Breakout / FBO).`;
+    } else {
+      text += `✅ *Match patterns:*\n${matches.join("\n")}`;
+    }
+    return text;
+  } catch (e) {
+    return `❌ Lỗi check ${symbol}: ${e.message}`;
+  }
+}
+
+async function buildRegimeMessage(env) {
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 60);
+    const cs = vni.closes;
+    const n = cs.length;
+    if (n < 50) return "❌ Không đủ VNI data";
+
+    const cur = cs[n - 1];
+    const ret20 = ((cur - cs[n - 21]) / cs[n - 21]) * 100;
+    const ret60 = ((cur - cs[n - 60]) / cs[n - 60]) * 100;
+
+    // MA50
+    let maSum = 0;
+    for (let i = n - 50; i < n; i++) maSum += cs[i];
+    const ma50 = maSum / 50;
+    const aboveMa50 = cur > ma50;
+
+    // Realized vol 20d
+    let vols = [];
+    for (let i = n - 20; i < n; i++) {
+      vols.push((cs[i] - cs[i - 1]) / cs[i - 1]);
+    }
+    const mean = vols.reduce((a, b) => a + b, 0) / vols.length;
+    const stdDaily = Math.sqrt(vols.reduce((a, b) => a + (b - mean) ** 2, 0) / vols.length) * 100;
+
+    let trendLabel = aboveMa50 ? "📈 Uptrend (>MA50)" : "📉 Downtrend (<MA50)";
+    let volLabel = stdDaily < 1.0 ? "🟢 Low" : (stdDaily < 1.5 ? "🟡 Medium" : "🔴 High");
+
+    let text = `📊 *VNI Regime hiện tại*\n\n`;
+    text += `VNI: ${cur.toFixed(2)}\n`;
+    text += `Return: ${ret20 >= 0 ? "+" : ""}${ret20.toFixed(1)}% (20d) · ${ret60 >= 0 ? "+" : ""}${ret60.toFixed(1)}% (60d)\n`;
+    text += `Trend: ${trendLabel}\n`;
+    text += `Vol 20d realized: ${stdDaily.toFixed(2)}%/day → ${volLabel}\n\n`;
+    text += `*Pattern aptitude:*\n`;
+    if (aboveMa50 && stdDaily < 1.2) {
+      text += `🟢 Low-vol uptrend → Base Breakout work tốt nhất\n`;
+    } else if (!aboveMa50 && stdDaily > 1.2) {
+      text += `🌊 High-vol downtrend → FBO (oversold + NN mua) có thể fire\n`;
+    } else {
+      text += `🟡 Mixed regime → cautious, đợi pattern setup rõ\n`;
+    }
+    return text;
+  } catch (e) {
+    return `❌ Lỗi fetch VNI: ${e.message}`;
+  }
 }
 
 // ── Cron: check all active watches (not dismissed) ──────────────────
