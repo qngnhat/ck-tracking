@@ -549,6 +549,9 @@
       const c = $("analysis-tab-tplus");
       if (c && !c.dataset.loaded) lazyLoadTplusTab();
     }
+    if (mode === "technical") {
+      initTechnicalTabHandlers();
+    }
   }
 
   async function lazyLoadTplusTab() {
@@ -911,43 +914,176 @@
     return { label: "⚪ NEUTRAL", desc: "Tín hiệu hỗn hợp — đợi setup rõ", color: "neutral" };
   }
 
-  function renderTechnicalTabContent(r) {
-    // Use global currentData (raw OHLCV fetched by analyzeSymbol)
-    if (!currentData || !currentData.closes?.length) {
-      return `<div class="empty-state"><p>Không đủ data để phân tích kỹ thuật.</p></div>`;
+  // Aggregate daily OHLCV → weekly (Monday-Friday groups)
+  function aggregateWeekly(data) {
+    const { times, opens, highs, lows, closes, volumes } = data;
+    if (!times || !times.length) return data;
+    const weeklyT = [], weeklyO = [], weeklyH = [], weeklyL = [], weeklyC = [], weeklyV = [];
+    let curWeek = null;
+    let weekStart = null, weekHigh = -Infinity, weekLow = Infinity, weekOpen = null, weekClose = null, weekVol = 0;
+    for (let i = 0; i < times.length; i++) {
+      const date = new Date(times[i] * 1000);
+      // Week number = floor((days since epoch) / 7)
+      const weekIndex = Math.floor(times[i] / 86400 / 7);
+      if (curWeek === null || weekIndex !== curWeek) {
+        // Flush prev week
+        if (curWeek !== null) {
+          weeklyT.push(weekStart);
+          weeklyO.push(weekOpen);
+          weeklyH.push(weekHigh);
+          weeklyL.push(weekLow);
+          weeklyC.push(weekClose);
+          weeklyV.push(weekVol);
+        }
+        // Start new week
+        curWeek = weekIndex;
+        weekStart = times[i];
+        weekOpen = opens[i];
+        weekHigh = highs[i];
+        weekLow = lows[i];
+        weekClose = closes[i];
+        weekVol = volumes[i];
+      } else {
+        weekHigh = Math.max(weekHigh, highs[i]);
+        weekLow = Math.min(weekLow, lows[i]);
+        weekClose = closes[i];
+        weekVol += volumes[i];
+      }
     }
-    const { opens, highs, lows, closes, volumes } = currentData;
+    // Flush last week
+    if (curWeek !== null) {
+      weeklyT.push(weekStart);
+      weeklyO.push(weekOpen);
+      weeklyH.push(weekHigh);
+      weeklyL.push(weekLow);
+      weeklyC.push(weekClose);
+      weeklyV.push(weekVol);
+    }
+    return { times: weeklyT, opens: weeklyO, highs: weeklyH, lows: weeklyL, closes: weeklyC, volumes: weeklyV };
+  }
+
+  let technicalChartInstance = null;
+  function renderTechnicalChart(containerId, data) {
+    const container = document.getElementById(containerId);
+    if (!container || !data || !window.LightweightCharts) return;
+    container.innerHTML = "";
+    if (technicalChartInstance) {
+      try { technicalChartInstance.remove(); } catch {}
+      technicalChartInstance = null;
+    }
+    const { times, opens, highs, lows, closes, volumes } = data;
+    const candles = [], volBars = [];
+    for (let i = 0; i < times.length; i++) {
+      candles.push({ time: times[i], open: opens[i], high: highs[i], low: lows[i], close: closes[i] });
+      volBars.push({
+        time: times[i], value: volumes[i],
+        color: closes[i] >= opens[i] ? "rgba(76,175,80,0.5)" : "rgba(255,68,68,0.5)",
+      });
+    }
+    const ma20Series = computeSMASeries(closes, times, 20);
+    const ma50Series = computeSMASeries(closes, times, 50);
+    const ma200Series = computeSMASeries(closes, times, 200);
+    const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
+    technicalChartInstance = window.LightweightCharts.createChart(container, {
+      width: chartWidth, height: 320,
+      layout: { background: { color: "#0f0f1e" }, textColor: "#a0a0b0", fontSize: 11 },
+      grid: { vertLines: { color: "#1f1f2e" }, horzLines: { color: "#1f1f2e" } },
+      rightPriceScale: { borderColor: "#2a2a3e" },
+      timeScale: { borderColor: "#2a2a3e", timeVisible: false },
+      crosshair: { mode: 1 },
+    });
+    const candleSeries = technicalChartInstance.addCandlestickSeries({
+      upColor: "#4CAF50", downColor: "#ff4444",
+      borderUpColor: "#4CAF50", borderDownColor: "#ff4444",
+      wickUpColor: "#4CAF50", wickDownColor: "#ff4444",
+    });
+    candleSeries.setData(candles);
+    if (ma20Series.length) {
+      const ma20Line = technicalChartInstance.addLineSeries({ color: "#00d2ff", lineWidth: 1, title: "MA20", priceLineVisible: false, lastValueVisible: false });
+      ma20Line.setData(ma20Series.filter((p) => p.value !== null));
+    }
+    if (ma50Series.length) {
+      const ma50Line = technicalChartInstance.addLineSeries({ color: "#FFC107", lineWidth: 1, title: "MA50", priceLineVisible: false, lastValueVisible: false });
+      ma50Line.setData(ma50Series.filter((p) => p.value !== null));
+    }
+    if (ma200Series.length) {
+      const ma200Line = technicalChartInstance.addLineSeries({ color: "#ef5350", lineWidth: 1, title: "MA200", priceLineVisible: false, lastValueVisible: false });
+      ma200Line.setData(ma200Series.filter((p) => p.value !== null));
+    }
+    // Volume bars (sub pane)
+    const volSeries = technicalChartInstance.addHistogramSeries({
+      priceFormat: { type: "volume" },
+      priceScaleId: "vol",
+      lastValueVisible: false,
+    });
+    volSeries.setData(volBars);
+    technicalChartInstance.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    technicalChartInstance.timeScale().fitContent();
+  }
+
+  // Re-run technical analysis với data (D or W aggregated)
+  function refreshTechnicalAnalysis(timeframe) {
+    if (!currentData || !lastAnalysisResult) return;
+    const data = timeframe === "W" ? aggregateWeekly(currentData) : currentData;
+    const slot = document.getElementById("technical-analysis-body");
+    if (slot) slot.innerHTML = buildTechnicalAnalysisBody(lastAnalysisResult, data, timeframe);
+    // Re-render chart
+    requestAnimationFrame(() => renderTechnicalChart("technical-chart-container", data));
+  }
+
+  // Build analysis body (5 sections + verdict) — separate from full tab content
+  function buildTechnicalAnalysisBody(r, data, timeframe) {
+    const { opens, highs, lows, closes, volumes } = data;
     const n = closes.length;
+    if (n < 30) return `<div class="empty-state"><p>Không đủ data (cần ≥30 bars) — timeframe ${timeframe} quá ít sample.</p></div>`;
 
     const candle = detectCandlePattern(opens, highs, lows, closes, n);
-    const trend = detectTrendStatus(r);
+    // Recompute MAs cho timeframe hiện tại
+    const ma20 = n >= 20 ? closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20 : null;
+    const ma50 = n >= 50 ? closes.slice(n - 50).reduce((a, b) => a + b, 0) / 50 : null;
+    const ma200 = n >= 200 ? closes.slice(n - 200).reduce((a, b) => a + b, 0) / 200 : null;
+    const cur = closes[n - 1];
+    const trend = detectTrendStatus({ current: cur, ma20, ma50, ma200 });
     const volAnalysis = detectVolumeAnalysis(volumes, closes, n);
     const sr = detectSupportResistance(highs, lows, closes, n);
-    const rsiStatus = detectRsiStatus(r.rsi);
+    // RSI compute on closes
+    let rsi = null;
+    if (n >= 15) {
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= 14; i++) {
+        const d = closes[n - 15 + i] - closes[n - 16 + i];
+        if (d > 0) gains += d; else losses -= d;
+      }
+      let avgG = gains / 14, avgL = losses / 14;
+      // Wilder smoothing for n-15 onwards
+      rsi = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+    }
+    const rsiStatus = detectRsiStatus(rsi);
     const verdict = buildTechnicalVerdict([candle, trend, volAnalysis, rsiStatus]);
+    const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
     return `
       <div class="ta-verdict ta-${verdict.color}">
         <div class="ta-verdict-label">${verdict.label}</div>
-        <div class="ta-verdict-desc">${verdict.desc}</div>
+        <div class="ta-verdict-desc">${verdict.desc} <small>(phân tích trên nến ${tfLabel})</small></div>
       </div>
 
       <div class="ta-section">
         <h3 class="ta-section-title">📈 Xu hướng (Trend)</h3>
-        <div class="ta-row">
+        <div class="ta-row sentiment-${trend.sentiment}">
           <div class="ta-label">${trend.label}</div>
           <div class="ta-desc">${trend.desc}</div>
         </div>
         <div class="ta-mini-grid">
-          <div><span class="ta-mini-label">Close:</span> <b>${r.current.toFixed(2)}k</b></div>
-          ${r.ma20 ? `<div><span class="ta-mini-label">MA20:</span> ${r.ma20.toFixed(2)}k</div>` : ""}
-          ${r.ma50 ? `<div><span class="ta-mini-label">MA50:</span> ${r.ma50.toFixed(2)}k</div>` : ""}
-          ${r.ma200 ? `<div><span class="ta-mini-label">MA200:</span> ${r.ma200.toFixed(2)}k</div>` : ""}
+          <div><span class="ta-mini-label">Close:</span> <b>${cur.toFixed(2)}k</b></div>
+          ${ma20 ? `<div><span class="ta-mini-label">MA20:</span> ${ma20.toFixed(2)}k</div>` : ""}
+          ${ma50 ? `<div><span class="ta-mini-label">MA50:</span> ${ma50.toFixed(2)}k</div>` : ""}
+          ${ma200 ? `<div><span class="ta-mini-label">MA200:</span> ${ma200.toFixed(2)}k</div>` : ""}
         </div>
       </div>
 
       <div class="ta-section">
-        <h3 class="ta-section-title">🕯️ Mẫu hình nến (Candle)</h3>
+        <h3 class="ta-section-title">🕯️ Mẫu hình nến ${tfLabel}</h3>
         ${candle ? `
           <div class="ta-row sentiment-${candle.sentiment}">
             <div class="ta-label">${candle.name}</div>
@@ -980,24 +1116,93 @@
           </div>
         </div>
         <div class="ta-mini-grid">
-          <div><span class="ta-mini-label">30d high:</span> ${sr.maxH.toFixed(2)}k</div>
-          <div><span class="ta-mini-label">30d low:</span> ${sr.minL.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">30 ${tfLabel} high:</span> ${sr.maxH.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">30 ${tfLabel} low:</span> ${sr.minL.toFixed(2)}k</div>
         </div>
       </div>` : ""}
 
       ${rsiStatus ? `
       <div class="ta-section">
-        <h3 class="ta-section-title">📐 RSI (14)</h3>
+        <h3 class="ta-section-title">📐 RSI (14) — nến ${tfLabel}</h3>
         <div class="ta-row sentiment-${rsiStatus.sentiment}">
-          <div class="ta-label">${rsiStatus.zone} · RSI = ${r.rsi.toFixed(1)}</div>
+          <div class="ta-label">${rsiStatus.zone} · RSI = ${rsi.toFixed(1)}</div>
           <div class="ta-desc">${rsiStatus.desc}</div>
         </div>
       </div>` : ""}
 
       <div class="ta-disclaimer">
-        <small>⚠️ <b>Disclaimer</b>: phân tích kỹ thuật tự động dựa trên price action + indicator. Chỉ là tín hiệu kỹ thuật, KHÔNG phải lời khuyên đầu tư. Luôn cân nhắc fundamentals + risk management + position size trước khi giao dịch.</small>
+        <small>⚠️ <b>Method</b>: phân tích pure rule-based trên price action + indicator (Wilder RSI, MA20/50/200, swing pivot 5-bar S/R, body/shadow ratio candle pattern). Không AI/ML. Timeframe = nến ${tfLabel}. Chỉ là tín hiệu kỹ thuật, KHÔNG phải lời khuyên đầu tư.</small>
       </div>
     `;
+  }
+
+  function renderTechnicalTabContent(r) {
+    if (!currentData || !currentData.closes?.length) {
+      return `<div class="empty-state"><p>Không đủ data để phân tích kỹ thuật.</p></div>`;
+    }
+    const { opens, highs, lows, closes, volumes } = currentData;
+    const n = closes.length;
+    const cur = closes[n - 1];
+    const prev = n >= 2 ? closes[n - 2] : cur;
+    const dayChange = ((cur - prev) / prev) * 100;
+    const dayVol = volumes[n - 1];
+    const avgVol20 = n >= 20 ? volumes.slice(n - 21, n - 1).reduce((a, b) => a + b, 0) / 20 : null;
+    const volRatio = avgVol20 ? dayVol / avgVol20 : null;
+    const sym = r.symbol;
+    const changeSign = dayChange >= 0 ? "+" : "";
+    const changeColor = dayChange >= 0 ? "up" : "down";
+    const dayHigh = currentData.highs[n - 1];
+    const dayLow = currentData.lows[n - 1];
+
+    return `
+      <div class="ta-info-row">
+        <div class="ta-info-symbol">${sym}</div>
+        <div class="ta-info-price ${changeColor}">${cur.toFixed(2)}k <span class="ta-info-change">${changeSign}${dayChange.toFixed(2)}%</span></div>
+        <div class="ta-info-stats">
+          <span>H: ${dayHigh.toFixed(2)}k</span>
+          <span>L: ${dayLow.toFixed(2)}k</span>
+          <span>Vol: ${dayVol >= 1e6 ? (dayVol/1e6).toFixed(1) + "M" : (dayVol/1e3).toFixed(0) + "K"} ${volRatio ? `<small>(${volRatio.toFixed(1)}× TB20)</small>` : ""}</span>
+        </div>
+      </div>
+
+      <div class="ta-controls">
+        <span class="ctrl-label">Timeframe:</span>
+        <div class="seg-toggle" id="ta-tf-toggle">
+          <button class="seg-btn active" data-tf="D">Daily</button>
+          <button class="seg-btn" data-tf="W">Weekly</button>
+        </div>
+      </div>
+
+      <div class="ta-chart-wrap">
+        <div id="technical-chart-container"></div>
+        <div class="ta-chart-legend">
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#00d2ff"></span>MA20</span>
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#FFC107"></span>MA50</span>
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#ef5350"></span>MA200</span>
+        </div>
+      </div>
+
+      <div id="technical-analysis-body">${buildTechnicalAnalysisBody(r, currentData, "D")}</div>
+    `;
+  }
+
+  // Bind timeframe toggle + render chart on tab show
+  function initTechnicalTabHandlers() {
+    const toggle = document.getElementById("ta-tf-toggle");
+    if (toggle && !toggle.dataset.bound) {
+      toggle.dataset.bound = "1";
+      toggle.querySelectorAll(".seg-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          toggle.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          refreshTechnicalAnalysis(btn.dataset.tf);
+        });
+      });
+    }
+    // Initial chart render
+    if (currentData) {
+      requestAnimationFrame(() => renderTechnicalChart("technical-chart-container", currentData));
+    }
   }
 
   function renderOverviewTabContent(r) {
