@@ -536,7 +536,7 @@
   }
 
   function setAnalysisTab(mode) {
-    if (!["overview", "tplus"].includes(mode)) mode = "overview";
+    if (!["overview", "technical", "tplus"].includes(mode)) mode = "overview";
     document.querySelectorAll(".analysis-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
