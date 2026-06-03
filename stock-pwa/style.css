@@ -7773,3 +7773,28 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #999;
   font-size: 11px;
 }
+
+/* Ichimoku checkbox toggle */
+.ta-checkbox-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d0d6e2;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 12px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ta-checkbox-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.ta-checkbox-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #2196F3;
+}

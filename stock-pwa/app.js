@@ -962,6 +962,16 @@
     return { times: weeklyT, opens: weeklyO, highs: weeklyH, lows: weeklyL, closes: weeklyC, volumes: weeklyV };
   }
 
+  const ICHIMOKU_PREF_KEY = "stock_pwa_show_ichimoku";
+  function loadShowIchimoku() {
+    try { return localStorage.getItem(ICHIMOKU_PREF_KEY) === "1"; }
+    catch { return false; }
+  }
+  function saveShowIchimoku(v) {
+    try { localStorage.setItem(ICHIMOKU_PREF_KEY, v ? "1" : "0"); }
+    catch {}
+  }
+
   let technicalChartInstance = null;
   function renderTechnicalChart(containerId, data) {
     const container = document.getElementById(containerId);
@@ -1010,6 +1020,79 @@
       const ma200Line = technicalChartInstance.addLineSeries({ color: "#ef5350", lineWidth: 1, title: "MA200", priceLineVisible: false, lastValueVisible: false });
       ma200Line.setData(ma200Series.filter((p) => p.value !== null));
     }
+
+    // Ichimoku overlay (toggle preference)
+    if (loadShowIchimoku()) {
+      const ichi = computeIchimoku(highs, lows, closes);
+      if (ichi) {
+        const n = times.length;
+        // Detect bar interval (seconds): difference between consecutive times
+        const barInterval = n >= 2 ? (times[1] - times[0]) : 86400;
+        // Tenkan + Kijun: bar time = chart time
+        const tenkanData = [], kijunData = [];
+        for (let i = 0; i < n; i++) {
+          if (ichi.tenkanSeries[i] != null) tenkanData.push({ time: times[i], value: ichi.tenkanSeries[i] });
+          if (ichi.kijunSeries[i] != null) kijunData.push({ time: times[i], value: ichi.kijunSeries[i] });
+        }
+        // Senkou A & B: SHIFT +26 bars forward (project into future on chart)
+        const senkouAData = [], senkouBData = [];
+        for (let i = 0; i < n; i++) {
+          const futureTime = times[i] + 26 * barInterval;
+          if (ichi.senkouASeries[i] != null) senkouAData.push({ time: futureTime, value: ichi.senkouASeries[i] });
+          if (ichi.senkouBSeries[i] != null) senkouBData.push({ time: futureTime, value: ichi.senkouBSeries[i] });
+        }
+        // Sort + dedupe (chart needs sorted unique times)
+        const uniq = (arr) => {
+          const m = new Map();
+          for (const p of arr) m.set(p.time, p);
+          return [...m.values()].sort((a, b) => a.time - b.time);
+        };
+        const senkouAClean = uniq(senkouAData);
+        const senkouBClean = uniq(senkouBData);
+
+        const tenkanLine = technicalChartInstance.addLineSeries({
+          color: "#2196F3", lineWidth: 1, title: "Tenkan(9)",
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        tenkanLine.setData(tenkanData);
+
+        const kijunLine = technicalChartInstance.addLineSeries({
+          color: "#E91E63", lineWidth: 1, title: "Kijun(26)",
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        kijunLine.setData(kijunData);
+
+        // Senkou A line (đường trên/dưới của cloud)
+        const senkouALine = technicalChartInstance.addLineSeries({
+          color: "rgba(76,175,80,0.7)", lineWidth: 1, title: "Senkou A",
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        senkouALine.setData(senkouAClean);
+
+        // Senkou B line
+        const senkouBLine = technicalChartInstance.addLineSeries({
+          color: "rgba(255,68,68,0.7)", lineWidth: 1, title: "Senkou B",
+          priceLineVisible: false, lastValueVisible: false,
+        });
+        senkouBLine.setData(senkouBClean);
+
+        // Cloud fill — use Baseline series (fill between A and B)
+        // LightweightCharts không có built-in fill-between-2-lines, dùng trick:
+        // tạo Area series cho cả A và B với base = thấp, fill bằng overlap visual
+        // Simple approach: area dưới mỗi line semi-transparent
+        try {
+          const cloudAreaA = technicalChartInstance.addAreaSeries({
+            topColor: "rgba(76,175,80,0.10)",
+            bottomColor: "rgba(76,175,80,0)",
+            lineColor: "transparent",
+            priceLineVisible: false, lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+          cloudAreaA.setData(senkouAClean);
+        } catch {}
+      }
+    }
+
     // Volume bars (sub pane)
     const volSeries = technicalChartInstance.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -1116,6 +1199,7 @@
   // ── Ichimoku Kinko Hyo (mây Ichimoku) ──────────────────────
   // 5 lines: Tenkan-sen (9), Kijun-sen (26), Senkou A/B (cloud shifted +26),
   // Chikou Span (close shifted -26). Standard parameters.
+  // Returns full series for chart overlay + current values for analysis.
   function computeIchimoku(highs, lows, closes) {
     const n = closes.length;
     if (n < 52) return null;
@@ -1132,26 +1216,10 @@
     // Compute series
     const tenkan = [], kijun = [], senkouA = [], senkouB = [];
     for (let i = 0; i < n; i++) {
-      if (i < 8) {
-        tenkan.push(null);
-      } else {
-        tenkan.push((periodH(9, i) + periodL(9, i)) / 2);
-      }
-      if (i < 25) {
-        kijun.push(null);
-      } else {
-        kijun.push((periodH(26, i) + periodL(26, i)) / 2);
-      }
-      // Senkou A = (Tenkan + Kijun) / 2 at bar i, projected forward 26 bars
-      if (tenkan[i] != null && kijun[i] != null) {
-        senkouA.push((tenkan[i] + kijun[i]) / 2);
-      } else senkouA.push(null);
-      // Senkou B = (52-high + 52-low) / 2
-      if (i < 51) {
-        senkouB.push(null);
-      } else {
-        senkouB.push((periodH(52, i) + periodL(52, i)) / 2);
-      }
+      tenkan.push(i < 8 ? null : (periodH(9, i) + periodL(9, i)) / 2);
+      kijun.push(i < 25 ? null : (periodH(26, i) + periodL(26, i)) / 2);
+      senkouA.push(tenkan[i] != null && kijun[i] != null ? (tenkan[i] + kijun[i]) / 2 : null);
+      senkouB.push(i < 51 ? null : (periodH(52, i) + periodL(52, i)) / 2);
     }
 
     // Current cloud values come from bar (n-1 - 26) — the value that was projected forward
@@ -1170,6 +1238,11 @@
       // Cloud projection (next 26 bars)
       futureSenkouA: senkouA[n - 1],
       futureSenkouB: senkouB[n - 1],
+      // Full series cho chart overlay
+      tenkanSeries: tenkan,
+      kijunSeries: kijun,
+      senkouASeries: senkouA,
+      senkouBSeries: senkouB,
     };
   }
 
@@ -1975,14 +2048,24 @@
           <button class="seg-btn active" data-tf="D">Daily</button>
           <button class="seg-btn" data-tf="W">Weekly</button>
         </div>
+        <label class="ta-checkbox-toggle">
+          <input type="checkbox" id="ta-ichimoku-toggle" ${loadShowIchimoku() ? "checked" : ""}>
+          <span>☁️ Ichimoku</span>
+        </label>
       </div>
 
       <div class="ta-chart-wrap">
         <div id="technical-chart-container"></div>
-        <div class="ta-chart-legend">
+        <div class="ta-chart-legend" id="ta-chart-legend">
           <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#00d2ff"></span>MA20</span>
           <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#FFC107"></span>MA50</span>
           <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#ef5350"></span>MA200</span>
+          ${loadShowIchimoku() ? `
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#2196F3"></span>Tenkan(9)</span>
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:#E91E63"></span>Kijun(26)</span>
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:rgba(76,175,80,0.7)"></span>Senkou A</span>
+          <span class="ta-legend-item"><span class="ta-legend-dot" style="background:rgba(255,68,68,0.7)"></span>Senkou B</span>
+          ` : ""}
         </div>
       </div>
 
@@ -1990,7 +2073,7 @@
     `;
   }
 
-  // Bind timeframe toggle + render chart on tab show
+  // Bind timeframe toggle + Ichimoku toggle + render chart on tab show
   function initTechnicalTabHandlers() {
     const toggle = document.getElementById("ta-tf-toggle");
     if (toggle && !toggle.dataset.bound) {
@@ -2001,6 +2084,25 @@
           btn.classList.add("active");
           refreshTechnicalAnalysis(btn.dataset.tf);
         });
+      });
+    }
+    // Ichimoku toggle — re-render chart + update legend
+    const ichiToggle = document.getElementById("ta-ichimoku-toggle");
+    if (ichiToggle && !ichiToggle.dataset.bound) {
+      ichiToggle.dataset.bound = "1";
+      ichiToggle.addEventListener("change", () => {
+        saveShowIchimoku(ichiToggle.checked);
+        // Re-render entire tab (refresh chart + legend)
+        const activeTf = document.querySelector("#ta-tf-toggle .seg-btn.active")?.dataset.tf || "D";
+        refreshTechnicalAnalysis(activeTf);
+        // Also re-render tab container HTML to update legend
+        if (lastAnalysisResult) {
+          $("analysis-tab-technical").innerHTML = renderTechnicalTabContent(lastAnalysisResult);
+          // Re-bind handlers (innerHTML wipes old listeners)
+          document.getElementById("ta-tf-toggle").dataset.bound = "";
+          document.getElementById("ta-ichimoku-toggle").dataset.bound = "";
+          initTechnicalTabHandlers();
+        }
       });
     }
     // Initial chart render
