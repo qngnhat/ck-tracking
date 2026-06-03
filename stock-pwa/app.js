@@ -1113,6 +1113,207 @@
     return { label, desc, sentiment };
   }
 
+  // ── Chart Patterns (multi-bar) ────────────────────────────
+  // Find swing pivots (local max/min với N-bar lookback both sides)
+  function findSwingPivots(highs, lows, lookback = 60, sensitivity = 3) {
+    const start = Math.max(0, highs.length - lookback);
+    const pivots = []; // { idx, type: 'H'|'L', price }
+    for (let i = start + sensitivity; i < highs.length - sensitivity; i++) {
+      // Swing high
+      let isHigh = true;
+      for (let k = 1; k <= sensitivity; k++) {
+        if (highs[i] <= highs[i - k] || highs[i] <= highs[i + k]) { isHigh = false; break; }
+      }
+      if (isHigh) pivots.push({ idx: i, type: "H", price: highs[i] });
+      // Swing low
+      let isLow = true;
+      for (let k = 1; k <= sensitivity; k++) {
+        if (lows[i] >= lows[i - k] || lows[i] >= lows[i + k]) { isLow = false; break; }
+      }
+      if (isLow) pivots.push({ idx: i, type: "L", price: lows[i] });
+    }
+    return pivots.sort((a, b) => a.idx - b.idx);
+  }
+
+  // Linear regression slope (returns slope per bar)
+  function linRegSlope(points) {
+    if (points.length < 2) return null;
+    const n = points.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    for (const p of points) {
+      sumX += p.idx;
+      sumY += p.price;
+      sumXY += p.idx * p.price;
+      sumXX += p.idx * p.idx;
+    }
+    const denom = n * sumXX - sumX * sumX;
+    if (denom === 0) return null;
+    return (n * sumXY - sumX * sumY) / denom;
+  }
+
+  // HH/HL trend structure analysis
+  function detectHhHlStructure(pivots) {
+    if (pivots.length < 4) return null;
+    // Take last 4-6 swings
+    const recent = pivots.slice(-6);
+    const highs = recent.filter((p) => p.type === "H").map((p) => p.price);
+    const lows = recent.filter((p) => p.type === "L").map((p) => p.price);
+    if (highs.length < 2 || lows.length < 2) return null;
+
+    const hhCount = highs.slice(1).filter((h, i) => h > highs[i]).length;
+    const lhCount = highs.slice(1).filter((h, i) => h < highs[i]).length;
+    const hlCount = lows.slice(1).filter((l, i) => l > lows[i]).length;
+    const llCount = lows.slice(1).filter((l, i) => l < lows[i]).length;
+    const totalH = highs.length - 1;
+    const totalL = lows.length - 1;
+
+    let label, desc, sentiment;
+    if (hhCount === totalH && hlCount === totalL) {
+      label = "🟢 HH + HL — Uptrend structure";
+      desc = `Higher Highs (${hhCount}/${totalH}) + Higher Lows (${hlCount}/${totalL}) → cấu trúc tăng kinh điển, follow trend`;
+      sentiment = "bullish";
+    } else if (lhCount === totalH && llCount === totalL) {
+      label = "🔴 LH + LL — Downtrend structure";
+      desc = `Lower Highs (${lhCount}/${totalH}) + Lower Lows (${llCount}/${totalL}) → cấu trúc giảm, tránh mua`;
+      sentiment = "bearish";
+    } else if (hhCount > lhCount && hlCount > llCount) {
+      label = "🟡 Mostly HH/HL — uptrend nhẹ";
+      desc = `${hhCount}/${totalH} HH, ${hlCount}/${totalL} HL — xu hướng tăng nhưng có nhiễu`;
+      sentiment = "bullish-mild";
+    } else if (lhCount > hhCount && llCount > hlCount) {
+      label = "🟠 Mostly LH/LL — downtrend nhẹ";
+      desc = `${lhCount}/${totalH} LH, ${llCount}/${totalL} LL — xu hướng giảm có nhiễu`;
+      sentiment = "bearish-mild";
+    } else {
+      label = "⚪ Cấu trúc hỗn hợp";
+      desc = `HH/HL không rõ rệt → consolidation hoặc đảo chiều`;
+      sentiment = "neutral";
+    }
+    return { label, desc, sentiment, hhCount, lhCount, hlCount, llCount };
+  }
+
+  // Triangle pattern detection — converging trendlines
+  function detectTrianglePattern(pivots, closes, n) {
+    if (pivots.length < 5) return null;
+    const recent = pivots.slice(-10); // last 10 swings (~30-40 bars)
+    const swingHighs = recent.filter((p) => p.type === "H");
+    const swingLows = recent.filter((p) => p.type === "L");
+    if (swingHighs.length < 2 || swingLows.length < 2) return null;
+
+    const cur = closes[n - 1];
+    const slopeH = linRegSlope(swingHighs);
+    const slopeL = linRegSlope(swingLows);
+    if (slopeH == null || slopeL == null) return null;
+
+    // Normalize slope to %/bar (vs current price)
+    const slopeH_pct = (slopeH / cur) * 100;
+    const slopeL_pct = (slopeL / cur) * 100;
+
+    // Range of highs + lows to check if "converging"
+    const highMax = Math.max(...swingHighs.map((p) => p.price));
+    const highMin = Math.min(...swingHighs.map((p) => p.price));
+    const lowMax = Math.max(...swingLows.map((p) => p.price));
+    const lowMin = Math.min(...swingLows.map((p) => p.price));
+    const highRange = (highMax - highMin) / cur * 100;
+    const lowRange = (lowMax - lowMin) / cur * 100;
+
+    let pattern = null;
+    // Ascending triangle: flat highs, rising lows
+    if (Math.abs(slopeH_pct) < 0.05 && slopeL_pct > 0.05 && highRange < 3) {
+      pattern = {
+        name: "📐 Ascending Triangle",
+        desc: `Đỉnh ngang quanh ${highMax.toFixed(2)}k, đáy tăng dần → bullish breakout setup (typical target +${(highRange + 5).toFixed(1)}% nếu break trên)`,
+        sentiment: "bullish",
+      };
+    }
+    // Descending triangle: falling highs, flat lows
+    else if (slopeH_pct < -0.05 && Math.abs(slopeL_pct) < 0.05 && lowRange < 3) {
+      pattern = {
+        name: "📐 Descending Triangle",
+        desc: `Đỉnh giảm dần, đáy ngang quanh ${lowMin.toFixed(2)}k → bearish breakdown setup`,
+        sentiment: "bearish",
+      };
+    }
+    // Symmetric triangle: converging slopes
+    else if (slopeH_pct < -0.05 && slopeL_pct > 0.05) {
+      pattern = {
+        name: "📐 Symmetric Triangle",
+        desc: `2 trendlines hội tụ → consolidation, breakout cả 2 chiều có thể xảy ra. Đợi confirm direction.`,
+        sentiment: "neutral",
+      };
+    }
+    // Channel up
+    else if (slopeH_pct > 0.05 && slopeL_pct > 0.05 && Math.abs(slopeH_pct - slopeL_pct) < 0.1) {
+      pattern = {
+        name: "📈 Up Channel",
+        desc: `2 trendlines song song, đều dốc lên → uptrend channel, mua đáy bán đỉnh trong channel`,
+        sentiment: "bullish-mild",
+      };
+    }
+    // Channel down
+    else if (slopeH_pct < -0.05 && slopeL_pct < -0.05 && Math.abs(slopeH_pct - slopeL_pct) < 0.1) {
+      pattern = {
+        name: "📉 Down Channel",
+        desc: `2 trendlines song song, đều dốc xuống → downtrend channel, không nên mua`,
+        sentiment: "bearish-mild",
+      };
+    }
+    return pattern;
+  }
+
+  // Double Top / Bottom detection — 2 peaks/troughs near same level
+  function detectDoubleTopBottom(pivots, closes, n) {
+    if (pivots.length < 4) return null;
+    const recent = pivots.slice(-20); // last 20 swings
+    const swingHighs = recent.filter((p) => p.type === "H");
+    const swingLows = recent.filter((p) => p.type === "L");
+    const cur = closes[n - 1];
+
+    // Double Top: 2 highs near same level (within 3%) với valley between
+    if (swingHighs.length >= 2) {
+      const sortedH = [...swingHighs].sort((a, b) => b.price - a.price);
+      const top1 = sortedH[0], top2 = sortedH[1];
+      const diff = Math.abs(top1.price - top2.price) / top1.price * 100;
+      if (diff < 3 && Math.abs(top1.idx - top2.idx) >= 10) {
+        // Check valley between
+        const lo = Math.min(top1.idx, top2.idx);
+        const hi = Math.max(top1.idx, top2.idx);
+        const valleyClose = Math.min(...closes.slice(lo, hi));
+        const valleyDrop = ((top1.price - valleyClose) / top1.price) * 100;
+        if (valleyDrop > 3) {
+          const isRecent = Math.max(top1.idx, top2.idx) >= n - 5;
+          return {
+            name: "🔴 Double Top",
+            desc: `2 đỉnh tại ${top1.price.toFixed(2)}k và ${top2.price.toFixed(2)}k (chênh ${diff.toFixed(1)}%), valley drop ${valleyDrop.toFixed(1)}% → bearish reversal pattern. ${isRecent ? "ĐANG hình thành — cảnh báo." : "Đã hoàn thành."}`,
+            sentiment: "bearish",
+          };
+        }
+      }
+    }
+
+    // Double Bottom: 2 lows near same level với rally between
+    if (swingLows.length >= 2) {
+      const sortedL = [...swingLows].sort((a, b) => a.price - b.price);
+      const bot1 = sortedL[0], bot2 = sortedL[1];
+      const diff = Math.abs(bot1.price - bot2.price) / bot1.price * 100;
+      if (diff < 3 && Math.abs(bot1.idx - bot2.idx) >= 10) {
+        const lo = Math.min(bot1.idx, bot2.idx);
+        const hi = Math.max(bot1.idx, bot2.idx);
+        const peakClose = Math.max(...closes.slice(lo, hi));
+        const peakRise = ((peakClose - bot1.price) / bot1.price) * 100;
+        if (peakRise > 3) {
+          const isRecent = Math.max(bot1.idx, bot2.idx) >= n - 5;
+          return {
+            name: "🟢 Double Bottom",
+            desc: `2 đáy tại ${bot1.price.toFixed(2)}k và ${bot2.price.toFixed(2)}k (chênh ${diff.toFixed(1)}%), peak rise ${peakRise.toFixed(1)}% → bullish reversal pattern. ${isRecent ? "ĐANG hình thành — entry opportunity." : "Đã hoàn thành."}`,
+            sentiment: "bullish",
+          };
+        }
+      }
+    }
+    return null;
+  }
+
   // VN market-specific flags
   function detectVnFlags(closes, n) {
     const cur = closes[n - 1];
@@ -1220,7 +1421,17 @@
     const adxStatus = isDaily ? detectAdxStatus(r.adx) : null;
     const stochStatus = isDaily ? detectStochStatus(r.stoch) : null;
     const vnFlags = isDaily ? detectVnFlags(closes, n) : [];
-    const verdict = buildTechnicalVerdict([candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus]);
+
+    // Multi-bar chart patterns
+    const pivots = findSwingPivots(highs, lows, 60, 3);
+    const hhHl = detectHhHlStructure(pivots);
+    const triangle = detectTrianglePattern(pivots, closes, n);
+    const doubleTopBot = detectDoubleTopBottom(pivots, closes, n);
+
+    const verdict = buildTechnicalVerdict([
+      candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus,
+      hhHl, triangle, doubleTopBot,
+    ]);
     const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
     return `
@@ -1251,6 +1462,33 @@
             <div class="ta-desc">${candle.desc}</div>
           </div>` : `<div class="ta-row"><div class="ta-desc">Không phát hiện mẫu hình rõ rệt</div></div>`}
       </div>
+
+      ${hhHl ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📊 Cấu trúc Swing (HH/HL)</h3>
+        <div class="ta-row sentiment-${hhHl.sentiment}">
+          <div class="ta-label">${hhHl.label}</div>
+          <div class="ta-desc">${hhHl.desc}</div>
+        </div>
+      </div>` : ""}
+
+      ${triangle ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📐 Mẫu hình Chart (Trendline)</h3>
+        <div class="ta-row sentiment-${triangle.sentiment}">
+          <div class="ta-label">${triangle.name}</div>
+          <div class="ta-desc">${triangle.desc}</div>
+        </div>
+      </div>` : ""}
+
+      ${doubleTopBot ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🔁 Double Top/Bottom</h3>
+        <div class="ta-row sentiment-${doubleTopBot.sentiment}">
+          <div class="ta-label">${doubleTopBot.name}</div>
+          <div class="ta-desc">${doubleTopBot.desc}</div>
+        </div>
+      </div>` : ""}
 
       ${volAnalysis ? `
       <div class="ta-section">
