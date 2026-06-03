@@ -1031,7 +1031,162 @@
     requestAnimationFrame(() => renderTechnicalChart("technical-chart-container", data));
   }
 
-  // Build analysis body (5 sections + verdict) — separate from full tab content
+  // MACD interpretation
+  function detectMacdStatus(macd) {
+    if (!macd || macd.macd == null) return null;
+    const m = macd.macd, sig = macd.signal, hist = macd.hist;
+    let label, desc, sentiment;
+    if (m > sig && hist > 0) {
+      if (m > 0) {
+        label = "🟢 MACD bullish — trên signal line + zero";
+        sentiment = "bullish";
+      } else {
+        label = "🟡 MACD bullish crossover dưới zero";
+        sentiment = "bullish-mild";
+      }
+      desc = `MACD ${m.toFixed(3)} > Signal ${sig.toFixed(3)}, histogram +${hist.toFixed(3)}`;
+    } else if (m < sig && hist < 0) {
+      if (m < 0) {
+        label = "🔴 MACD bearish — dưới signal + zero";
+        sentiment = "bearish";
+      } else {
+        label = "🟠 MACD bearish crossover trên zero";
+        sentiment = "bearish-mild";
+      }
+      desc = `MACD ${m.toFixed(3)} < Signal ${sig.toFixed(3)}, histogram ${hist.toFixed(3)}`;
+    } else {
+      label = "⚪ MACD trung tính";
+      desc = `MACD ${m.toFixed(3)}, Signal ${sig.toFixed(3)}`;
+      sentiment = "neutral";
+    }
+    if (macd.histTurning) desc += " · ⚠️ Histogram vừa đảo chiều (cảnh báo turning point)";
+    return { label, desc, sentiment };
+  }
+
+  // ADX interpretation — trend strength
+  function detectAdxStatus(adx) {
+    if (!adx || adx.adx == null) return null;
+    const a = adx.adx, plusDI = adx.plusDI, minusDI = adx.minusDI;
+    let label, desc, sentiment;
+    if (a >= 40) {
+      label = `🔥 Trend MẠNH (ADX ${a.toFixed(0)})`;
+      sentiment = plusDI > minusDI ? "bullish" : "bearish";
+      desc = plusDI > minusDI
+        ? `+DI ${plusDI.toFixed(1)} > -DI ${minusDI.toFixed(1)} → uptrend mạnh, follow momentum`
+        : `-DI ${minusDI.toFixed(1)} > +DI ${plusDI.toFixed(1)} → downtrend mạnh, tránh mua`;
+    } else if (a >= 25) {
+      label = `📈 Trending (ADX ${a.toFixed(0)})`;
+      sentiment = plusDI > minusDI ? "bullish-mild" : "bearish-mild";
+      desc = plusDI > minusDI
+        ? `+DI > -DI → uptrend`
+        : `-DI > +DI → downtrend`;
+    } else if (a >= 20) {
+      label = `🟡 Trend yếu (ADX ${a.toFixed(0)})`;
+      desc = "Có trend nhưng yếu — đợi confirm";
+      sentiment = "neutral";
+    } else {
+      label = `⚪ Sideways (ADX ${a.toFixed(0)})`;
+      desc = "ADX < 20 → không có trend rõ, market sideways, tránh trend-following";
+      sentiment = "neutral";
+    }
+    return { label, desc, sentiment };
+  }
+
+  // Stochastic %K/%D
+  function detectStochStatus(stoch) {
+    if (!stoch || stoch.k == null) return null;
+    const k = stoch.k, d = stoch.d;
+    let label, desc, sentiment;
+    if (k > 80) {
+      label = `🟠 Overbought %K=${k.toFixed(0)}`;
+      desc = "Stochastic > 80 → ngắn hạn overbought";
+      sentiment = "bearish-mild";
+    } else if (k < 20) {
+      label = `🟢 Oversold %K=${k.toFixed(0)}`;
+      desc = "Stochastic < 20 → ngắn hạn oversold, có thể hồi";
+      sentiment = "bullish-mild";
+    } else {
+      label = `⚪ Trung tính %K=${k.toFixed(0)} %D=${d.toFixed(0)}`;
+      desc = "Stochastic trong vùng 20-80";
+      sentiment = "neutral";
+    }
+    return { label, desc, sentiment };
+  }
+
+  // VN market-specific flags
+  function detectVnFlags(closes, n) {
+    const cur = closes[n - 1];
+    const flags = [];
+    // Penny stock warning (< 10k VND)
+    if (cur < 10) {
+      flags.push({
+        type: "warn",
+        text: `⚠️ Mã penny (${cur.toFixed(2)}k VND < 10k) — rủi ro pump-and-dump cao, tránh chase`,
+      });
+    } else if (cur < 15) {
+      flags.push({
+        type: "info",
+        text: `ℹ️ Mid-cap thấp (${cur.toFixed(2)}k VND) — thanh khoản trung bình, watch volume`,
+      });
+    }
+    // Distance to daily ceiling/floor (giả định HOSE ±7%)
+    const prevClose = n >= 2 ? closes[n - 2] : cur;
+    const ceiling = prevClose * 1.07;
+    const floor = prevClose * 0.93;
+    const distCeiling = ((ceiling - cur) / cur) * 100;
+    const distFloor = ((cur - floor) / cur) * 100;
+    if (distCeiling < 1) {
+      flags.push({
+        type: "info",
+        text: `🚀 Sát trần (cách +${distCeiling.toFixed(1)}%, prev close ${prevClose.toFixed(2)}k) — momentum cao, chú ý FOMO`,
+      });
+    }
+    if (distFloor < 1) {
+      flags.push({
+        type: "warn",
+        text: `🔻 Sát sàn (cách -${distFloor.toFixed(1)}%) — panic selling, chờ stabilize trước khi vào`,
+      });
+    }
+    return flags;
+  }
+
+  // Stock Profile interpretation
+  function buildStockProfileSection(profile) {
+    if (!profile) return "";
+    const items = [];
+    if (profile.volLabel) {
+      const volColor = profile.volLabel === "Calm" ? "#66bb6a"
+        : profile.volLabel === "Normal" ? "#FFC107"
+        : profile.volLabel === "Volatile" ? "#FFA726"
+        : "#ef5350";
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Volatility</span>: <b style="color:${volColor}">${profile.volLabel}</b> ${profile.atrPct != null ? `<small>(ATR ${profile.atrPct.toFixed(2)}%)</small>` : ""}</div>`);
+    }
+    if (profile.trendLabel) {
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Trend behavior</span>: <b>${profile.trendLabel}</b></div>`);
+    }
+    if (profile.betaLabel) {
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Beta vs VNI</span>: <b>${profile.betaLabel}</b> ${profile.beta != null ? `<small>(β=${profile.beta.toFixed(2)})</small>` : ""}</div>`);
+    }
+    if (profile.breakoutCount != null && profile.breakoutWinRate != null) {
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Breakout history</span>: ${profile.breakoutCount} lần · Win ${profile.breakoutWinRate.toFixed(0)}%</div>`);
+    }
+    if (profile.selloffCount != null && profile.recoveryWinRate != null) {
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Sell-off pattern</span>: ${profile.selloffCount} lần · Recovery rate ${profile.recoveryWinRate.toFixed(0)}% ${profile.avgRecoveryBars != null ? `<small>(avg ${profile.avgRecoveryBars.toFixed(0)} phiên)</small>` : ""}</div>`);
+    }
+    if (profile.volPercentile != null) {
+      items.push(`<div class="ta-profile-item"><span class="ta-profile-label">Vol today</span>: percentile ${profile.volPercentile.toFixed(0)}% ${profile.volMultiple != null ? `<small>(${profile.volMultiple.toFixed(1)}× avg)</small>` : ""}</div>`);
+    }
+    if (!items.length) return "";
+    return `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🧬 Đặc thù mã (Stock Profile)</h3>
+        <div class="ta-profile-grid">
+          ${items.join("")}
+        </div>
+      </div>`;
+  }
+
+  // Build analysis body (sections + verdict) — separate from full tab content
   function buildTechnicalAnalysisBody(r, data, timeframe) {
     const { opens, highs, lows, closes, volumes } = data;
     const n = closes.length;
@@ -1059,7 +1214,13 @@
       rsi = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
     }
     const rsiStatus = detectRsiStatus(rsi);
-    const verdict = buildTechnicalVerdict([candle, trend, volAnalysis, rsiStatus]);
+    // Indicators chỉ available cho Daily (r.macd / r.adx / r.stoch tính từ daily data)
+    const isDaily = timeframe === "D";
+    const macdStatus = isDaily ? detectMacdStatus(r.macd) : null;
+    const adxStatus = isDaily ? detectAdxStatus(r.adx) : null;
+    const stochStatus = isDaily ? detectStochStatus(r.stoch) : null;
+    const vnFlags = isDaily ? detectVnFlags(closes, n) : [];
+    const verdict = buildTechnicalVerdict([candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus]);
     const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
     return `
@@ -1128,6 +1289,41 @@
           <div class="ta-label">${rsiStatus.zone} · RSI = ${rsi.toFixed(1)}</div>
           <div class="ta-desc">${rsiStatus.desc}</div>
         </div>
+      </div>` : ""}
+
+      ${macdStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📊 MACD (12,26,9)</h3>
+        <div class="ta-row sentiment-${macdStatus.sentiment}">
+          <div class="ta-label">${macdStatus.label}</div>
+          <div class="ta-desc">${macdStatus.desc}</div>
+        </div>
+      </div>` : ""}
+
+      ${adxStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">💪 ADX (14) — Trend Strength</h3>
+        <div class="ta-row sentiment-${adxStatus.sentiment}">
+          <div class="ta-label">${adxStatus.label}</div>
+          <div class="ta-desc">${adxStatus.desc}</div>
+        </div>
+      </div>` : ""}
+
+      ${stochStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📈 Stochastic %K%D (14,3)</h3>
+        <div class="ta-row sentiment-${stochStatus.sentiment}">
+          <div class="ta-label">${stochStatus.label}</div>
+          <div class="ta-desc">${stochStatus.desc}</div>
+        </div>
+      </div>` : ""}
+
+      ${buildStockProfileSection(r.stockProfile)}
+
+      ${vnFlags.length > 0 ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🇻🇳 VN Market Flags</h3>
+        ${vnFlags.map((f) => `<div class="ta-row sentiment-${f.type === "warn" ? "bearish-mild" : "neutral"}"><div class="ta-desc">${f.text}</div></div>`).join("")}
       </div>` : ""}
 
       <div class="ta-disclaimer">

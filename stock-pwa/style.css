@@ -7747,3 +7747,29 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
     height: 260px;
   }
 }
+
+/* Stock Profile grid */
+.ta-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
+}
+.ta-profile-item {
+  font-size: 12px;
+  color: #d0d6e2;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  border-left: 2px solid rgba(255, 255, 255, 0.1);
+}
+.ta-profile-label {
+  color: #888;
+  font-size: 11px;
+}
+.ta-profile-item b {
+  color: #fff;
+}
+.ta-profile-item small {
+  color: #999;
+  font-size: 11px;
+}
