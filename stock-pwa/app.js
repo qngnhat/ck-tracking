@@ -600,14 +600,18 @@
     root.innerHTML = `
       <div class="analysis-tabs" role="tablist">
         <button class="analysis-tab" data-mode="overview" type="button" role="tab">📊 Tổng quan</button>
+        <button class="analysis-tab" data-mode="technical" type="button" role="tab">🔍 Kỹ thuật</button>
         <button class="analysis-tab" data-mode="tplus" type="button" role="tab">⚡ T+ Plan</button>
       </div>
       <div class="analysis-tab-content" data-mode="overview" id="analysis-tab-overview"></div>
+      <div class="analysis-tab-content" data-mode="technical" id="analysis-tab-technical" style="display:none"></div>
       <div class="analysis-tab-content" data-mode="tplus" id="analysis-tab-tplus" style="display:none"></div>
     `;
 
     // Overview = current default content (always rendered)
     $("analysis-tab-overview").innerHTML = renderOverviewTabContent(r);
+    // Technical tab — pattern + vol + S/R + trend analysis
+    $("analysis-tab-technical").innerHTML = renderTechnicalTabContent(r);
 
     // Pre-render T+ tab if context exists (came from Ranking click)
     if (analyzeContext === "tplus" && analyzeContextPick) {
@@ -718,6 +722,280 @@
           <div>• Hoặc đợi nến rút chân + volume xác nhận trở lại</div>
           <div>• Nếu vẫn vào → size nhỏ (5% NAV), SL chặt, không hold qua T+5</div>
         </div>
+      </div>
+    `;
+  }
+
+  // ── Technical Analysis tab — pattern + vol + S/R + trend interpretation ──
+
+  // Detect last bar candle pattern
+  function detectCandlePattern(opens, highs, lows, closes, n) {
+    if (n < 2) return null;
+    const o = opens[n - 1], h = highs[n - 1], l = lows[n - 1], c = closes[n - 1];
+    const prevO = opens[n - 2], prevC = closes[n - 2];
+    const body = Math.abs(c - o);
+    const range = h - l;
+    if (range <= 0) return null;
+    const upperShadow = h - Math.max(o, c);
+    const lowerShadow = Math.min(o, c) - l;
+    const bodyPct = body / range;
+
+    // Marubozu — strong body, very small shadows
+    if (bodyPct > 0.9) {
+      return c > o
+        ? { name: "Marubozu xanh", desc: "Nến tăng mạnh, không bóng → áp lực mua áp đảo", sentiment: "bullish" }
+        : { name: "Marubozu đỏ", desc: "Nến giảm mạnh, không bóng → áp lực bán áp đảo", sentiment: "bearish" };
+    }
+
+    // Doji
+    if (bodyPct < 0.1) {
+      return { name: "Doji", desc: "Open ≈ Close → bên mua/bán cân bằng, có thể đảo chiều", sentiment: "neutral" };
+    }
+
+    // Hammer — lower shadow ≥ 2× body, small upper shadow, small body
+    if (lowerShadow >= 2 * body && upperShadow < body && bodyPct < 0.4) {
+      return { name: "Hammer (Búa)", desc: "Bóng dưới dài → mua mạnh từ đáy phiên, thường đảo chiều tăng", sentiment: "bullish" };
+    }
+
+    // Shooting Star — upper shadow ≥ 2× body, small lower
+    if (upperShadow >= 2 * body && lowerShadow < body && bodyPct < 0.4) {
+      return { name: "Shooting Star (Sao Băng)", desc: "Bóng trên dài → bán mạnh từ đỉnh phiên, thường đảo chiều giảm", sentiment: "bearish" };
+    }
+
+    // Engulfing patterns
+    const prevBody = Math.abs(prevC - prevO);
+    if (prevBody > 0) {
+      if (c > o && prevC < prevO && c >= prevO && o <= prevC) {
+        return { name: "Bullish Engulfing", desc: "Nến xanh nuốt trọn nến đỏ trước → đảo chiều tăng", sentiment: "bullish" };
+      }
+      if (c < o && prevC > prevO && c <= prevO && o >= prevC) {
+        return { name: "Bearish Engulfing", desc: "Nến đỏ nuốt trọn nến xanh trước → đảo chiều giảm", sentiment: "bearish" };
+      }
+    }
+
+    // Default: strong/weak body
+    if (c > o) {
+      return { name: "Nến xanh thường", desc: "Áp lực mua tốt nhưng không nổi bật", sentiment: bodyPct > 0.6 ? "bullish-mild" : "neutral" };
+    }
+    return { name: "Nến đỏ thường", desc: "Áp lực bán, chưa rõ đảo chiều", sentiment: bodyPct > 0.6 ? "bearish-mild" : "neutral" };
+  }
+
+  // Trend status from MA stack
+  function detectTrendStatus(r) {
+    const cur = r.current;
+    const ma20 = r.ma20, ma50 = r.ma50, ma200 = r.ma200;
+    if (!ma20 || !ma50 || !ma200) return { label: "?", desc: "Không đủ data MA", sentiment: "neutral" };
+    if (cur > ma20 && ma20 > ma50 && ma50 > ma200) {
+      return { label: "📈 Xu hướng tăng MẠNH", desc: "Cấu trúc MA stack hoàn hảo: close > MA20 > MA50 > MA200", sentiment: "bullish" };
+    }
+    if (cur > ma20 && ma20 > ma50) {
+      return { label: "📈 Xu hướng tăng", desc: "close > MA20 > MA50, nhưng chưa vượt MA200 → uptrend ngắn-trung hạn", sentiment: "bullish-mild" };
+    }
+    if (cur < ma20 && ma20 < ma50 && ma50 < ma200) {
+      return { label: "📉 Xu hướng giảm MẠNH", desc: "close < MA20 < MA50 < MA200 → tránh mua", sentiment: "bearish" };
+    }
+    if (cur < ma20 && ma20 < ma50) {
+      return { label: "📉 Xu hướng giảm", desc: "close < MA20 < MA50 → yếu, đợi đáy hoặc tránh", sentiment: "bearish-mild" };
+    }
+    return { label: "➡️ Đi ngang / không rõ", desc: "MA cross nhau, sideways → đợi setup rõ ràng", sentiment: "neutral" };
+  }
+
+  // Volume analysis — current vs avg, accumulation/distribution
+  function detectVolumeAnalysis(volumes, closes, n) {
+    if (n < 20) return null;
+    const cur = volumes[n - 1];
+    const avgVol20 = volumes.slice(n - 21, n - 1).reduce((a, b) => a + b, 0) / 20;
+    const ratio = avgVol20 > 0 ? cur / avgVol20 : 0;
+
+    // Vol trend last 5 days
+    const recentVol = volumes.slice(n - 5, n);
+    const recentPrice = closes.slice(n - 5, n);
+    const volSlope = (recentVol[recentVol.length - 1] - recentVol[0]) / recentVol[0];
+    const priceSlope = (recentPrice[recentPrice.length - 1] - recentPrice[0]) / recentPrice[0];
+
+    let signal, sentiment;
+    if (ratio > 2.5) {
+      signal = `🔥 Vol BÙNG NỔ ${ratio.toFixed(1)}× TB20`;
+      sentiment = closes[n - 1] > closes[n - 2] ? "bullish" : "bearish";
+    } else if (ratio > 1.5) {
+      signal = `⬆️ Vol cao ${ratio.toFixed(1)}× TB20 — có lực`;
+      sentiment = "bullish-mild";
+    } else if (ratio < 0.5) {
+      signal = `💤 Vol cạn ${ratio.toFixed(1)}× TB20 — thiếu lực`;
+      sentiment = "neutral";
+    } else {
+      signal = `🟰 Vol bình thường ${ratio.toFixed(1)}× TB20`;
+      sentiment = "neutral";
+    }
+
+    // Accumulation/Distribution interpretation
+    let context;
+    if (priceSlope > 0.02 && volSlope > 0.1) {
+      context = "✅ Giá tăng + vol tăng = Accumulation (lực mua xác nhận)";
+    } else if (priceSlope > 0.02 && volSlope < -0.1) {
+      context = "⚠️ Giá tăng nhưng vol giảm = phân phối ngầm, cảnh báo đỉnh";
+    } else if (priceSlope < -0.02 && volSlope > 0.1) {
+      context = "⚠️ Giá giảm + vol tăng = Distribution (bán tháo)";
+    } else if (priceSlope < -0.02 && volSlope < -0.1) {
+      context = "💤 Giá giảm + vol giảm = hết áp lực bán, có thể đáy";
+    } else {
+      context = "Vol-price trung tính 5 phiên gần đây";
+    }
+
+    return { ratio, signal, context, sentiment };
+  }
+
+  // Support/Resistance — recent swing levels (last 30 bars)
+  function detectSupportResistance(highs, lows, closes, n) {
+    if (n < 30) return null;
+    const cur = closes[n - 1];
+    const window = 30;
+    const recentHighs = highs.slice(n - window, n);
+    const recentLows = lows.slice(n - window, n);
+    const maxH = Math.max(...recentHighs);
+    const minL = Math.min(...recentLows);
+
+    // Find swing highs (local max) within window — simple peak detect
+    const swings = [];
+    for (let i = 2; i < window - 2; i++) {
+      const ih = recentHighs[i];
+      if (ih > recentHighs[i - 1] && ih > recentHighs[i - 2] &&
+          ih > recentHighs[i + 1] && ih > recentHighs[i + 2]) {
+        swings.push({ type: "R", price: ih });
+      }
+      const il = recentLows[i];
+      if (il < recentLows[i - 1] && il < recentLows[i - 2] &&
+          il < recentLows[i + 1] && il < recentLows[i + 2]) {
+        swings.push({ type: "S", price: il });
+      }
+    }
+
+    // Nearest resistance above cur, nearest support below cur
+    const resists = swings.filter((s) => s.type === "R" && s.price > cur).map((s) => s.price);
+    const supports = swings.filter((s) => s.type === "S" && s.price < cur).map((s) => s.price);
+    const nearestR = resists.length ? Math.min(...resists) : maxH;
+    const nearestS = supports.length ? Math.max(...supports) : minL;
+
+    const distR = ((nearestR - cur) / cur) * 100;
+    const distS = ((cur - nearestS) / cur) * 100;
+    return { nearestR, nearestS, distR, distS, maxH, minL };
+  }
+
+  // RSI status + zone
+  function detectRsiStatus(rsi) {
+    if (rsi == null) return null;
+    if (rsi >= 80) return { zone: "🔴 Cực overbought", desc: "RSI ≥ 80 → áp lực bán cao, cẩn thận đảo chiều", sentiment: "bearish" };
+    if (rsi >= 70) return { zone: "🟠 Overbought", desc: "RSI 70-80 → quá mua, có thể điều chỉnh", sentiment: "bearish-mild" };
+    if (rsi >= 50) return { zone: "🟢 Trên 50 (bullish bias)", desc: "RSI > 50 → bên mua đang chiếm ưu thế", sentiment: "bullish-mild" };
+    if (rsi >= 30) return { zone: "🟡 Dưới 50 (bearish bias)", desc: "RSI 30-50 → bên bán chiếm ưu thế", sentiment: "bearish-mild" };
+    if (rsi >= 20) return { zone: "🔵 Oversold", desc: "RSI 20-30 → quá bán, có thể hồi", sentiment: "bullish-mild" };
+    return { zone: "💎 Cực oversold", desc: "RSI < 20 → cực kỳ oversold, capitulation, thường đảo chiều mạnh", sentiment: "bullish" };
+  }
+
+  // Final verdict — combine sentiments
+  function buildTechnicalVerdict(signals) {
+    let score = 0;
+    let count = 0;
+    const weight = { bullish: 2, "bullish-mild": 1, neutral: 0, "bearish-mild": -1, bearish: -2 };
+    for (const s of signals) {
+      if (s && s.sentiment != null) {
+        score += weight[s.sentiment] ?? 0;
+        count++;
+      }
+    }
+    const avg = count > 0 ? score / count : 0;
+    if (avg >= 1.0) return { label: "🟢 BULLISH MẠNH", desc: "Đa số tín hiệu tăng — context entry tốt", color: "strong-bull" };
+    if (avg >= 0.4) return { label: "🟡 BULLISH NHẸ", desc: "Có tín hiệu tăng nhưng chưa rõ rệt — cẩn thận", color: "mild-bull" };
+    if (avg <= -1.0) return { label: "🔴 BEARISH MẠNH", desc: "Đa số tín hiệu giảm — tránh mua", color: "strong-bear" };
+    if (avg <= -0.4) return { label: "🟠 BEARISH NHẸ", desc: "Có cảnh báo, hold/wait", color: "mild-bear" };
+    return { label: "⚪ NEUTRAL", desc: "Tín hiệu hỗn hợp — đợi setup rõ", color: "neutral" };
+  }
+
+  function renderTechnicalTabContent(r) {
+    // Use global currentData (raw OHLCV fetched by analyzeSymbol)
+    if (!currentData || !currentData.closes?.length) {
+      return `<div class="empty-state"><p>Không đủ data để phân tích kỹ thuật.</p></div>`;
+    }
+    const { opens, highs, lows, closes, volumes } = currentData;
+    const n = closes.length;
+
+    const candle = detectCandlePattern(opens, highs, lows, closes, n);
+    const trend = detectTrendStatus(r);
+    const volAnalysis = detectVolumeAnalysis(volumes, closes, n);
+    const sr = detectSupportResistance(highs, lows, closes, n);
+    const rsiStatus = detectRsiStatus(r.rsi);
+    const verdict = buildTechnicalVerdict([candle, trend, volAnalysis, rsiStatus]);
+
+    return `
+      <div class="ta-verdict ta-${verdict.color}">
+        <div class="ta-verdict-label">${verdict.label}</div>
+        <div class="ta-verdict-desc">${verdict.desc}</div>
+      </div>
+
+      <div class="ta-section">
+        <h3 class="ta-section-title">📈 Xu hướng (Trend)</h3>
+        <div class="ta-row">
+          <div class="ta-label">${trend.label}</div>
+          <div class="ta-desc">${trend.desc}</div>
+        </div>
+        <div class="ta-mini-grid">
+          <div><span class="ta-mini-label">Close:</span> <b>${r.current.toFixed(2)}k</b></div>
+          ${r.ma20 ? `<div><span class="ta-mini-label">MA20:</span> ${r.ma20.toFixed(2)}k</div>` : ""}
+          ${r.ma50 ? `<div><span class="ta-mini-label">MA50:</span> ${r.ma50.toFixed(2)}k</div>` : ""}
+          ${r.ma200 ? `<div><span class="ta-mini-label">MA200:</span> ${r.ma200.toFixed(2)}k</div>` : ""}
+        </div>
+      </div>
+
+      <div class="ta-section">
+        <h3 class="ta-section-title">🕯️ Mẫu hình nến (Candle)</h3>
+        ${candle ? `
+          <div class="ta-row sentiment-${candle.sentiment}">
+            <div class="ta-label">${candle.name}</div>
+            <div class="ta-desc">${candle.desc}</div>
+          </div>` : `<div class="ta-row"><div class="ta-desc">Không phát hiện mẫu hình rõ rệt</div></div>`}
+      </div>
+
+      ${volAnalysis ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📊 Phân tích Volume</h3>
+        <div class="ta-row sentiment-${volAnalysis.sentiment}">
+          <div class="ta-label">${volAnalysis.signal}</div>
+          <div class="ta-desc">${volAnalysis.context}</div>
+        </div>
+      </div>` : ""}
+
+      ${sr ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🎯 Hỗ trợ / Kháng cự</h3>
+        <div class="ta-sr-grid">
+          <div class="ta-sr-cell">
+            <div class="ta-sr-label">⛔ Kháng cự gần nhất</div>
+            <div class="ta-sr-value">${sr.nearestR.toFixed(2)}k</div>
+            <div class="ta-sr-dist">cách +${sr.distR.toFixed(1)}%</div>
+          </div>
+          <div class="ta-sr-cell">
+            <div class="ta-sr-label">🛡️ Hỗ trợ gần nhất</div>
+            <div class="ta-sr-value">${sr.nearestS.toFixed(2)}k</div>
+            <div class="ta-sr-dist">cách −${sr.distS.toFixed(1)}%</div>
+          </div>
+        </div>
+        <div class="ta-mini-grid">
+          <div><span class="ta-mini-label">30d high:</span> ${sr.maxH.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">30d low:</span> ${sr.minL.toFixed(2)}k</div>
+        </div>
+      </div>` : ""}
+
+      ${rsiStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📐 RSI (14)</h3>
+        <div class="ta-row sentiment-${rsiStatus.sentiment}">
+          <div class="ta-label">${rsiStatus.zone} · RSI = ${r.rsi.toFixed(1)}</div>
+          <div class="ta-desc">${rsiStatus.desc}</div>
+        </div>
+      </div>` : ""}
+
+      <div class="ta-disclaimer">
+        <small>⚠️ <b>Disclaimer</b>: phân tích kỹ thuật tự động dựa trên price action + indicator. Chỉ là tín hiệu kỹ thuật, KHÔNG phải lời khuyên đầu tư. Luôn cân nhắc fundamentals + risk management + position size trước khi giao dịch.</small>
       </div>
     `;
   }
