@@ -1113,6 +1113,144 @@
     return { label, desc, sentiment };
   }
 
+  // ── Level Analysis: S/R touch + BB + 52w + MA + Confluence ──────
+
+  // Generate round numbers near current price (VN retail psychology levels)
+  function generateRoundLevels(cur) {
+    const tick = cur < 50 ? 5 : cur < 200 ? 10 : 20;
+    const base = Math.floor(cur / tick) * tick;
+    return [base, base + tick, base + 2 * tick].filter((p) => p > 0);
+  }
+
+  // Detect which levels are currently being "touched" (within 1.5% of price)
+  function detectLevelTouch(r, closes, highs, lows, n) {
+    const cur = closes[n - 1];
+    const dayHigh = highs[n - 1];
+    const dayLow = lows[n - 1];
+
+    const levels = [];
+
+    // Support / Resistance từ analysis (real swing)
+    if (r.support && r.support > 0) {
+      levels.push({ type: "S", source: "Swing Support", price: r.support });
+    }
+    if (r.resistance && r.resistance > 0) {
+      levels.push({ type: "R", source: "Swing Resistance", price: r.resistance });
+    }
+
+    // MA20/50/200
+    if (r.ma20) levels.push({ type: cur > r.ma20 ? "S" : "R", source: "MA20", price: r.ma20 });
+    if (r.ma50) levels.push({ type: cur > r.ma50 ? "S" : "R", source: "MA50", price: r.ma50 });
+    if (r.ma200) levels.push({ type: cur > r.ma200 ? "S" : "R", source: "MA200", price: r.ma200 });
+
+    // 52-week High/Low
+    if (r.w52High) levels.push({ type: "R", source: "52w High", price: r.w52High });
+    if (r.w52Low) levels.push({ type: "S", source: "52w Low", price: r.w52Low });
+
+    // Bollinger Bands
+    if (r.bb && r.bb.upper) levels.push({ type: "R", source: "BB Upper", price: r.bb.upper });
+    if (r.bb && r.bb.lower) levels.push({ type: "S", source: "BB Lower", price: r.bb.lower });
+    if (r.bb && r.bb.middle) levels.push({ type: cur > r.bb.middle ? "S" : "R", source: "BB Middle", price: r.bb.middle });
+
+    // Round numbers (VN psychology)
+    const roundLevels = generateRoundLevels(cur);
+    for (const rl of roundLevels) {
+      const distPct = Math.abs(rl - cur) / cur * 100;
+      if (distPct < 5) {
+        levels.push({ type: rl > cur ? "R" : "S", source: "Round level", price: rl });
+      }
+    }
+
+    // Compute distance + touch flag for each level
+    const enriched = levels.map((lv) => {
+      const distPct = ((lv.price - cur) / cur) * 100;
+      // Touched: today's range overlaps level OR distance < 1.5%
+      const touched = (lv.price >= dayLow && lv.price <= dayHigh) || Math.abs(distPct) < 1.5;
+      return { ...lv, distPct, touched };
+    });
+
+    // Sort: touched first, then by absolute distance
+    enriched.sort((a, b) => {
+      if (a.touched !== b.touched) return a.touched ? -1 : 1;
+      return Math.abs(a.distPct) - Math.abs(b.distPct);
+    });
+
+    return enriched;
+  }
+
+  // Confluence detection: cluster of 2+ levels within 1.5% of each other
+  function detectConfluence(levels) {
+    const clusters = [];
+    const used = new Set();
+    for (let i = 0; i < levels.length; i++) {
+      if (used.has(i)) continue;
+      const cluster = [levels[i]];
+      const avgPrice = levels[i].price;
+      for (let j = i + 1; j < levels.length; j++) {
+        if (used.has(j)) continue;
+        const distPct = Math.abs(levels[j].price - avgPrice) / avgPrice * 100;
+        if (distPct < 1.5) {
+          cluster.push(levels[j]);
+          used.add(j);
+        }
+      }
+      if (cluster.length >= 2) {
+        const meanPrice = cluster.reduce((a, b) => a + b.price, 0) / cluster.length;
+        clusters.push({
+          price: meanPrice,
+          sources: cluster.map((c) => c.source),
+          count: cluster.length,
+          type: cluster.filter((c) => c.type === "R").length >= cluster.length / 2 ? "R" : "S",
+        });
+        used.add(i);
+      }
+    }
+    return clusters;
+  }
+
+  // Bollinger Bands detailed status
+  function detectBollingerStatus(r, closes, n) {
+    if (!r.bb || r.bb.upper == null) return null;
+    const cur = closes[n - 1];
+    const upper = r.bb.upper;
+    const lower = r.bb.lower;
+    const middle = r.bb.middle;
+    const width = upper - lower;
+    const widthPct = (width / middle) * 100;
+
+    // Band width historical comparison (squeeze detection)
+    // Compute width 20 phiên trước → so sánh
+    let isSqueeze = false;
+    if (n >= 40) {
+      // Simple proxy: current width < 50% of recent avg
+      // (better would be compare to historical width series)
+      isSqueeze = widthPct < 8; // empirical threshold for VN stocks
+    }
+
+    let label, desc, sentiment;
+    if (cur >= upper) {
+      label = "🟠 Chạm/vượt BB upper";
+      desc = `Giá ${cur.toFixed(2)}k ≥ BB upper ${upper.toFixed(2)}k → overbought ngắn hạn, có thể pullback về middle ${middle.toFixed(2)}k`;
+      sentiment = "bearish-mild";
+    } else if (cur <= lower) {
+      label = "🟢 Chạm/dưới BB lower";
+      desc = `Giá ${cur.toFixed(2)}k ≤ BB lower ${lower.toFixed(2)}k → oversold ngắn hạn, có thể rebound về middle`;
+      sentiment = "bullish-mild";
+    } else if (cur > middle) {
+      label = "🟡 Trên BB middle";
+      desc = `Giá trong nửa trên (${cur.toFixed(2)}k vs middle ${middle.toFixed(2)}k)`;
+      sentiment = "bullish-mild";
+    } else {
+      label = "🟡 Dưới BB middle";
+      desc = `Giá trong nửa dưới (${cur.toFixed(2)}k vs middle ${middle.toFixed(2)}k)`;
+      sentiment = "bearish-mild";
+    }
+    if (isSqueeze) {
+      desc += ` · ⚡ SQUEEZE width ${widthPct.toFixed(1)}% (band thắt) → breakout sắp đến, theo dõi hướng`;
+    }
+    return { label, desc, sentiment, widthPct, isSqueeze };
+  }
+
   // ── Chart Patterns (multi-bar) ────────────────────────────
   // Find swing pivots (local max/min với N-bar lookback both sides)
   function findSwingPivots(highs, lows, lookback = 60, sensitivity = 3) {
@@ -1428,9 +1566,15 @@
     const triangle = detectTrianglePattern(pivots, closes, n);
     const doubleTopBot = detectDoubleTopBottom(pivots, closes, n);
 
+    // Level analysis (chỉ daily — r.support/resistance/bb từ daily analysis)
+    const levels = isDaily ? detectLevelTouch(r, closes, highs, lows, n) : [];
+    const confluences = isDaily ? detectConfluence(levels) : [];
+    const touchedLevels = levels.filter((lv) => lv.touched);
+    const bbStatus = isDaily ? detectBollingerStatus(r, closes, n) : null;
+
     const verdict = buildTechnicalVerdict([
       candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus,
-      hhHl, triangle, doubleTopBot,
+      hhHl, triangle, doubleTopBot, bbStatus,
     ]);
     const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
@@ -1501,7 +1645,7 @@
 
       ${sr ? `
       <div class="ta-section">
-        <h3 class="ta-section-title">🎯 Hỗ trợ / Kháng cự</h3>
+        <h3 class="ta-section-title">🎯 Hỗ trợ / Kháng cự ${tfLabel}</h3>
         <div class="ta-sr-grid">
           <div class="ta-sr-cell">
             <div class="ta-sr-label">⛔ Kháng cự gần nhất</div>
@@ -1517,6 +1661,58 @@
         <div class="ta-mini-grid">
           <div><span class="ta-mini-label">30 ${tfLabel} high:</span> ${sr.maxH.toFixed(2)}k</div>
           <div><span class="ta-mini-label">30 ${tfLabel} low:</span> ${sr.minL.toFixed(2)}k</div>
+        </div>
+      </div>` : ""}
+
+      ${touchedLevels.length > 0 ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🎯 ĐANG chạm levels (within 1.5%)</h3>
+        ${touchedLevels.slice(0, 5).map((lv) => `
+          <div class="ta-row sentiment-${lv.type === "S" ? "bullish-mild" : "bearish-mild"}">
+            <div class="ta-label">${lv.type === "S" ? "🛡️" : "⛔"} ${lv.source}: ${lv.price.toFixed(2)}k</div>
+            <div class="ta-desc">cách ${lv.distPct >= 0 ? "+" : ""}${lv.distPct.toFixed(2)}% — ${lv.type === "S" ? "test hỗ trợ" : "test kháng cự"}</div>
+          </div>
+        `).join("")}
+      </div>` : ""}
+
+      ${confluences.length > 0 ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">🔥 Confluence (Multi-level cluster)</h3>
+        ${confluences.map((c) => `
+          <div class="ta-row sentiment-${c.type === "S" ? "bullish" : "bearish"}">
+            <div class="ta-label">${c.type === "S" ? "💎 Vùng hỗ trợ mạnh" : "💎 Vùng kháng cự mạnh"} ~${c.price.toFixed(2)}k (${c.count} levels confluence)</div>
+            <div class="ta-desc">Sources: ${c.sources.join(" + ")} — vùng giá quan trọng, nhiều technical levels chồng nhau</div>
+          </div>
+        `).join("")}
+      </div>` : ""}
+
+      ${bbStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📏 Bollinger Bands (20, 2σ)</h3>
+        <div class="ta-row sentiment-${bbStatus.sentiment}">
+          <div class="ta-label">${bbStatus.label}</div>
+          <div class="ta-desc">${bbStatus.desc}</div>
+        </div>
+        ${r.bb ? `
+        <div class="ta-mini-grid">
+          <div><span class="ta-mini-label">Upper:</span> ${r.bb.upper.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">Middle:</span> ${r.bb.middle.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">Lower:</span> ${r.bb.lower.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">Width:</span> ${bbStatus.widthPct.toFixed(1)}%</div>
+        </div>` : ""}
+      </div>` : ""}
+
+      ${isDaily && (r.distMA20 != null || r.distMA50 != null || r.distMA200 != null) ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">📏 Khoảng cách từ MA</h3>
+        <div class="ta-mini-grid">
+          ${r.distMA20 != null ? `<div><span class="ta-mini-label">vs MA20:</span> <b>${r.distMA20 >= 0 ? "+" : ""}${r.distMA20.toFixed(1)}%</b> ${Math.abs(r.distMA20) > 10 ? "<small>⚠️ xa</small>" : ""}</div>` : ""}
+          ${r.distMA50 != null ? `<div><span class="ta-mini-label">vs MA50:</span> <b>${r.distMA50 >= 0 ? "+" : ""}${r.distMA50.toFixed(1)}%</b> ${Math.abs(r.distMA50) > 15 ? "<small>⚠️ xa</small>" : ""}</div>` : ""}
+          ${r.distMA200 != null ? `<div><span class="ta-mini-label">vs MA200:</span> <b>${r.distMA200 >= 0 ? "+" : ""}${r.distMA200.toFixed(1)}%</b> ${Math.abs(r.distMA200) > 25 ? "<small>⚠️ extension</small>" : ""}</div>` : ""}
+          ${r.posIn52w != null ? `<div><span class="ta-mini-label">52w pos:</span> <b>${r.posIn52w.toFixed(0)}%</b></div>` : ""}
+        </div>
+        <div class="ta-desc" style="margin-top: 6px; font-size: 11px; color: #888;">
+          ⚠️ Distance > 10% từ MA20 / > 15% MA50 / > 25% MA200 → extension cao, có thể mean-revert
         </div>
       </div>` : ""}
 
