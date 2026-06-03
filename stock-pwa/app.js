@@ -1113,6 +1113,148 @@
     return { label, desc, sentiment };
   }
 
+  // ── Ichimoku Kinko Hyo (mây Ichimoku) ──────────────────────
+  // 5 lines: Tenkan-sen (9), Kijun-sen (26), Senkou A/B (cloud shifted +26),
+  // Chikou Span (close shifted -26). Standard parameters.
+  function computeIchimoku(highs, lows, closes) {
+    const n = closes.length;
+    if (n < 52) return null;
+
+    const periodH = (period, idx) => {
+      const start = Math.max(0, idx - period + 1);
+      return Math.max(...highs.slice(start, idx + 1));
+    };
+    const periodL = (period, idx) => {
+      const start = Math.max(0, idx - period + 1);
+      return Math.min(...lows.slice(start, idx + 1));
+    };
+
+    // Compute series
+    const tenkan = [], kijun = [], senkouA = [], senkouB = [];
+    for (let i = 0; i < n; i++) {
+      if (i < 8) {
+        tenkan.push(null);
+      } else {
+        tenkan.push((periodH(9, i) + periodL(9, i)) / 2);
+      }
+      if (i < 25) {
+        kijun.push(null);
+      } else {
+        kijun.push((periodH(26, i) + periodL(26, i)) / 2);
+      }
+      // Senkou A = (Tenkan + Kijun) / 2 at bar i, projected forward 26 bars
+      if (tenkan[i] != null && kijun[i] != null) {
+        senkouA.push((tenkan[i] + kijun[i]) / 2);
+      } else senkouA.push(null);
+      // Senkou B = (52-high + 52-low) / 2
+      if (i < 51) {
+        senkouB.push(null);
+      } else {
+        senkouB.push((periodH(52, i) + periodL(52, i)) / 2);
+      }
+    }
+
+    // Current cloud values come from bar (n-1 - 26) — the value that was projected forward
+    const cloudIdx = n - 1 - 26;
+    const curSenkouA = cloudIdx >= 0 && senkouA[cloudIdx] != null ? senkouA[cloudIdx] : null;
+    const curSenkouB = cloudIdx >= 0 && senkouB[cloudIdx] != null ? senkouB[cloudIdx] : null;
+
+    return {
+      tenkan: tenkan[n - 1],
+      kijun: kijun[n - 1],
+      tenkanPrev: tenkan[n - 2],
+      kijunPrev: kijun[n - 2],
+      senkouA: curSenkouA,
+      senkouB: curSenkouB,
+      chikou: closes[n - 1 - 26] != null ? closes[n - 1] : null,
+      // Cloud projection (next 26 bars)
+      futureSenkouA: senkouA[n - 1],
+      futureSenkouB: senkouB[n - 1],
+    };
+  }
+
+  function detectIchimokuStatus(ichimoku, cur, prevClose) {
+    if (!ichimoku || ichimoku.tenkan == null || ichimoku.kijun == null) return null;
+    const { tenkan, kijun, tenkanPrev, kijunPrev, senkouA, senkouB, futureSenkouA, futureSenkouB } = ichimoku;
+
+    // Cloud position
+    let cloudTop = null, cloudBot = null;
+    if (senkouA != null && senkouB != null) {
+      cloudTop = Math.max(senkouA, senkouB);
+      cloudBot = Math.min(senkouA, senkouB);
+    }
+
+    // 1. Price vs Cloud
+    let cloudSentiment = "neutral";
+    let cloudLabel = "";
+    if (cloudTop != null && cloudBot != null) {
+      if (cur > cloudTop) {
+        cloudSentiment = "bullish";
+        cloudLabel = `🟢 Giá TRÊN Kumo (cloud ${cloudBot.toFixed(2)}-${cloudTop.toFixed(2)}k) → uptrend`;
+      } else if (cur < cloudBot) {
+        cloudSentiment = "bearish";
+        cloudLabel = `🔴 Giá DƯỚI Kumo (cloud ${cloudBot.toFixed(2)}-${cloudTop.toFixed(2)}k) → downtrend`;
+      } else {
+        cloudSentiment = "neutral";
+        cloudLabel = `🟡 Giá TRONG Kumo (cloud ${cloudBot.toFixed(2)}-${cloudTop.toFixed(2)}k) → consolidation, đợi break`;
+      }
+    }
+
+    // 2. Tenkan/Kijun cross
+    let tkCross = "";
+    let tkSentiment = "neutral";
+    if (tenkanPrev != null && kijunPrev != null) {
+      if (tenkanPrev <= kijunPrev && tenkan > kijun) {
+        tkCross = "🟢 TK Cross UP (Tenkan vừa cắt lên Kijun) → bullish momentum signal";
+        tkSentiment = "bullish";
+      } else if (tenkanPrev >= kijunPrev && tenkan < kijun) {
+        tkCross = "🔴 TK Cross DOWN (Tenkan vừa cắt xuống Kijun) → bearish momentum signal";
+        tkSentiment = "bearish";
+      } else if (tenkan > kijun) {
+        tkCross = `🟡 Tenkan ${tenkan.toFixed(2)}k > Kijun ${kijun.toFixed(2)}k → bullish bias`;
+        tkSentiment = "bullish-mild";
+      } else {
+        tkCross = `🟠 Tenkan ${tenkan.toFixed(2)}k < Kijun ${kijun.toFixed(2)}k → bearish bias`;
+        tkSentiment = "bearish-mild";
+      }
+    }
+
+    // 3. Future Kumo color (bullish if A > B, bearish if A < B)
+    let futureCloud = "";
+    if (futureSenkouA != null && futureSenkouB != null) {
+      if (futureSenkouA > futureSenkouB) {
+        futureCloud = `🟢 Mây tương lai XANH (Senkou A ${futureSenkouA.toFixed(2)}k > B ${futureSenkouB.toFixed(2)}k) → trend tăng support`;
+      } else {
+        futureCloud = `🔴 Mây tương lai ĐỎ (Senkou A ${futureSenkouA.toFixed(2)}k < B ${futureSenkouB.toFixed(2)}k) → trend giảm pressure`;
+      }
+    }
+
+    // Combine into final verdict
+    const sentiments = [cloudSentiment, tkSentiment];
+    let finalSentiment = "neutral";
+    if (cloudSentiment === "bullish" && tkSentiment.startsWith("bullish")) finalSentiment = "bullish";
+    else if (cloudSentiment === "bearish" && tkSentiment.startsWith("bearish")) finalSentiment = "bearish";
+    else if (cloudSentiment.startsWith("bull") || tkSentiment.startsWith("bull")) finalSentiment = "bullish-mild";
+    else if (cloudSentiment.startsWith("bear") || tkSentiment.startsWith("bear")) finalSentiment = "bearish-mild";
+
+    let mainLabel;
+    if (finalSentiment === "bullish") mainLabel = "🟢 Ichimoku BULLISH (price + TK align)";
+    else if (finalSentiment === "bearish") mainLabel = "🔴 Ichimoku BEARISH (price + TK align)";
+    else if (finalSentiment === "bullish-mild") mainLabel = "🟡 Ichimoku bullish nhẹ";
+    else if (finalSentiment === "bearish-mild") mainLabel = "🟠 Ichimoku bearish nhẹ";
+    else mainLabel = "⚪ Ichimoku mixed signals";
+
+    return {
+      label: mainLabel,
+      cloudLabel,
+      tkCross,
+      futureCloud,
+      sentiment: finalSentiment,
+      tenkan, kijun,
+      cloudTop, cloudBot,
+    };
+  }
+
   // ── Level Analysis: S/R touch + BB + 52w + MA + Confluence ──────
 
   // Generate round numbers near current price (VN retail psychology levels)
@@ -1572,9 +1714,15 @@
     const touchedLevels = levels.filter((lv) => lv.touched);
     const bbStatus = isDaily ? detectBollingerStatus(r, closes, n) : null;
 
+    // Ichimoku (work cho cả daily + weekly)
+    const ichimoku = computeIchimoku(highs, lows, closes);
+    const curPrice = closes[n - 1];
+    const prevPrice = n >= 2 ? closes[n - 2] : curPrice;
+    const ichimokuStatus = detectIchimokuStatus(ichimoku, curPrice, prevPrice);
+
     const verdict = buildTechnicalVerdict([
       candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus,
-      hhHl, triangle, doubleTopBot, bbStatus,
+      hhHl, triangle, doubleTopBot, bbStatus, ichimokuStatus,
     ]);
     const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
@@ -1700,6 +1848,32 @@
           <div><span class="ta-mini-label">Lower:</span> ${r.bb.lower.toFixed(2)}k</div>
           <div><span class="ta-mini-label">Width:</span> ${bbStatus.widthPct.toFixed(1)}%</div>
         </div>` : ""}
+      </div>` : ""}
+
+      ${ichimokuStatus ? `
+      <div class="ta-section">
+        <h3 class="ta-section-title">☁️ Ichimoku Kinko Hyo (Mây Ichimoku)</h3>
+        <div class="ta-row sentiment-${ichimokuStatus.sentiment}">
+          <div class="ta-label">${ichimokuStatus.label}</div>
+          <div class="ta-desc">${ichimokuStatus.cloudLabel}</div>
+        </div>
+        ${ichimokuStatus.tkCross ? `
+        <div class="ta-row sentiment-${ichimokuStatus.sentiment}" style="margin-top: 6px;">
+          <div class="ta-desc">${ichimokuStatus.tkCross}</div>
+        </div>` : ""}
+        ${ichimokuStatus.futureCloud ? `
+        <div class="ta-row" style="margin-top: 6px;">
+          <div class="ta-desc">${ichimokuStatus.futureCloud}</div>
+        </div>` : ""}
+        <div class="ta-mini-grid">
+          <div><span class="ta-mini-label">Tenkan (9):</span> ${ichimokuStatus.tenkan.toFixed(2)}k</div>
+          <div><span class="ta-mini-label">Kijun (26):</span> ${ichimokuStatus.kijun.toFixed(2)}k</div>
+          ${ichimokuStatus.cloudTop != null ? `<div><span class="ta-mini-label">Kumo top:</span> ${ichimokuStatus.cloudTop.toFixed(2)}k</div>` : ""}
+          ${ichimokuStatus.cloudBot != null ? `<div><span class="ta-mini-label">Kumo bot:</span> ${ichimokuStatus.cloudBot.toFixed(2)}k</div>` : ""}
+        </div>
+        <div class="ta-desc" style="margin-top: 6px; font-size: 11px; color: #888;">
+          📚 Ichimoku check 3 yếu tố: (1) giá vs mây, (2) Tenkan/Kijun cross, (3) màu mây tương lai
+        </div>
       </div>` : ""}
 
       ${isDaily && (r.distMA20 != null || r.distMA50 != null || r.distMA200 != null) ? `
