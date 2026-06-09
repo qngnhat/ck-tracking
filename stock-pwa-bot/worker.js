@@ -73,6 +73,29 @@ export default {
     if (url.pathname === "/health") {
       return new Response("OK", { status: 200 });
     }
+    // Watch app (Huawei Watch Stock): pull portfolio + watchlist symbols.
+    // Secret-protected; uses service_role to read the user's data (bypasses RLS).
+    if (url.pathname === "/watch/symbols" && request.method === "GET") {
+      const key = url.searchParams.get("key");
+      if (key !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const sb = sbClient(env);
+      const wlRows = (await sbQuery(sb, "watchlist", { select: "symbol" })) || [];
+      const txRows = (await sbQuery(sb, "transactions", { select: "symbol,side,quantity" })) || [];
+      // Holdings = net qty per symbol (buy +, sell -), keep qty > 0.
+      const net = {};
+      for (const t of txRows) {
+        const q = Number(t.quantity) || 0;
+        net[t.symbol] = (net[t.symbol] || 0) + (t.side === "buy" ? q : -q);
+      }
+      const portfolio = Object.keys(net).filter((s) => net[s] > 1e-9).sort();
+      const watchlist = [...new Set(wlRows.map((r) => r.symbol))].sort();
+      return new Response(JSON.stringify({ portfolio, watchlist }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (url.pathname === "/cron-test" && request.method === "POST") {
       // Manual trigger cron logic (testing only — protect by secret)
       const secret = url.searchParams.get("secret");
