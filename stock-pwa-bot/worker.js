@@ -3737,7 +3737,7 @@ async function handleAiExplain(request, env, ctx) {
 
   // Cache lookup
   const cache = caches.default;
-  const cacheKey = new Request(`https://ai-cache.local/explain/${sym}/${date}`, { method: "GET" });
+  const cacheKey = new Request(`https://ai-cache.local/v2/explain/${sym}/${date}`, { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) {
     const j = await hit.json();
@@ -3770,7 +3770,7 @@ async function handleAiResearch(request, env, ctx) {
   const date = vnDateKey();
 
   const cache = caches.default;
-  const cacheKey = new Request(`https://ai-cache.local/research/${sym}/${date}`, { method: "GET" });
+  const cacheKey = new Request(`https://ai-cache.local/v2/research/${sym}/${date}`, { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) {
     const j = await hit.json();
@@ -3821,35 +3821,51 @@ ${JSON.stringify(ta, null, 2)}
 }
 
 function buildResearchPrompt(symbol, ta) {
+  const today = vnDateKey();
+  const d30Ago = new Date(Date.now() + 7 * 3600 * 1000 - 30 * 86400 * 1000)
+    .toISOString().slice(0, 10);
   return `Mày là chuyên gia phân tích chứng khoán Việt Nam. Phân tích TOÀN DIỆN mã ${symbol} cho swing trader.
+
+=== NGÀY HÔM NAY (Việt Nam) ===
+${today}
 
 === TA (đã tính sẵn, chính xác) ===
 ${JSON.stringify(ta, null, 2)}
 
 === QUY TRÌNH ===
 1. Tóm tắt TA (dùng data trên, KHÔNG bịa).
-2. Tìm Google Search:
+2. Google Search các nội dung sau:
    a) Sức khỏe tài chính ${symbol}: P/E, P/B, ROE, EPS, doanh thu, lợi nhuận Q gần nhất, tăng trưởng YoY.
-   b) Tin tức ${symbol} trong 30 ngày gần đây.
-   c) **PHỐT/CỜ ĐỎ**: UBCKNN xử phạt, vi phạm CBTT, lãnh đạo bị bắt/từ chức, gian lận BCTC, kiểm toán ngoại trừ, bị cảnh báo/kiểm soát/đình chỉ giao dịch.
-3. Nếu KHÔNG tìm thấy phốt qua Google → ghi rõ "Không phát hiện cảnh báo nào trong 30 ngày qua".
-4. KHÔNG bịa fundamental/news/phốt. Mọi claim PHẢI có nguồn URL từ kết quả search. Không có nguồn → không nói.
+   b) **Tin tức ${symbol} TỪ NGÀY ${d30Ago} ĐẾN NAY** (cửa sổ 30 ngày gần nhất).
+   c) **Sự kiện sắp tới**: ĐHCĐ, chốt quyền cổ tức, công bố BCTC quý tới, phát hành thêm, niêm yết bổ sung, M&A đang chờ phê duyệt.
+   d) **PHỐT/CỜ ĐỎ**: UBCKNN xử phạt, vi phạm CBTT, lãnh đạo bị bắt/từ chức, gian lận BCTC, kiểm toán ngoại trừ, bị cảnh báo/kiểm soát/đình chỉ giao dịch — **TRONG 90 NGÀY GẦN NHẤT THÔI**.
+
+=== QUY TẮC CỰC QUAN TRỌNG ===
+1. **BỎ QUA mọi tin >30 ngày** trong mục News. Tin cũ tuyệt đối KHÔNG report ở phần News.
+2. **CHỈ report phốt nếu có nguồn**, và phốt đó **≤90 ngày** so với ${today}. Phốt cũ hơn → bỏ.
+3. Nếu không tìm thấy tin trong 30 ngày → ghi rõ "Không có tin tức đáng chú ý trong 30 ngày qua".
+4. Nếu không tìm thấy phốt trong 90 ngày → ghi rõ "Không phát hiện cảnh báo nào trong 90 ngày qua".
+5. **KHÔNG bịa** fundamental/news/phốt. Mọi claim PHẢI có nguồn URL từ kết quả search.
+6. Mỗi tin/phốt PHẢI ghi rõ NGÀY (dd/mm/yyyy) để verify recency.
 
 === OUTPUT (tiếng Việt, ≤ 600 chữ, markdown) ===
 **📊 TA tóm tắt**
 {50 chữ — verdict + xu hướng + tín hiệu mạnh nhất}
 
 **💰 Sức khỏe tài chính**
-{P/E, P/B, ROE, EPS, doanh thu, lợi nhuận Q gần nhất, growth YoY. So sánh "rẻ/đắt/hợp lý" dựa trên ngành. Nếu không tìm thấy data → ghi rõ "Không tra được số liệu fundamental".}
+{P/E, P/B, ROE, EPS, doanh thu/LN Q gần nhất, growth YoY. Đánh giá "rẻ/đắt/hợp lý" so với ngành. Không tra được → ghi rõ.}
 
-**📰 Tin tức 30 ngày**
-{2-3 tin quan trọng nhất. Mỗi tin 1 dòng kèm ngày và 1 link nguồn.}
+**📰 Tin tức 30 ngày gần đây** (từ ${d30Ago} đến ${today})
+{2-3 tin trong cửa sổ này, mỗi tin 1 dòng + ngày dd/mm/yyyy + link. Nếu không có → ghi "Không có tin tức đáng chú ý trong 30 ngày qua".}
 
-**🚨 Cờ đỏ / phốt**
-{Nếu có: liệt kê + link nguồn. KHÔNG có → "Không phát hiện cảnh báo nào trong 30 ngày qua".}
+**📅 Sự kiện sắp tới**
+{ĐHCĐ, chốt cổ tức, BCTC quý tới, các catalysts đã công bố. Nếu không có → ghi "Chưa thấy sự kiện đáng chú ý sắp tới".}
+
+**🚨 Cờ đỏ / phốt** (90 ngày gần nhất)
+{Nếu có trong 90 ngày: liệt kê + ngày + link. Không có → "Không phát hiện cảnh báo nào trong 90 ngày qua".}
 
 **🎯 Hành động đề xuất**
-{Kết luận tổng hợp: Mua/Giữ/Theo dõi/Tránh + lý do tổng hợp TA + fundamental + news. Entry/SL gợi ý nếu OK. Nhắc đây là phân tích tham khảo, không phải lời khuyên đầu tư.}`;
+{Kết luận tổng hợp: Mua/Giữ/Theo dõi/Tránh + lý do tổng hợp TA + fundamental + news + sự kiện. Entry/SL gợi ý nếu OK. Nhắc đây là phân tích tham khảo, không phải lời khuyên đầu tư.}`;
 }
 
 async function callGemini(apiKey, prompt, { grounding }) {
