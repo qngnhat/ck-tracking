@@ -3687,7 +3687,10 @@ async function logHeartbeat(env, cronName, detail = {}) {
 // Cache: Cloudflare Cache API, key = mode+symbol+vn-date → 1 call/ngày/mã.
 // Free tier Gemini Flash: 1500/day non-grounded + 500/day grounded.
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+// 2.5-flash-lite: rẻ nhất trong họ flash (input $0.10/1M, output $0.40/1M),
+// vẫn support Google Search grounding cho research mode.
+// $1 prepay credit ≈ 1700 request. Đủ xài nhiều tháng.
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 function vnDateKey() {
