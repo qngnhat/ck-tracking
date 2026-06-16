@@ -10202,6 +10202,86 @@
   });
 
   // ── Portfolio render ──
+  // Build TA verdict + key signals + smart recommendation for portfolio coach
+  // Reuse detectors từ tab Kỹ thuật (detectMacdStatus, etc.)
+  function buildPortfolioTaCoach(ana) {
+    if (!ana || !ana._raw || !ana._raw.closes?.length) return null;
+    const { opens, highs, lows, closes, volumes } = ana._raw;
+    const n = closes.length;
+    if (n < 30) return null;
+
+    // Reuse detectors
+    const candle = detectCandlePattern(opens, highs, lows, closes, n);
+    const trend = detectTrendStatus({
+      current: ana.current,
+      ma20: ana.ma20, ma50: ana.ma50, ma200: ana.ma200,
+    });
+    const volAnalysis = detectVolumeAnalysis(volumes, closes, n);
+    const rsiStatus = detectRsiStatus(ana.rsi);
+    const macdStatus = detectMacdStatus(ana.macd);
+    const adxStatus = detectAdxStatus(ana.adx);
+
+    // Multi-bar patterns
+    const pivots = findSwingPivots(highs, lows, 60, 3);
+    const hhHl = detectHhHlStructure(pivots);
+    const triangle = detectTrianglePattern(pivots, closes, n);
+    const doubleTopBot = detectDoubleTopBottom(pivots, closes, n);
+
+    // Compute verdict
+    const verdict = buildTechnicalVerdict([
+      candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus,
+      hhHl, triangle, doubleTopBot,
+    ]);
+
+    // Pick TOP 5 most actionable signals (priority: pattern > trend > momentum)
+    const signals = [];
+    const pushSig = (s, prefix = "") => {
+      if (s && s.sentiment) {
+        const icon = s.sentiment === "bullish" ? "✓" : s.sentiment === "bearish" ? "✗" : "•";
+        const label = s.label || s.name;
+        if (label) signals.push({ icon, label: prefix + label, sentiment: s.sentiment });
+      }
+    };
+    pushSig(doubleTopBot);
+    pushSig(triangle);
+    pushSig(hhHl);
+    pushSig(macdStatus, "MACD: ");
+    pushSig(adxStatus);
+    pushSig(volAnalysis);
+    pushSig(trend);
+    pushSig(candle);
+    pushSig(rsiStatus);
+
+    // Smart recommendation based on verdict + position context
+    let smartRec = null;
+    const v = verdict.color;
+    if (v === "strong-bull") {
+      smartRec = "💎 Tín hiệu BULLISH MẠNH — giữ chặt, có thể trail SL lên swing low gần nhất";
+    } else if (v === "mild-bull") {
+      smartRec = "🟡 Momentum tích cực — hold + theo dõi, đặt SL bảo vệ lãi";
+    } else if (v === "strong-bear") {
+      smartRec = "🚨 Tín hiệu BEARISH MẠNH — cân nhắc chốt lời/cắt lỗ, nhiều cảnh báo";
+    } else if (v === "mild-bear") {
+      smartRec = "⚠️ Có cảnh báo bearish — thắt chặt SL, không add-on";
+    } else {
+      smartRec = "⚪ Tín hiệu hỗn hợp — hold theo plan, không can thiệp";
+    }
+
+    return {
+      verdict,
+      signals: signals.slice(0, 5),
+      smartRec,
+      // Suggest trail SL based on recent swing low (if uptrend)
+      suggestedSL: (() => {
+        if (verdict.color !== "strong-bull" && verdict.color !== "mild-bull") return null;
+        const swingLows = pivots.filter((p) => p.type === "L").slice(-3);
+        if (!swingLows.length) return null;
+        const recentLow = swingLows[swingLows.length - 1];
+        return recentLow.price;
+      })(),
+    };
+  }
+
   async function renderPortfolio() {
     const container = $("portfolio-content");
     const empty = $("portfolio-empty");
@@ -10297,15 +10377,15 @@
     } catch {}
 
     // Fetch current price + analysis for each holding (parallel)
+    // Also cache raw OHLCV (for TA verdict + pattern detection in coach)
     const enriched = await Promise.all(
       holdings.map(async (h) => {
         try {
-          // Use cached if available
           if (!portfolioAnalysisCache[h.symbol] ||
               Date.now() - portfolioAnalysisCache[h.symbol]._ts > 30 * 60 * 1000) {
             const data = await ANALYSIS.fetchHistory(h.symbol, "D", 250);
             const r = ANALYSIS.analyze(h.symbol, data, {});
-            portfolioAnalysisCache[h.symbol] = { ...r, _ts: Date.now() };
+            portfolioAnalysisCache[h.symbol] = { ...r, _raw: data, _ts: Date.now() };
           }
           return { ...h, analysis: portfolioAnalysisCache[h.symbol] };
         } catch (e) {
@@ -10408,6 +10488,9 @@
         const action = ana ? PORTFOLIO.recommendAction(h, ana, inTplusTop) : null;
         const setupLabel = ana?.recommendation || "--";
         const setupColor = ana?.recColor || "#888";
+
+        // TA Coach — verdict + signals + smart rec (reuse tab Kỹ thuật logic)
+        const taCoach = ana ? buildPortfolioTaCoach(ana) : null;
 
         // Coach UI: T+ chip, RSI chip, range bar SL←now→target
         const coach = action?.coach;
@@ -10516,6 +10599,26 @@
               <div class="holding-action" style="border-left-color: ${action.color}">
                 <span class="holding-action-icon">${action.icon}</span>
                 <span class="holding-action-text">${action.text}</span>
+              </div>
+            ` : ""}
+            ${taCoach ? `
+              <div class="holding-ta-coach ta-${taCoach.verdict.color}">
+                <div class="ta-coach-verdict">
+                  <span class="ta-coach-label">${taCoach.verdict.label}</span>
+                  <span class="ta-coach-count">${taCoach.signals.length} signals</span>
+                </div>
+                <div class="ta-coach-signals">
+                  ${taCoach.signals.map((s) => `
+                    <div class="ta-coach-sig sentiment-${s.sentiment}">
+                      <span class="ta-coach-sig-icon">${s.icon}</span>
+                      <span class="ta-coach-sig-text">${s.label}</span>
+                    </div>
+                  `).join("")}
+                </div>
+                <div class="ta-coach-rec">${taCoach.smartRec}</div>
+                ${taCoach.suggestedSL && coach?.distSL ? `
+                  <div class="ta-coach-trail">💡 Gợi ý trail SL: ${taCoach.suggestedSL.toFixed(2)}k (swing low gần nhất, thay vì SL cố định ${coach.distSL.price.toFixed(2)}k)</div>
+                ` : ""}
               </div>
             ` : ""}
             ${chipsHtml}
