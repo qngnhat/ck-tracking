@@ -693,11 +693,24 @@ export default {
     // /ai-explain   — diễn giải TA only (no grounding, cheap, ~1s)
     // /ai-research  — TA + fundamental + news + phốt (Google Search grounding, ~3s)
     // Cache: server-side Cache API, key = (mode, symbol, vn-date) → 1 call/ngày/mã.
-    if (url.pathname === "/ai-explain" && request.method === "POST") {
-      return handleAiExplain(request, env, ctx);
-    }
-    if (url.pathname === "/ai-research" && request.method === "POST") {
-      return handleAiResearch(request, env, ctx);
+    if (url.pathname === "/ai-explain" || url.pathname === "/ai-research") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+      if (request.method === "POST") {
+        return url.pathname === "/ai-explain"
+          ? handleAiExplain(request, env, ctx)
+          : handleAiResearch(request, env, ctx);
+      }
+      return new Response("Method not allowed", { status: 405 });
     }
     return new Response("Stock PWA Bot Worker", { status: 200 });
   },
