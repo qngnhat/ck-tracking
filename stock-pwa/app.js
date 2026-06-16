@@ -1799,10 +1799,49 @@
     ]);
     const tfLabel = timeframe === "W" ? "tuần" : "ngày";
 
+    // Build structured snapshot for AI (sent to Gemini)
+    const sigList = [candle, trend, volAnalysis, rsiStatus, macdStatus, adxStatus,
+                     hhHl, triangle, doubleTopBot, bbStatus, ichimokuStatus]
+      .filter(Boolean)
+      .map((s) => ({ label: s.label || "", desc: s.desc || "", sentiment: s.sentiment || "neutral" }));
+    window._lastTaSnapshot = {
+      symbol: r.symbol,
+      timeframe,
+      price: cur,
+      ma: { ma20, ma50, ma200 },
+      rsi: rsi !== null ? Number(rsi.toFixed(1)) : null,
+      macd: r.macd || null,
+      adx: r.adx || null,
+      verdict: { label: verdict.label, color: verdict.color, desc: verdict.desc },
+      signals: sigList,
+      levels: {
+        support: r.support || null,
+        resistance: r.resistance || null,
+        bb: r.bb || null,
+      },
+      touchedLevels: touchedLevels.map((lv) => ({ kind: lv.kind, label: lv.label, distance: lv.distance })),
+      confluences: confluences.map((c) => ({ label: c.label })),
+      vnFlags: vnFlags.map((f) => ({ label: f.label, sentiment: f.sentiment })),
+    };
+
     return `
       <div class="ta-verdict ta-${verdict.color}">
         <div class="ta-verdict-label">${verdict.label}</div>
         <div class="ta-verdict-desc">${verdict.desc} <small>(phân tích trên nến ${tfLabel})</small></div>
+      </div>
+
+      <div class="ta-ai-section">
+        <div class="ta-ai-actions">
+          <button class="ta-ai-btn ta-ai-btn-explain" id="ta-ai-explain-btn" type="button">
+            🤖 AI giải thích TA
+            <small>nhanh, free</small>
+          </button>
+          <button class="ta-ai-btn ta-ai-btn-research" id="ta-ai-research-btn" type="button">
+            📊 Nghiên cứu sâu
+            <small>+ fundamental, news, phốt</small>
+          </button>
+        </div>
+        <div id="ta-ai-result" class="ta-ai-result" style="display:none"></div>
       </div>
 
       <div class="ta-section">
@@ -2105,10 +2144,125 @@
         }
       });
     }
+    // AI buttons (explain TA / research sâu via Gemini)
+    const explainBtn = document.getElementById("ta-ai-explain-btn");
+    if (explainBtn && !explainBtn.dataset.bound) {
+      explainBtn.dataset.bound = "1";
+      explainBtn.addEventListener("click", () => callAiAnalysis("explain"));
+    }
+    const researchBtn = document.getElementById("ta-ai-research-btn");
+    if (researchBtn && !researchBtn.dataset.bound) {
+      researchBtn.dataset.bound = "1";
+      researchBtn.addEventListener("click", () => callAiAnalysis("research"));
+    }
     // Initial chart render
     if (currentData) {
       requestAnimationFrame(() => renderTechnicalChart("technical-chart-container", currentData));
     }
+  }
+
+  // ── AI analysis (Gemini via worker) ────────────────────────────
+  const AI_WORKER_BASE = "https://stock-pwa-bot.qngnhat.workers.dev";
+
+  async function callAiAnalysis(mode) {
+    const snap = window._lastTaSnapshot;
+    if (!snap) return;
+    const resultEl = document.getElementById("ta-ai-result");
+    if (!resultEl) return;
+
+    const explainBtn = document.getElementById("ta-ai-explain-btn");
+    const researchBtn = document.getElementById("ta-ai-research-btn");
+    if (explainBtn) explainBtn.disabled = true;
+    if (researchBtn) researchBtn.disabled = true;
+
+    const modeLabel = mode === "explain" ? "AI giải thích TA" : "AI nghiên cứu sâu";
+    const estTime = mode === "explain" ? "~1-2s" : "~3-5s";
+    resultEl.style.display = "block";
+    resultEl.innerHTML = `
+      <div class="ta-ai-loading">
+        <div class="ta-ai-spinner"></div>
+        <div>${modeLabel} đang chạy… ${estTime}</div>
+        <small>Lần đầu trong ngày sẽ chậm hơn (chưa cache).</small>
+      </div>
+    `;
+
+    try {
+      const r = await fetch(`${AI_WORKER_BASE}/ai-${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: snap.symbol, ta: snap }),
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) {
+        resultEl.innerHTML = `
+          <div class="ta-ai-error">
+            ❌ Lỗi: ${escapeHtml(data.error || `HTTP ${r.status}`)}
+            <small>Liên hệ admin nếu lặp lại. Worker cần GEMINI_API_KEY config.</small>
+          </div>
+        `;
+        return;
+      }
+      renderAiResponse(resultEl, data, modeLabel);
+    } catch (e) {
+      resultEl.innerHTML = `
+        <div class="ta-ai-error">
+          ❌ Network error: ${escapeHtml(e.message)}
+        </div>
+      `;
+    } finally {
+      if (explainBtn) explainBtn.disabled = false;
+      if (researchBtn) researchBtn.disabled = false;
+    }
+  }
+
+  function renderAiResponse(el, data, modeLabel) {
+    const cachedTag = data.cached
+      ? `<span class="ta-ai-cached" title="Đã cache trong ngày, không tốn token">♻️ cached</span>`
+      : "";
+    const citationsHtml = data.citations && data.citations.length
+      ? `<div class="ta-ai-citations">
+          <div class="ta-ai-citations-title">📎 Nguồn (${data.citations.length}):</div>
+          <ul>
+            ${data.citations.slice(0, 8).map((c, i) =>
+              `<li><a href="${escapeHtml(c.uri)}" target="_blank" rel="noopener">${escapeHtml(c.title || c.uri).slice(0, 80)}</a></li>`
+            ).join("")}
+          </ul>
+        </div>`
+      : "";
+    el.innerHTML = `
+      <div class="ta-ai-header">
+        <span class="ta-ai-header-label">${modeLabel}</span>
+        ${cachedTag}
+        <small class="ta-ai-disclaimer">Phân tích tham khảo, KHÔNG phải lời khuyên đầu tư.</small>
+      </div>
+      <div class="ta-ai-body markdown-body">${renderSimpleMarkdown(data.response || "")}</div>
+      ${citationsHtml}
+    `;
+  }
+
+  // Lightweight markdown → HTML (bold, italic, links, headers, lists, line breaks)
+  function renderSimpleMarkdown(md) {
+    if (!md) return "";
+    let html = escapeHtml(md);
+    // Bold **text**
+    html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+    // Italic *text* (avoid double-star)
+    html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    // Inline code `text`
+    html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    // Links [text](url)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // Headers # / ## / ###
+    html = html.replace(/^### (.+)$/gm, "<h4>$1</h4>");
+    html = html.replace(/^## (.+)$/gm, "<h3>$1</h3>");
+    html = html.replace(/^# (.+)$/gm, "<h3>$1</h3>");
+    // Bullet lists - / *
+    html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+    html = html.replace(/(<li>[\s\S]+?<\/li>)(\n(?!<li>)|$)/g, "<ul>$1</ul>$2");
+    // Line breaks
+    html = html.replace(/\n\n+/g, "</p><p>");
+    html = html.replace(/\n/g, "<br>");
+    return `<p>${html}</p>`;
   }
 
   function renderOverviewTabContent(r) {

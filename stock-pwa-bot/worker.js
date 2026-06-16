@@ -689,6 +689,16 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    // ── AI analysis (Gemini Flash 2.0) ──────────────────────────────
+    // /ai-explain   — diễn giải TA only (no grounding, cheap, ~1s)
+    // /ai-research  — TA + fundamental + news + phốt (Google Search grounding, ~3s)
+    // Cache: server-side Cache API, key = (mode, symbol, vn-date) → 1 call/ngày/mã.
+    if (url.pathname === "/ai-explain" && request.method === "POST") {
+      return handleAiExplain(request, env, ctx);
+    }
+    if (url.pathname === "/ai-research" && request.method === "POST") {
+      return handleAiResearch(request, env, ctx);
+    }
     return new Response("Stock PWA Bot Worker", { status: 200 });
   },
 
@@ -3667,4 +3677,201 @@ async function logHeartbeat(env, cronName, detail = {}) {
   } catch (e) {
     console.warn("[heartbeat] log fail:", e.message);
   }
+}
+
+// ── AI analysis (Gemini Flash 2.0) ─────────────────────────────────────
+// Two modes:
+//   explain  — diễn giải TA (rule-based output từ tab Kỹ thuật) bằng tiếng Việt
+//   research — explain + Google Search grounding cho fundamental, news 30d, phốt
+//
+// Cache: Cloudflare Cache API, key = mode+symbol+vn-date → 1 call/ngày/mã.
+// Free tier Gemini Flash: 1500/day non-grounded + 500/day grounded.
+
+const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+function vnDateKey() {
+  const now = new Date();
+  const vn = new Date(now.getTime() + 7 * 3600 * 1000);
+  return vn.toISOString().slice(0, 10);
+}
+
+function aiJsonResp(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "max-age=86400",
+    },
+  });
+}
+
+async function handleAiExplain(request, env, ctx) {
+  if (!env.GEMINI_API_KEY) {
+    return aiJsonResp({ error: "GEMINI_API_KEY not configured" }, 503);
+  }
+  let body;
+  try { body = await request.json(); } catch { body = null; }
+  if (!body || !body.symbol || !body.ta) {
+    return aiJsonResp({ error: "missing symbol or ta" }, 400);
+  }
+  const sym = String(body.symbol).toUpperCase();
+  const date = vnDateKey();
+
+  // Cache lookup
+  const cache = caches.default;
+  const cacheKey = new Request(`https://ai-cache.local/explain/${sym}/${date}`, { method: "GET" });
+  const hit = await cache.match(cacheKey);
+  if (hit) {
+    const j = await hit.json();
+    j.cached = true;
+    return aiJsonResp(j);
+  }
+
+  const prompt = buildExplainPrompt(sym, body.ta);
+  let result;
+  try {
+    result = await callGemini(env.GEMINI_API_KEY, prompt, { grounding: false });
+  } catch (e) {
+    return aiJsonResp({ error: `Gemini fail: ${e.message}` }, 502);
+  }
+  const out = { symbol: sym, mode: "explain", date, response: result.text, citations: [], cached: false };
+  ctx.waitUntil(cache.put(cacheKey, aiJsonResp(out)));
+  return aiJsonResp(out);
+}
+
+async function handleAiResearch(request, env, ctx) {
+  if (!env.GEMINI_API_KEY) {
+    return aiJsonResp({ error: "GEMINI_API_KEY not configured" }, 503);
+  }
+  let body;
+  try { body = await request.json(); } catch { body = null; }
+  if (!body || !body.symbol || !body.ta) {
+    return aiJsonResp({ error: "missing symbol or ta" }, 400);
+  }
+  const sym = String(body.symbol).toUpperCase();
+  const date = vnDateKey();
+
+  const cache = caches.default;
+  const cacheKey = new Request(`https://ai-cache.local/research/${sym}/${date}`, { method: "GET" });
+  const hit = await cache.match(cacheKey);
+  if (hit) {
+    const j = await hit.json();
+    j.cached = true;
+    return aiJsonResp(j);
+  }
+
+  const prompt = buildResearchPrompt(sym, body.ta);
+  let result;
+  try {
+    result = await callGemini(env.GEMINI_API_KEY, prompt, { grounding: true });
+  } catch (e) {
+    return aiJsonResp({ error: `Gemini fail: ${e.message}` }, 502);
+  }
+  const out = { symbol: sym, mode: "research", date, response: result.text, citations: result.citations, cached: false };
+  ctx.waitUntil(cache.put(cacheKey, aiJsonResp(out)));
+  return aiJsonResp(out);
+}
+
+function buildExplainPrompt(symbol, ta) {
+  return `Mày là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam, hỗ trợ swing trader T+ (giữ 3-10 phiên).
+
+Diễn giải các chỉ báo dưới đây CHO RIÊNG mã ${symbol}. Output tiếng Việt thuần, ngắn gọn, dễ đọc cho người mới.
+
+=== DỮ LIỆU TA (đã tính sẵn) ===
+${JSON.stringify(ta, null, 2)}
+
+=== YÊU CẦU ===
+1. CHỈ diễn giải dữ liệu cho trong JSON. KHÔNG bịa thêm chỉ báo / số liệu.
+2. Trả lời ≤ 350 chữ, format markdown đúng theo template dưới.
+3. Tone: thân thiện, dùng "mày/tao" OK, hoặc "anh/chị" lịch sự — chọn nhất quán.
+4. KHÔNG kết luận chắc chắn "sẽ tăng/giảm". Dùng "nhiều khả năng", "có xác suất".
+5. Nếu signals mâu thuẫn → nói rõ "tín hiệu chưa thống nhất, nên đứng ngoài".
+
+=== TEMPLATE ===
+**📊 Tổng quan**
+{1-2 câu — verdict + xu hướng chính}
+
+**✅ Tín hiệu tích cực**
+- {signal 1 + nghĩa thực tế là gì}
+- {signal 2}
+
+**⚠️ Rủi ro / cảnh báo**
+- {signal tiêu cực hoặc lo ngại}
+
+**🎯 Hành động đề xuất**
+{2-3 câu — Mua/Giữ/Theo dõi/Tránh + entry/SL gợi ý NẾU setup OK. Nhắc đây là gợi ý, không phải lời khuyên đầu tư.}`;
+}
+
+function buildResearchPrompt(symbol, ta) {
+  return `Mày là chuyên gia phân tích chứng khoán Việt Nam. Phân tích TOÀN DIỆN mã ${symbol} cho swing trader.
+
+=== TA (đã tính sẵn, chính xác) ===
+${JSON.stringify(ta, null, 2)}
+
+=== QUY TRÌNH ===
+1. Tóm tắt TA (dùng data trên, KHÔNG bịa).
+2. Tìm Google Search:
+   a) Sức khỏe tài chính ${symbol}: P/E, P/B, ROE, EPS, doanh thu, lợi nhuận Q gần nhất, tăng trưởng YoY.
+   b) Tin tức ${symbol} trong 30 ngày gần đây.
+   c) **PHỐT/CỜ ĐỎ**: UBCKNN xử phạt, vi phạm CBTT, lãnh đạo bị bắt/từ chức, gian lận BCTC, kiểm toán ngoại trừ, bị cảnh báo/kiểm soát/đình chỉ giao dịch.
+3. Nếu KHÔNG tìm thấy phốt qua Google → ghi rõ "Không phát hiện cảnh báo nào trong 30 ngày qua".
+4. KHÔNG bịa fundamental/news/phốt. Mọi claim PHẢI có nguồn URL từ kết quả search. Không có nguồn → không nói.
+
+=== OUTPUT (tiếng Việt, ≤ 600 chữ, markdown) ===
+**📊 TA tóm tắt**
+{50 chữ — verdict + xu hướng + tín hiệu mạnh nhất}
+
+**💰 Sức khỏe tài chính**
+{P/E, P/B, ROE, EPS, doanh thu, lợi nhuận Q gần nhất, growth YoY. So sánh "rẻ/đắt/hợp lý" dựa trên ngành. Nếu không tìm thấy data → ghi rõ "Không tra được số liệu fundamental".}
+
+**📰 Tin tức 30 ngày**
+{2-3 tin quan trọng nhất. Mỗi tin 1 dòng kèm ngày và 1 link nguồn.}
+
+**🚨 Cờ đỏ / phốt**
+{Nếu có: liệt kê + link nguồn. KHÔNG có → "Không phát hiện cảnh báo nào trong 30 ngày qua".}
+
+**🎯 Hành động đề xuất**
+{Kết luận tổng hợp: Mua/Giữ/Theo dõi/Tránh + lý do tổng hợp TA + fundamental + news. Entry/SL gợi ý nếu OK. Nhắc đây là phân tích tham khảo, không phải lời khuyên đầu tư.}`;
+}
+
+async function callGemini(apiKey, prompt, { grounding }) {
+  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const reqBody = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: grounding ? 1200 : 800,
+    },
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+    ],
+  };
+  if (grounding) {
+    reqBody.tools = [{ google_search: {} }];
+  }
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(reqBody),
+  });
+  if (!r.ok) {
+    const errText = await r.text();
+    throw new Error(`Gemini ${r.status}: ${errText.slice(0, 300)}`);
+  }
+  const data = await r.json();
+  const cand = data.candidates?.[0];
+  const text = cand?.content?.parts?.map((p) => p.text || "").join("") || "";
+  if (!text) {
+    throw new Error(`Empty response: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  const gm = cand?.groundingMetadata;
+  const citations = (gm?.groundingChunks || [])
+    .map((c) => ({ title: c.web?.title || "", uri: c.web?.uri || "" }))
+    .filter((c) => c.uri);
+  return { text, citations };
 }
