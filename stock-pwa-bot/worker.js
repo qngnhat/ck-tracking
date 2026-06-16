@@ -3770,7 +3770,7 @@ async function handleAiResearch(request, env, ctx) {
   const date = vnDateKey();
 
   const cache = caches.default;
-  const cacheKey = new Request(`https://ai-cache.local/v2/research/${sym}/${date}`, { method: "GET" });
+  const cacheKey = new Request(`https://ai-cache.local/v3/research/${sym}/${date}`, { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) {
     const j = await hit.json();
@@ -3841,12 +3841,13 @@ ${JSON.stringify(ta, null, 2)}
    d) **PHỐT/CỜ ĐỎ**: UBCKNN xử phạt, vi phạm CBTT, lãnh đạo bị bắt/từ chức, gian lận BCTC, kiểm toán ngoại trừ, bị cảnh báo/kiểm soát/đình chỉ giao dịch — **TRONG 90 NGÀY GẦN NHẤT THÔI**.
 
 === QUY TẮC CỰC QUAN TRỌNG ===
-1. **BỎ QUA mọi tin >30 ngày** trong mục News. Tin cũ tuyệt đối KHÔNG report ở phần News.
-2. **CHỈ report phốt nếu có nguồn**, và phốt đó **≤90 ngày** so với ${today}. Phốt cũ hơn → bỏ.
-3. Nếu không tìm thấy tin trong 30 ngày → ghi rõ "Không có tin tức đáng chú ý trong 30 ngày qua".
-4. Nếu không tìm thấy phốt trong 90 ngày → ghi rõ "Không phát hiện cảnh báo nào trong 90 ngày qua".
+1. **HARD FILTER NEWS**: Trước khi đưa tin vào output, tự check ngày tin. Nếu ngày tin TRƯỚC ${d30Ago} → BỎ HOÀN TOÀN. Không bù tin cũ vào để cho có. Thà ghi "Chỉ tìm thấy 1 tin trong cửa sổ này" còn hơn report tin >30d.
+2. **HARD FILTER PHỐT**: Phốt có ngày trước (today - 90d) → BỎ. Không lôi tin phạt cũ vào.
+3. **Sự kiện sắp tới**: chỉ event chưa xảy ra hoặc xảy ra ≤7 ngày trước (vẫn còn relevant). Event >7d quá khứ → bỏ qua, không liệt kê.
+4. Nếu cửa sổ thực sự trống → ghi rõ "Không có tin tức đáng chú ý trong 30 ngày qua" / "Không phát hiện cảnh báo nào trong 90 ngày qua" / "Chưa thấy sự kiện đáng chú ý sắp tới".
 5. **KHÔNG bịa** fundamental/news/phốt. Mọi claim PHẢI có nguồn URL từ kết quả search.
-6. Mỗi tin/phốt PHẢI ghi rõ NGÀY (dd/mm/yyyy) để verify recency.
+6. Mỗi tin/phốt/event PHẢI ghi rõ NGÀY (dd/mm/yyyy) lên trước nội dung để dễ verify.
+7. Tin chung thị trường (VN-Index, vĩ mô) KHÔNG liên quan riêng ${symbol} → BỎ. Chỉ tin/event đặc thù ${symbol}.
 
 === OUTPUT (tiếng Việt, ≤ 600 chữ, markdown) ===
 **📊 TA tóm tắt**
