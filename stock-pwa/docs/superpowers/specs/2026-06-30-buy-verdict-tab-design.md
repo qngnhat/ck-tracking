@@ -13,21 +13,29 @@ combined scoring **underperform** buy-and-hold, nên team đã bỏ nhãn cứng
 đổi sang "Setup". Thiết kế này **tôn trọng bài học đó**: không phán MUA/BÁN dứt khoát,
 mà trình bày dưới dạng **xác suất thiên hướng + dải % thống kê + disclaimer**.
 
+**Làm lại từ đầu — không kế thừa backtest cũ.** Verdict tự xây logic mới hoàn toàn.
+- GIỮ: chỉ số thô từ `r` (RSI/MA/MACD/ADX/BB/Stoch/MFI/volRatio/foreignFlow/giá/
+  support-resistance) — đây là toán thuần, không phải sản phẩm backtest.
+- BỎ, KHÔNG dùng: `score`, `reasons`, `recommendation/recLevel/recColor`,
+  `forwardStats`, `stockProfile.multipliers`, `buyZoneLow/High` (đều gắn scoring Phase 1.x).
+- Dự báo % **tự tính mới**, setup-based (xem dưới), KHÔNG đụng `forwardStats` cũ.
+
 ## Approach
 
 Toàn bộ dữ liệu cần thiết **đã có sẵn** trong object `r = ANALYSIS.analyze(...)`
 (lastAnalysisResult). KHÔNG fetch thêm request nào. Tab "Nên mua?" chỉ là một
 **lớp tổng hợp + trình bày** trên dữ liệu đã tính.
 
-Các trường `r` sẽ tiêu thụ:
+Các trường **thô** của `r` sẽ tiêu thụ (KHÔNG dùng score/reasons/forwardStats cũ):
 - Xu hướng/chart: `trendDir`, `ma20/50/200`, `distMA*`, `adx`, `adxStrength`
 - Momentum: `rsi`, `macd`, `stoch`, `bbPos`, `posIn52w`
 - Volume: `volRatio`, `mfi`
 - Khối ngoại: `foreignFlow`, `foreignTrend`
-- Vùng giá: `support`, `resistance`, `buyZoneLow/High`, `stopLoss`
-- Rủi ro: `flags` (sellPressure, deepDowntrend, bearTrap, lowVol, ...)
-- **Dự báo %**: `forwardStats` (forward return median/mean/p25/p75 ở mốc 5/10/20
-  phiên, lấy từ các phiên lịch sử có cùng RSI bucket với hôm nay)
+- Vùng giá: `support`, `resistance`, `stopLoss`, `atr`
+- Dữ liệu giá thô: `currentData.closes/highs/lows/volumes` (để tự tính forward-return)
+
+Lưu ý: verdict cần cả mảng giá lịch sử (`closes`/`highs`/...) để tự quét setup.
+Trong app.js, mảng này có sẵn ở `currentData` (cùng object đã feed cho `analyze`).
 
 ### Verdict layer (logic mới, thuần tổng hợp)
 
@@ -42,19 +50,37 @@ Mỗi trụ ra điểm con + danh sách lý do (tái dùng style `reasons` sẵn
 thành **"Nghiêng mua N%"** / **"Trung tính"** / **"Nghiêng tránh N%"** — KHÔNG dùng
 chữ "MUA/BÁN".
 
-### Dự báo biên độ %
+### Dự báo biên độ % — setup-based forward-return (TỰ TÍNH MỚI)
 
-Lấy thẳng từ `r.forwardStats`. Hiển thị: *"Trong quá khứ, khi {mã} ở trạng thái RSI
-tương tự ({bucketLabel}), sau 5/10/20 phiên giá thường đi: median X% (dải p25..p75)."*
-Kèm số mẫu (n) để user biết độ tin cậy. Nếu `forwardStats == null` (mã mới, <50 nến)
-→ ẩn block dự báo, ghi rõ "không đủ dữ liệu lịch sử".
+Hàm mới `computeSetupForwardReturn(closes, highs, lows, volumes)`. Logic:
+
+1. **Setup signature hôm nay** = 4 chiều rời rạc hoá:
+   - Vị trí so MA50: `above` / `below`
+   - RSI bucket: `<30` / `30-45` / `45-55` / `55-70` / `>70`
+   - ADX tier: `weak(<20)` / `forming(20-25)` / `strong(>25)`
+   - Vol tier (so SMA20 vol): `low(<0.8x)` / `normal` / `high(>1.5x)`
+2. **Quét lịch sử** mã (toàn bộ nến trừ 20 phiên cuối — cần forward window):
+   tại mỗi phiên i tính signature của nó, đếm số chiều khớp với signature hôm nay.
+   Nhận phiên nếu **match ≥ 3/4 chiều**.
+3. Với các phiên khớp, đo forward return ở mốc **5/10/20 phiên**:
+   `(close[i+k] - close[i]) / close[i] * 100`.
+4. Trả về median + p25 + p75 + **n (số mẫu)** cho từng mốc.
+
+**Fallback khi n < 5** (setup quá hiếm): dùng **ATR-projection** —
+biên độ `±k·atrPct·√k_phiên`, lệch theo bias verdict; đánh dấu rõ
+"ít mẫu lịch sử (n=X), dùng ước lượng biến động (ATR)".
+
+Hiển thị: *"Trong quá khứ, khi {mã} ở setup tương tự (n=N phiên), sau 5/10/20 phiên
+giá thường đi: median X% (dải p25..p75)."*
+Nếu `closes.length < 50` → ẩn block, ghi "không đủ dữ liệu lịch sử".
 
 ### Trình bày (tab "Nên mua?")
 
 - **Header verdict**: badge thiên hướng (màu theo mức) + 1 câu tóm tắt.
 - **Dự báo forward**: bảng 5/10/20 phiên (median + dải + n mẫu).
 - **4 trụ**: mỗi trụ 1 dòng điểm + lý do gọn (tái dùng chip style).
-- **Vùng hành động**: buy zone / stop-loss / kháng cự gần (đã có trong `r`).
+- **Vùng hành động**: mục tiêu = kháng cự gần / stop = hỗ trợ (đã có trong `r`),
+  tính %tới-target và %tới-stop. KHÔNG dùng `buyZoneLow/High` cũ.
 - **Disclaimer**: nhắc đây là thống kê kỹ thuật, không phải khuyến nghị mua/bán;
   forward stats là phân phối lịch sử, không đảm bảo tương lai.
 
@@ -66,9 +92,11 @@ Kèm số mẫu (n) để user biết độ tin cậy. Nếu `forwardStats == nu
   - `getAnalysisTabDefault` / `setAnalysisTab`: thêm `"verdict"` vào danh sách mode.
   - `renderAnalysis(r)`: render verdict tab (lazy — chỉ build khi tab được mở lần đầu,
     theo đúng pattern tab "Kỹ thuật" hiện tại).
-  - `computeBuyVerdict(r)`: hàm tổng hợp điểm 4 trụ → {bias, score, pillars[], reasons[]}.
-  - `renderVerdictTabContent(r)`: build HTML từ verdict + forwardStats + vùng giá.
-- `analysis.js`: **không đổi** (mọi dữ liệu đã có; forwardStats đã tính sẵn).
+  - `computeBuyVerdict(r)`: tổng hợp điểm 4 trụ → {bias, score 0-100, pillars[], reasons[]}.
+    Logic mới, KHÔNG đọc `r.score/reasons/recommendation`.
+  - `computeSetupForwardReturn(closes, highs, lows, volumes)`: dự báo setup-based (mới).
+  - `renderVerdictTabContent(r)`: build HTML từ verdict + forward-return + vùng giá.
+- `analysis.js`: **không đổi** (chỉ đọc chỉ số thô + mảng giá; không thêm/sửa hàm).
 
 ## Data flow
 
@@ -78,12 +106,15 @@ analyzeSymbol(sym)
   → renderAnalysis(r) lưu lastAnalysisResult = r
   → user bấm tab "Nên mua?"
   → setAnalysisTab("verdict") → lazy build:
-       computeBuyVerdict(r) → renderVerdictTabContent(r) → innerHTML
+       computeBuyVerdict(r)
+       computeSetupForwardReturn(currentData.closes, highs, lows, volumes)
+       → renderVerdictTabContent(r) → innerHTML
 ```
 
 ## Error handling
 
-- `forwardStats == null` → ẩn block dự báo, hiện ghi chú thiếu dữ liệu.
+- `closes.length < 50` → ẩn block dự báo, hiện ghi chú thiếu dữ liệu lịch sử.
+- setup match n < 5 → fallback ATR-projection, đánh dấu "ít mẫu".
 - `foreignFlow == null` → trụ dòng tiền chỉ dùng volRatio/MFI, ghi "không có dữ liệu NN".
 - Mã ETF / thiếu indicator → từng trụ tự bỏ qua component null (giống `analyze` hiện tại).
 - Không thêm network call → không có failure mode mạng mới.
@@ -99,6 +130,7 @@ Kiểm tra `node -c app.js` pass sau khi sửa.
 ## Scope (YAGNI)
 
 - KHÔNG khôi phục tab Rà soát / quét VN100 (gác lại).
-- KHÔNG thêm scoring backtest mới, KHÔNG fetch thêm.
+- KHÔNG fetch thêm request.
+- KHÔNG kế thừa score/reasons/recommendation/forwardStats/multipliers/buyZone cũ.
 - KHÔNG phán MUA/BÁN cứng.
-- Chỉ là 1 tab tổng hợp dữ liệu đã có + 1 hàm verdict + 1 hàm render.
+- Tab = đọc chỉ số thô + 1 hàm verdict + 1 hàm forward-return mới + 1 hàm render.
