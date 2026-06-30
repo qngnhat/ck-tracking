@@ -352,51 +352,21 @@
   </main>
   </div>
 
-  <!-- Ranking tab → Rà soát Trung hạn (Base Breakout pattern) -->
+  <!-- Ranking tab → Rà soát (STRIPPED — chờ build lại logic mới) -->
   <div class="tab-content tab-ranking active">
     <main id="ranking-container">
       <div class="ranking-header">
         <div>
-          <h2 class="ranking-title" id="ranking-title">🔍 Rà soát Trung hạn</h2>
-          <div class="ranking-meta" id="ranking-meta">Pattern Base Breakout · hold ~1 tháng · trail 10%</div>
+          <h2 class="ranking-title" id="ranking-title">🔍 Rà soát</h2>
+          <div class="ranking-meta" id="ranking-meta"></div>
         </div>
         <div class="ranking-actions">
           <button class="btn-icon" id="ranking-refresh" title="Cập nhật">↻</button>
         </div>
       </div>
 
-      <div id="midterm-sizing-helper" class="midterm-sizing-helper"></div>
-      <div id="holiday-banner" class="holiday-banner" style="display:none"></div>
-
-      <div id="ranking-content">
-        <div class="empty-state ranking-intro" id="intro-midterm">
-          <div class="empty-icon">🔍</div>
-          <h2>Rà soát Trung hạn</h2>
-          <p>Pattern <b>Base Breakout</b>: mã tích lũy ≥30 phiên (range &lt;10%) + breakout above prev high + vol &gt;1.5× confirm.</p>
-          <p>Bot tự scan EOD mỗi ngày (14:50 VN). Mỗi pick hold ~1 tháng với trailing stop 10%.</p>
-          <p><small>📊 Cross-validated Test 2025-26: Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.</small></p>
-          <button class="btn-primary" id="ranking-load-btn">Tải picks hôm nay</button>
-        </div>
-      </div>
-
-      <div class="ranking-disclaimer" id="ranking-disclaimer">
-        ⚠️ Update mỗi 14:50 EOD (cron Telegram alert). Pattern hiếm ~38 lệnh/năm — nhiều ngày empty là bình thường, đừng FOMO. Hold 3 phiên, stop loss -4%, size 15% NAV/lệnh max. Chỉ là tín hiệu kỹ thuật, không phải lời khuyên đầu tư.
-      </div>
-
-      <!-- Paper Tracker (lịch sử khuyến nghị + verify performance) -->
-      <div class="tracker-section" id="tracker-section" style="display:none">
-        <div class="tracker-header" id="tracker-header">
-          <span>📊 Lịch sử khuyến nghị</span>
-          <span class="tracker-toggle-icon" id="tracker-toggle-icon">▼</span>
-        </div>
-        <div class="tracker-body" id="tracker-body" style="display:none">
-          <div class="tracker-controls">
-            <button class="btn-primary tracker-refresh-btn" id="tracker-refresh-btn">Cập nhật giá hiện tại</button>
-            <button class="link-btn" id="tracker-clear-btn">Xóa lịch sử</button>
-          </div>
-          <div id="tracker-content"></div>
-        </div>
-      </div>
+      <!-- Body trống — build lại UI Rà soát vào đây -->
+      <div id="ranking-content"></div>
     </main>
   </div>
 
