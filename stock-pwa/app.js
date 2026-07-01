@@ -15,6 +15,60 @@
 
   let stockList = [];
 
+  // ── Theme token layer ──
+  const THEME_KEY = "theme_pref";
+  function getThemePref() {
+    try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+    catch (e) { return "dark"; }
+  }
+  function chartCssVar(name, fallback) {
+    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  function getChartTheme() {
+    return {
+      layout: {
+        background: { color: chartCssVar("--bg-deep", "#0a0a14") },
+        textColor: chartCssVar("--text-mute", "#888888"),
+      },
+      grid: {
+        vertLines: { color: chartCssVar("--border-dim", "#1f1f2e") },
+        horzLines: { color: chartCssVar("--border-dim", "#1f1f2e") },
+      },
+      up: chartCssVar("--pos", "#4caf50"),
+      down: chartCssVar("--neg", "#ff4444"),
+      ma20: chartCssVar("--accent", "#00d2ff"),
+      ma50: chartCssVar("--warn-soft", "#ffb74d"),
+      ma200: chartCssVar("--neg", "#ef5350"),
+      accentSoft: chartCssVar("--accent-soft", "#4dd0e1"),
+      border: chartCssVar("--border", "#2a2a3e"),
+    };
+  }
+  function applyChartTheme() {
+    const t = getChartTheme();
+    [chartInstance, technicalChartInstance, vnindexChartInstance, hdChartInstance]
+      .forEach((c) => {
+        if (!c) return;
+        try { c.applyOptions({ layout: t.layout, grid: t.grid }); } catch (e) {}
+      });
+  }
+  function applyTheme() {
+    const pref = getThemePref();
+    document.body.dataset.theme = pref;
+    const btn = document.getElementById("theme-btn");
+    if (btn) btn.textContent = pref === "light" ? "☀️" : "🌙";
+    applyChartTheme();
+  }
+  function initTheme() {
+    const btn = document.getElementById("theme-btn");
+    if (btn) btn.addEventListener("click", () => {
+      const next = getThemePref() === "light" ? "dark" : "light";
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+      applyTheme();
+    });
+    applyTheme();
+  }
+
   const $ = (id) => document.getElementById(id);
 
   // ── Formatters ──
@@ -7356,6 +7410,7 @@
     if (offlineBanner) offlineBanner.hidden = !offline;
     document.body.classList.toggle("is-offline", offline);
   }
+  initTheme();
   syncOfflineBanner();
   window.addEventListener("online", syncOfflineBanner);
   window.addEventListener("offline", syncOfflineBanner);
