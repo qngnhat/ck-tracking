@@ -22,6 +22,7 @@
   --info: #2196f3;      --purple: #9c27b0;
   --chart-ma200: #ef5350;
   --accent-panel: #0f3460;  --surface-deep: #16162a;
+  --purple-soft: #ce93d8;
   --accent-rgb: 0,210,255;  --pos-rgb: 76,175,80;
   --neg-rgb: 255,68,68;     --warn-rgb: 255,152,0;
   --shadow: rgba(0,0,0,0.3);
@@ -39,6 +40,7 @@ body[data-theme="light"] {
   --info: #1976d2;      --purple: #8e24aa;
   --chart-ma200: #c62828;
   --accent-panel: #dbe9f5;  --surface-deep: #eef0f4;
+  --purple-soft: #a83fb8;
   --accent-rgb: 0,144,192;  --pos-rgb: 20,136,59;
   --neg-rgb: 211,47,47;     --warn-rgb: 217,119,43;
   --shadow: rgba(20,30,60,0.10);
@@ -2505,8 +2507,8 @@ body.is-offline {
 
 .climax-tier-badge.tier-Premium {
   background: linear-gradient(135deg, rgba(156, 39, 176, 0.28), rgba(233, 30, 99, 0.28));
-  border-color: var(--purple);
-  color: var(--purple);
+  border-color: var(--purple-soft);
+  color: var(--purple-soft);
   font-weight: 700;
   box-shadow: 0 0 12px rgba(206, 147, 216, 0.45);
 }
