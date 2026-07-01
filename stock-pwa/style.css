@@ -8042,3 +8042,41 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   text-decoration: none;
 }
 .ta-ai-citations a:hover { text-decoration: underline; }
+
+/* ── Buy Verdict tab ── */
+.vd-pillars { display: flex; flex-direction: column; gap: 6px; }
+.vd-pillar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; border-radius: 4px; font-size: 13px;
+  background: rgba(255,255,255,0.02); border-left: 2px solid #888;
+}
+.vd-pillar.vd-up   { border-left-color: #66bb6a; }
+.vd-pillar.vd-down { border-left-color: #ef5350; }
+.vd-pillar.vd-flat { border-left-color: #888; }
+.vd-pillar b { font-size: 14px; }
+.vd-pillar.vd-up b   { color: #66bb6a; }
+.vd-pillar.vd-down b { color: #ef5350; }
+.vd-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+.vd-fc-row {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.vd-fc-row span { flex: 1; font-size: 13px; color: #ccc; }
+.vd-fc-row b { font-size: 15px; font-weight: 700; }
+.vd-fc-row b.up   { color: #66bb6a; }
+.vd-fc-row b.down { color: #ef5350; }
+.vd-fc-row small { color: #888; font-size: 11px; }
+
+/* ── Buy Verdict tab — state description (pivot: mô tả, không dự báo) ── */
+.vd-states { display: flex; flex-direction: column; gap: 6px; }
+.vd-state {
+  padding: 8px 10px; border-radius: 4px;
+  background: rgba(255,255,255,0.02); border-left: 3px solid #888;
+}
+.vd-state-pos     { border-left-color: #66bb6a; }
+.vd-state-neg     { border-left-color: #ef5350; }
+.vd-state-warn    { border-left-color: #FFA726; }
+.vd-state-neutral { border-left-color: #888; }
+.vd-state-label { display: block; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.vd-state-text  { display: block; font-size: 13px; color: #eee; margin-top: 2px; line-height: 1.5; }
+.chip.vd-chip-warn { background: rgba(255,167,38,0.12); color: #FFA726; }

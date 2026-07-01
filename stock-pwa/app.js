@@ -528,12 +528,12 @@
 
   function getAnalysisTabDefault() {
     const persisted = localStorage.getItem(ANALYSIS_TAB_KEY);
-    if (["overview", "technical"].includes(persisted)) return persisted;
+    if (["overview", "technical", "verdict"].includes(persisted)) return persisted;
     return "overview";
   }
 
   function setAnalysisTab(mode) {
-    if (!["overview", "technical"].includes(mode)) mode = "overview";
+    if (!["overview", "technical", "verdict"].includes(mode)) mode = "overview";
     document.querySelectorAll(".analysis-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
     });
@@ -555,15 +555,19 @@
       <div class="analysis-tabs" role="tablist">
         <button class="analysis-tab" data-mode="overview" type="button" role="tab">📊 Tổng quan</button>
         <button class="analysis-tab" data-mode="technical" type="button" role="tab">🔍 Kỹ thuật</button>
+        <button class="analysis-tab" data-mode="verdict" type="button" role="tab">📋 Trạng thái</button>
       </div>
       <div class="analysis-tab-content" data-mode="overview" id="analysis-tab-overview"></div>
       <div class="analysis-tab-content" data-mode="technical" id="analysis-tab-technical" style="display:none"></div>
+      <div class="analysis-tab-content" data-mode="verdict" id="analysis-tab-verdict" style="display:none"></div>
     `;
 
     // Overview = current default content (always rendered)
     $("analysis-tab-overview").innerHTML = renderOverviewTabContent(r);
     // Technical tab — pattern + vol + S/R + trend analysis
     $("analysis-tab-technical").innerHTML = renderTechnicalTabContent(r);
+    // Verdict tab — build ngay (rẻ, thuần tính toán trên r + currentData)
+    $("analysis-tab-verdict").innerHTML = renderVerdictTabContent(r);
 
     // Set default active tab
     setAnalysisTab(getAnalysisTabDefault());
@@ -2102,6 +2106,77 @@
     if (currentData) {
       requestAnimationFrame(() => renderTechnicalChart("technical-chart-container", currentData));
     }
+  }
+
+  // ── Buy Verdict tab render ────────────────────────────────────
+  function renderVerdictTabContent(r) {
+    // Gọi qua global UMD (verdict-core.js load trước app.js trong index.html)
+    const V = window.__SSI_VERDICT__;
+    if (!V) return `<div class="an-reasons">Không tải được module đánh giá.</div>`;
+    // Backtest chứng minh scoring/dự báo KHÔNG có edge → tab chỉ MÔ TẢ trạng thái khách quan.
+    const s = V.describeState(r);
+    const fwd = currentData
+      ? V.computeSetupForwardReturn(currentData.closes, currentData.highs, currentData.lows, currentData.volumes)
+      : null;
+
+    // Header — nhắc rõ đây là mô tả trạng thái, không khuyến nghị
+    const head = `
+      <div class="ta-verdict ta-neutral">
+        <div class="ta-verdict-label">Trạng thái kỹ thuật</div>
+        <div class="ta-verdict-desc">Mô tả khách quan chart / giá / dòng tiền hiện tại. Không phải khuyến nghị mua/bán.</div>
+      </div>`;
+
+    // Các nhóm trạng thái — mỗi nhóm 1 dòng mô tả, tô màu theo tone
+    const groupRow = (g) =>
+      `<div class="vd-state vd-state-${g.tone}"><span class="vd-state-label">${g.label}</span><span class="vd-state-text">${g.text}</span></div>`;
+    const states = `
+      <div class="an-card">
+        <div class="an-title">Trạng thái hiện tại</div>
+        <div class="vd-states">${s.groups.map(groupRow).join("")}</div>
+      </div>`;
+
+    // Cảnh báo rủi ro — chỉ hiện khi có
+    const warns = s.warns.length
+      ? `<div class="an-card"><div class="an-title">⚠ Cảnh báo</div>
+           <div class="vd-reasons">${s.warns.map((x) => `<span class="chip vd-chip-warn">${x}</span>`).join("")}</div></div>`
+      : "";
+
+    // Thống kê lịch sử (tham khảo) — forward-return từ setup tương tự trong quá khứ
+    let stats;
+    if (!fwd) {
+      stats = `<div class="an-card"><div class="an-title">Thống kê lịch sử (tham khảo)</div>
+        <div class="an-reasons">Không đủ dữ liệu lịch sử (cần ≥ 50 phiên).</div></div>`;
+    } else {
+      const note = fwd.method === "atr-fallback"
+        ? `<div class="an-reasons">Ít mẫu lịch sử khớp trạng thái — ước lượng biên độ từ biến động (ATR ${fwd.atrPct ? fwd.atrPct.toFixed(2) : "--"}%/phiên).</div>`
+        : `<div class="an-reasons">Trong quá khứ, các phiên có trạng thái tương tự (vị trí MA50 · RSI · ADX · volume) diễn biến như sau:</div>`;
+      // h null (atr-fallback với atrPct null) → hiện "—", không crash
+      const hRow = (lbl, h) => h
+        ? `<div class="vd-fc-row"><span>${lbl}</span>
+             <b class="${h.median >= 0 ? "up" : "down"}">${h.median >= 0 ? "+" : ""}${h.median.toFixed(1)}%</b>
+             <small>dải ${h.p25.toFixed(1)}% … ${h.p75.toFixed(1)}%${h.n ? ` · n=${h.n}` : ""}</small></div>`
+        : `<div class="vd-fc-row"><span>${lbl}</span><small>—</small></div>`;
+      stats = `<div class="an-card"><div class="an-title">Thống kê lịch sử (tham khảo)</div>
+        ${note}
+        ${hRow("Sau 5 phiên", fwd.horizons.h5)}
+        ${hRow("Sau 10 phiên", fwd.horizons.h10)}
+        ${hRow("Sau 20 phiên", fwd.horizons.h20)}</div>`;
+    }
+
+    // Vùng tham chiếu — hỗ trợ/kháng cự/stop (mô tả vùng, không phải lệnh)
+    const pct = (to) => r.current ? ((to - r.current) / r.current) * 100 : 0;
+    const action = `<div class="an-card"><div class="an-title">Vùng giá tham chiếu</div>
+      ${r.resistance ? `<div class="vd-fc-row"><span>Kháng cự gần</span><b>${fp(r.resistance)}</b><small>${pct(r.resistance) >= 0 ? "+" : ""}${pct(r.resistance).toFixed(1)}%</small></div>` : ""}
+      ${r.support ? `<div class="vd-fc-row"><span>Hỗ trợ gần</span><b>${fp(r.support)}</b><small>${pct(r.support).toFixed(1)}%</small></div>` : ""}
+      ${r.stopLoss ? `<div class="vd-fc-row"><span>Mốc rủi ro (2·ATR)</span><b>${fp(r.stopLoss)}</b><small>${pct(r.stopLoss).toFixed(1)}%</small></div>` : ""}
+    </div>`;
+
+    const disclaimer = `<div class="an-reasons" style="margin-top:10px;font-style:italic">
+      Backtest cho thấy chỉ báo kỹ thuật thuần không dự báo được xu hướng tăng/giảm trên thị trường VN,
+      nên tab này chỉ MÔ TẢ trạng thái, KHÔNG khuyến nghị mua/bán. Thống kê lịch sử là phân phối quá khứ,
+      không đảm bảo tương lai.</div>`;
+
+    return head + states + warns + stats + action + disclaimer;
   }
 
   // ── AI analysis (Gemini via worker) ────────────────────────────

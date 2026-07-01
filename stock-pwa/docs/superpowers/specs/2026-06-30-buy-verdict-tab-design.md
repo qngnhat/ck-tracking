@@ -1,5 +1,16 @@
 # 2026-06-30 — Tab "Nên mua?" (Buy Verdict) cho màn phân tích mã
 
+> **CẬP NHẬT 2026-07-01 (PIVOT sau backtest):** Ý tưởng "chấm điểm nên mua + dự báo %"
+> đã bị **backtest bác bỏ**. Walk-forward trên 20 mã VN (14k+ phiên):
+> - Verdict 4-trụ: bias cao → forward THẤP nhất (đảo ngược, no edge).
+> - Pullback-in-uptrend detector: cũng không hơn baseline (+1.07% vs +1.30%).
+> - Lọc pullback theo lịch sử từng mã: vẫn ≈ baseline.
+> Kết luận: chỉ báo kỹ thuật thuần KHÔNG dự báo được forward return trên data VN
+> (khớp ghi chú Phase 1.4 của codebase). → Tab đổi thành **MÔ TẢ trạng thái kỹ thuật
+> khách quan** (`describeState`), KHÔNG phán mua/bán, KHÔNG số %. Thống kê lịch sử
+> (`computeSetupForwardReturn`) giữ lại làm THAM KHẢO có disclaimer. Phần dưới là thiết
+> kế gốc; đọc kèm ghi chú này.
+
 ## Context
 
 Tab Rà soát (quét cả rổ VN100) đã bị strip và **tạm gác lại**. Hướng mới: thay vì
