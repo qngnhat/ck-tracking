@@ -6705,18 +6705,18 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 
 /* ── Strong Leaders pick-card V2: BIG MUA/CHỜ/KHÔNG action ── */
 .pick-card-v2 {
-  background: #14142a;
-  border: 1px solid #2a2a3e;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 12px;
   border-left-width: 4px;
 }
 .pick-card-v2.pick-action-buy {
-  border-left-color: #4CAF50;
+  border-left-color: var(--pos);
 }
 .pick-card-v2.pick-action-wait {
-  border-left-color: #FF9800;
+  border-left-color: var(--warn);
 }
 .pick-card-v2.pick-action-no {
   border-left-color: #f44336;
@@ -6737,18 +6737,18 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   opacity: 0.9;
 }
 .pick-v2-rank {
-  color: #888;
+  color: var(--text-mute);
   font-size: 12px;
   font-weight: 600;
 }
 .pick-v2-symbol {
   font-size: 18px;
   font-weight: bold;
-  color: #fff;
+  color: var(--text-strong);
 }
 .pick-v2-sector {
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
   background: rgba(255, 255, 255, 0.05);
   padding: 2px 8px;
   border-radius: 4px;
@@ -6756,7 +6756,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .pick-v2-price {
   margin-left: auto;
   font-size: 16px;
-  color: #00d2ff;
+  color: var(--accent);
   font-weight: 600;
 }
 .pick-v2-header .pct {
@@ -6774,12 +6774,12 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border: 1px solid;
 }
 .pick-action-buy .pick-v2-action {
-  background: rgba(76, 175, 80, 0.10);
-  border-color: rgba(76, 175, 80, 0.4);
+  background: rgba(var(--pos-rgb), 0.10);
+  border-color: rgba(var(--pos-rgb), 0.4);
 }
 .pick-action-wait .pick-v2-action {
-  background: rgba(255, 152, 0, 0.10);
-  border-color: rgba(255, 152, 0, 0.4);
+  background: rgba(var(--warn-rgb), 0.10);
+  border-color: rgba(var(--warn-rgb), 0.4);
 }
 .pick-action-no .pick-v2-action {
   background: rgba(244, 67, 54, 0.10);
@@ -6792,10 +6792,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   letter-spacing: 0.5px;
 }
 .pick-action-buy .pick-v2-action-label {
-  color: #81c784;
+  color: var(--pos-soft);
 }
 .pick-action-wait .pick-v2-action-label {
-  color: #ffb74d;
+  color: var(--warn-soft);
 }
 .pick-action-no .pick-v2-action-label {
   color: #ef5350;
@@ -6809,11 +6809,11 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 /* Lý do 1 dòng */
 .pick-v2-reason {
   padding: 8px 10px;
-  background: rgba(0, 210, 255, 0.04);
-  border-left: 2px solid rgba(0, 210, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.04);
+  border-left: 2px solid rgba(var(--accent-rgb), 0.3);
   border-radius: 4px;
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-dim);
   margin-bottom: 10px;
   line-height: 1.5;
 }
@@ -6835,15 +6835,15 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   flex-wrap: wrap;
 }
 .pick-v2-plan-label {
-  color: #888;
+  color: var(--text-mute);
   min-width: 90px;
 }
 .pick-v2-plan-val {
-  color: #fff;
+  color: var(--text-strong);
   flex: 1;
 }
 .pick-v2-plan-val b {
-  color: #00d2ff;
+  color: var(--accent);
 }
 
 /* Collapse details */
@@ -6853,7 +6853,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .pick-v2-details summary {
   cursor: pointer;
   font-size: 12px;
-  color: #888;
+  color: var(--text-mute);
   padding: 6px 0;
   list-style: none;
 }
@@ -6872,7 +6872,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .pick-v2-analyze-cta {
   font-size: 11px;
-  color: #666;
+  color: var(--text-faint);
   margin-top: 8px;
   font-style: italic;
 }
@@ -6888,14 +6888,14 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border: 1px solid;
 }
 .pick-win-chip.win-chip-good {
-  background: rgba(76, 175, 80, 0.12);
-  border-color: rgba(76, 175, 80, 0.5);
-  color: #81c784;
+  background: rgba(var(--pos-rgb), 0.12);
+  border-color: rgba(var(--pos-rgb), 0.5);
+  color: var(--pos-soft);
 }
 .pick-win-chip.win-chip-neutral {
-  background: rgba(255, 152, 0, 0.10);
-  border-color: rgba(255, 152, 0, 0.45);
-  color: #ffb74d;
+  background: rgba(var(--warn-rgb), 0.10);
+  border-color: rgba(var(--warn-rgb), 0.45);
+  color: var(--warn-soft);
 }
 .pick-win-chip.win-chip-warn {
   background: rgba(244, 67, 54, 0.10);
@@ -6906,8 +6906,8 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 /* Closed positions section (mã đã đóng vị thế) */
 .port-closed-section {
   margin-top: 14px;
-  background: #14142a;
-  border: 1px solid #2a2a3e;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -6919,7 +6919,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   padding: 10px 14px;
   cursor: pointer;
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-dim);
   transition: background 0.15s;
 }
 
@@ -6932,18 +6932,18 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 
 .port-closed-toggle {
-  color: #888;
+  color: var(--text-mute);
   font-size: 10px;
 }
 
 .port-closed-body {
   padding: 4px 14px 12px;
-  border-top: 1px solid #2a2a3e;
+  border-top: 1px solid var(--border);
 }
 
 .closed-item {
   padding: 8px 0;
-  border-bottom: 1px dashed #20203a;
+  border-bottom: 1px dashed var(--surface-3);
 }
 
 .closed-item:last-child {
@@ -6959,7 +6959,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 
 .closed-symbol {
-  color: #fff;
+  color: var(--text-strong);
   font-weight: 700;
 }
 
@@ -6971,14 +6971,14 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
 }
 
 /* Portfolio risk hints (Cash/Equity ratio, Xanh-vỏ-đỏ-lòng) */
 .port-risk-hints {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #2a2a3e;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -6990,19 +6990,19 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   padding: 6px 10px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.03);
-  color: #ccc;
+  color: var(--text-dim);
 }
 
 .port-risk-hint.port-risk-warn {
-  background: rgba(255, 152, 0, 0.1);
-  border: 1px solid rgba(255, 152, 0, 0.3);
-  color: #ffb74d;
+  background: rgba(var(--warn-rgb), 0.1);
+  border: 1px solid rgba(var(--warn-rgb), 0.3);
+  color: var(--warn-soft);
 }
 
 .port-risk-hint.port-risk-info {
-  background: rgba(0, 210, 255, 0.08);
-  border: 1px solid rgba(0, 210, 255, 0.3);
-  color: #4dd0e1;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  color: var(--accent-soft);
 }
 
 .port-risk-hint.port-risk-info b {
@@ -7010,7 +7010,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 
 .port-risk-hint b {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .port-risk-hint.port-risk-warn b {
@@ -7019,18 +7019,18 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 
 /* Sell CTA orange khi action priority = 1 (SL violation / sát SL) */
 .holding-sell-cta {
-  color: #ff9800 !important;
+  color: var(--warn) !important;
   font-weight: 700;
 }
 
 .holding-sell-cta:hover {
-  color: #ffb74d !important;
+  color: var(--warn-soft) !important;
 }
 
 /* Duplicate transactions warning banner */
 .dupe-banner {
-  background: rgba(255, 152, 0, 0.1);
-  border: 1px solid rgba(255, 152, 0, 0.4);
+  background: rgba(var(--warn-rgb), 0.1);
+  border: 1px solid rgba(var(--warn-rgb), 0.4);
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 12px;
@@ -7043,7 +7043,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .dupe-banner-text {
   flex: 1;
   font-size: 12px;
-  color: #ffb74d;
+  color: var(--warn-soft);
   line-height: 1.5;
   min-width: 200px;
 }
@@ -7079,10 +7079,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-weight: 600;
 }
 
-.hd-leg-cost { color: #00d2ff; }
-.hd-leg-tp { color: #FF9800; }
-.hd-leg-sl { color: #ff4444; }
-.hd-leg-ma { color: #888; }
+.hd-leg-cost { color: var(--accent); }
+.hd-leg-tp { color: var(--warn); }
+.hd-leg-sl { color: var(--neg); }
+.hd-leg-ma { color: var(--text-mute); }
 
 .holding-actions-row {
   display: flex;
@@ -7114,9 +7114,9 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #1a1a2e;
+  background: var(--surface);
   border-radius: 16px 16px 0 0;
-  border-top: 1px solid #2a2a3e;
+  border-top: 1px solid var(--border);
   z-index: 201;
   transform: translateY(100%);
   transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1);
@@ -7139,19 +7139,19 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   justify-content: space-between;
   align-items: center;
   padding: 14px 20px;
-  border-bottom: 1px solid #2a2a3e;
+  border-bottom: 1px solid var(--border);
 }
 
 .modal-title {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .modal-close {
   background: none;
   border: none;
-  color: #888;
+  color: var(--text-mute);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -7174,7 +7174,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .form-row label {
   display: block;
   font-size: 11px;
-  color: #00d2ff;
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.3px;
   margin-bottom: 6px;
@@ -7185,10 +7185,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .form-row input[type="number"],
 .form-row input[type="date"] {
   width: 100%;
-  background: #0f0f1e;
-  border: 1px solid #2a2a3e;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #fff;
+  color: var(--text-strong);
   font-size: 14px;
   padding: 10px 12px;
   outline: none;
@@ -7196,17 +7196,17 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 
 .form-row input:focus {
-  border-color: #00d2ff;
+  border-color: var(--accent);
 }
 
 .form-summary {
-  background: #0f0f1e;
-  border: 1px solid #2a2a3e;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   margin: 8px 0 14px;
   font-size: 13px;
-  color: #00d2ff;
+  color: var(--accent);
   font-weight: 600;
   min-height: 14px;
   text-align: center;
@@ -7280,9 +7280,9 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .midterm-sizing-helper input[type="number"] {
   width: 80px;
   padding: 6px 10px;
-  border: 1px solid #2a2a3e;
-  background: #0f0f1e;
-  color: #fff;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-strong);
   border-radius: 5px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
@@ -7297,7 +7297,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .midterm-sizing-helper .sizing-hint {
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
   margin-left: auto;
 }
 @media (max-width: 480px) {
@@ -7326,7 +7326,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .midterm-sub {
   font-size: 12px;
-  color: #888;
+  color: var(--text-mute);
 }
 
 .midterm-picks-grid {
@@ -7352,7 +7352,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .mt-symbol {
   font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: var(--text-strong);
   letter-spacing: 0.5px;
 }
 .mt-status {
@@ -7361,7 +7361,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
 }
-.mt-status.status-profit { background: rgba(102, 187, 106, 0.15); color: #81c784; }
+.mt-status.status-profit { background: rgba(102, 187, 106, 0.15); color: var(--pos-soft); }
 .mt-status.status-new    { background: rgba(33, 150, 243, 0.15); color: #4fc3f7; }
 .mt-status.status-hold   { background: rgba(255, 193, 7, 0.12); color: #FFC107; }
 
@@ -7378,23 +7378,23 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   justify-content: space-between;
   font-size: 13px;
 }
-.mt-label { color: #888; }
+.mt-label { color: var(--text-mute); }
 .mt-value { color: #d0d6e2; font-variant-numeric: tabular-nums; }
 .mt-value.mt-sl    { color: #ef5350; }
-.mt-value.mt-peak  { color: #81c784; }
+.mt-value.mt-peak  { color: var(--pos-soft); }
 .mt-value.mt-trail { color: #FFC107; }
-.mt-value small    { color: #666; font-size: 11px; margin-left: 2px; }
+.mt-value small    { color: var(--text-faint); font-size: 11px; margin-left: 2px; }
 
 .mt-sizing {
   font-size: 14px;
   color: #d0d6e2;
   padding: 8px 10px;
   background: rgba(33, 150, 243, 0.06);
-  border-left: 3px solid #2196F3;
+  border-left: 3px solid var(--info);
   border-radius: 4px;
 }
 .mt-sizing b {
-  color: #fff;
+  color: var(--text-strong);
   font-weight: 700;
 }
 
@@ -7409,11 +7409,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   line-height: 1.4;
 }
 .mt-plan-row small { color: #777; }
-
 .mt-days-held {
   text-align: center;
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
   padding-top: 4px;
   border-top: 1px dashed rgba(255, 255, 255, 0.06);
 }
@@ -7434,7 +7433,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #d0d6e2;
   line-height: 1.5;
 }
-.scan-summary-banner b { color: #fff; }
+.scan-summary-banner b { color: var(--text-strong); }
 
 /* Full-scan progress bar */
 .full-scan-progress-bar {
@@ -7448,7 +7447,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .full-scan-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #2196F3, #FFC107);
+  background: linear-gradient(90deg, var(--info), #FFC107);
   transition: width 0.3s ease;
 }
 
@@ -7464,7 +7463,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .fbo-section-header h3 {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   margin: 0 0 4px 0;
 }
 .fbo-section-sub {
@@ -7495,7 +7494,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   background: linear-gradient(90deg, rgba(239, 83, 80, 0.08), rgba(255, 255, 255, 0.02));
   border-left-color: #ef5350;
 }
-.climax-section-header h3 { color: #fff; }
+.climax-section-header h3 { color: var(--text-strong); }
 .midterm-card.climax-card-mt {
   border-color: rgba(239, 83, 80, 0.20);
   background: linear-gradient(180deg, rgba(239, 83, 80, 0.03), rgba(255, 255, 255, 0.02));
@@ -7511,7 +7510,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   font-size: 11px;
   padding: 2px 6px;
   background: rgba(239, 83, 80, 0.15);
-  color: #ff8a80;
+  color: var(--neg-soft);
   border-radius: 4px;
   font-weight: 600;
   margin-left: 6px;
@@ -7519,7 +7518,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .midterm-card.tier-premium .climax-tier-pill {
   background: rgba(255, 215, 0, 0.15);
-  color: #ffd700;
+  color: var(--gold);
 }
 .midterm-card.tier-elite .climax-tier-pill {
   background: rgba(255, 193, 7, 0.15);
@@ -7529,7 +7528,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 /* Momentum tier cards */
 .momentum-section-header {
   background: linear-gradient(90deg, rgba(33, 150, 243, 0.08), rgba(255, 255, 255, 0.02));
-  border-left-color: #2196F3;
+  border-left-color: var(--info);
 }
 .midterm-card.momentum-card-mt {
   border-color: rgba(33, 150, 243, 0.20);
@@ -7562,7 +7561,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .verdict-line .verdict-text {
   font-weight: 700;
   font-size: 13px;
-  color: #fff;
+  color: var(--text-strong);
 }
 .verdict-line .verdict-bt {
   font-size: 11px;
@@ -7591,18 +7590,18 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   padding: 14px 16px;
   border-radius: 10px;
   margin-bottom: 16px;
-  border-left: 4px solid #888;
+  border-left: 4px solid var(--text-mute);
   background: rgba(255, 255, 255, 0.03);
 }
 .ta-verdict.ta-strong-bull { border-left-color: #66bb6a; background: rgba(102,187,106,0.10); }
 .ta-verdict.ta-mild-bull   { border-left-color: #FFC107; background: rgba(255,193,7,0.08); }
-.ta-verdict.ta-neutral     { border-left-color: #888;    background: rgba(255,255,255,0.03); }
+.ta-verdict.ta-neutral     { border-left-color: var(--text-mute); background: rgba(255,255,255,0.03); }
 .ta-verdict.ta-mild-bear   { border-left-color: #FFA726; background: rgba(255,167,38,0.08); }
 .ta-verdict.ta-strong-bear { border-left-color: #ef5350; background: rgba(239,83,80,0.10); }
 .ta-verdict-label {
   font-size: 16px;
   font-weight: 800;
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 4px;
 }
 .ta-verdict-desc {
@@ -7621,7 +7620,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .ta-section-title {
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   margin: 0 0 8px 0;
 }
 .ta-row {
@@ -7632,13 +7631,13 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .ta-row.sentiment-bullish      { border-left-color: #66bb6a; background: rgba(102,187,106,0.06); }
 .ta-row.sentiment-bullish-mild { border-left-color: #FFC107; background: rgba(255,193,7,0.05); }
-.ta-row.sentiment-neutral      { border-left-color: #888; }
+.ta-row.sentiment-neutral      { border-left-color: var(--text-mute); }
 .ta-row.sentiment-bearish-mild { border-left-color: #FFA726; background: rgba(255,167,38,0.05); }
 .ta-row.sentiment-bearish      { border-left-color: #ef5350; background: rgba(239,83,80,0.06); }
 .ta-label {
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 2px;
 }
 .ta-desc {
@@ -7656,7 +7655,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #d0d6e2;
 }
 .ta-mini-label {
-  color: #888;
+  color: var(--text-mute);
   font-size: 11px;
 }
 
@@ -7672,13 +7671,13 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .ta-sr-label {
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
   margin-bottom: 2px;
 }
 .ta-sr-value {
   font-size: 16px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   font-variant-numeric: tabular-nums;
 }
 .ta-sr-dist {
@@ -7710,7 +7709,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .ta-info-symbol {
   font-size: 22px;
   font-weight: 800;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ta-info-price {
   font-size: 18px;
@@ -7736,7 +7735,6 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   color: #777;
   margin-left: 2px;
 }
-
 .ta-controls {
   display: flex;
   align-items: center;
@@ -7764,7 +7762,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   margin-top: 6px;
   padding: 0 8px;
   font-size: 11px;
-  color: #aaa;
+  color: var(--text-mute);
 }
 .ta-legend-item {
   display: inline-flex;
@@ -7803,11 +7801,11 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border-left: 2px solid rgba(255, 255, 255, 0.1);
 }
 .ta-profile-label {
-  color: #888;
+  color: var(--text-mute);
   font-size: 11px;
 }
 .ta-profile-item b {
-  color: #fff;
+  color: var(--text-strong);
 }
 .ta-profile-item small {
   color: #999;
@@ -7836,7 +7834,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #2196F3;
+  accent-color: var(--info);
 }
 
 /* Portfolio TA Coach (inject TA verdict vào holding card) */
@@ -7844,12 +7842,12 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   margin-top: 10px;
   padding: 10px 12px;
   border-radius: 8px;
-  border-left: 3px solid #888;
+  border-left: 3px solid var(--text-mute);
   background: rgba(255, 255, 255, 0.02);
 }
 .holding-ta-coach.ta-strong-bull { border-left-color: #66bb6a; background: rgba(102,187,106,0.06); }
 .holding-ta-coach.ta-mild-bull   { border-left-color: #FFC107; background: rgba(255,193,7,0.05); }
-.holding-ta-coach.ta-neutral     { border-left-color: #888; }
+.holding-ta-coach.ta-neutral     { border-left-color: var(--text-mute); }
 .holding-ta-coach.ta-mild-bear   { border-left-color: #FFA726; background: rgba(255,167,38,0.05); }
 .holding-ta-coach.ta-strong-bear { border-left-color: #ef5350; background: rgba(239,83,80,0.06); }
 
@@ -7862,11 +7860,11 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .ta-coach-label {
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ta-coach-count {
   font-size: 10px;
-  color: #888;
+  color: var(--text-mute);
 }
 .ta-coach-signals {
   display: grid;
@@ -7883,10 +7881,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.02);
 }
-.ta-coach-sig.sentiment-bullish      { color: #81c784; }
+.ta-coach-sig.sentiment-bullish      { color: var(--pos-soft); }
 .ta-coach-sig.sentiment-bullish-mild { color: #fff176; }
-.ta-coach-sig.sentiment-bearish-mild { color: #ffb74d; }
-.ta-coach-sig.sentiment-bearish      { color: #ff8a80; }
+.ta-coach-sig.sentiment-bearish-mild { color: var(--warn-soft); }
+.ta-coach-sig.sentiment-bearish      { color: var(--neg-soft); }
 .ta-coach-sig.sentiment-neutral      { color: #b0bec5; }
 .ta-coach-sig-icon {
   font-weight: 700;
@@ -7929,7 +7927,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 8px;
   background: rgba(255,255,255,0.04);
-  color: #fff;
+  color: var(--text-strong);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
@@ -7948,10 +7946,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   margin-top: 3px;
   font-size: 10px;
   font-weight: 400;
-  color: #888;
+  color: var(--text-mute);
 }
 .ta-ai-btn-explain {
-  border-left: 3px solid #2196F3;
+  border-left: 3px solid var(--info);
 }
 .ta-ai-btn-research {
   border-left: 3px solid #FFC107;
@@ -7974,14 +7972,14 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   text-align: center;
 }
 .ta-ai-loading small {
-  color: #666;
+  color: var(--text-faint);
   font-size: 11px;
 }
 .ta-ai-spinner {
   width: 28px;
   height: 28px;
   border: 3px solid rgba(255,255,255,0.1);
-  border-top-color: #2196F3;
+  border-top-color: var(--info);
   border-radius: 50%;
   animation: ta-ai-spin 0.8s linear infinite;
 }
@@ -7993,7 +7991,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   background: rgba(239,83,80,0.1);
   border: 1px solid rgba(239,83,80,0.3);
   border-radius: 6px;
-  color: #ff8a80;
+  color: var(--neg-soft);
   font-size: 13px;
   display: flex;
   flex-direction: column;
@@ -8015,19 +8013,19 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .ta-ai-header-label {
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ta-ai-cached {
   font-size: 10px;
   padding: 2px 6px;
   background: rgba(102,187,106,0.15);
-  color: #81c784;
+  color: var(--pos-soft);
   border-radius: 4px;
 }
 .ta-ai-disclaimer {
   margin-left: auto;
   font-size: 10px;
-  color: #888;
+  color: var(--text-mute);
   font-style: italic;
 }
 .ta-ai-body {
@@ -8038,10 +8036,10 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .ta-ai-body h3, .ta-ai-body h4 {
   margin: 12px 0 6px;
   font-size: 13px;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ta-ai-body p { margin: 6px 0; }
-.ta-ai-body strong { color: #fff; }
+.ta-ai-body strong { color: var(--text-strong); }
 .ta-ai-body em { color: #FFC107; font-style: normal; }
 .ta-ai-body ul { margin: 6px 0; padding-left: 18px; }
 .ta-ai-body li { margin: 3px 0; }
@@ -8064,7 +8062,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 .ta-ai-citations-title {
   font-size: 11px;
-  color: #888;
+  color: var(--text-mute);
   margin-bottom: 6px;
   font-weight: 600;
 }
@@ -8088,11 +8086,11 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 .vd-pillar {
   display: flex; justify-content: space-between; align-items: center;
   padding: 6px 10px; border-radius: 4px; font-size: 13px;
-  background: rgba(255,255,255,0.02); border-left: 2px solid #888;
+  background: rgba(255,255,255,0.02); border-left: 2px solid var(--text-mute);
 }
 .vd-pillar.vd-up   { border-left-color: #66bb6a; }
 .vd-pillar.vd-down { border-left-color: #ef5350; }
-.vd-pillar.vd-flat { border-left-color: #888; }
+.vd-pillar.vd-flat { border-left-color: var(--text-mute); }
 .vd-pillar b { font-size: 14px; }
 .vd-pillar.vd-up b   { color: #66bb6a; }
 .vd-pillar.vd-down b { color: #ef5350; }
@@ -8101,23 +8099,23 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
   display: flex; align-items: baseline; gap: 8px;
   padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.vd-fc-row span { flex: 1; font-size: 13px; color: #ccc; }
+.vd-fc-row span { flex: 1; font-size: 13px; color: var(--text-dim); }
 .vd-fc-row b { font-size: 15px; font-weight: 700; }
 .vd-fc-row b.up   { color: #66bb6a; }
 .vd-fc-row b.down { color: #ef5350; }
-.vd-fc-row small { color: #888; font-size: 11px; }
+.vd-fc-row small { color: var(--text-mute); font-size: 11px; }
 
 /* ── Buy Verdict tab — state description (pivot: mô tả, không dự báo) ── */
 .vd-states { display: flex; flex-direction: column; gap: 6px; }
 .vd-state {
   padding: 8px 10px; border-radius: 4px;
-  background: rgba(255,255,255,0.02); border-left: 3px solid #888;
+  background: rgba(255,255,255,0.02); border-left: 3px solid var(--text-mute);
 }
 .vd-state-pos     { border-left-color: #66bb6a; }
 .vd-state-neg     { border-left-color: #ef5350; }
 .vd-state-warn    { border-left-color: #FFA726; }
-.vd-state-neutral { border-left-color: #888; }
-.vd-state-label { display: block; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.vd-state-neutral { border-left-color: var(--text-mute); }
+.vd-state-label { display: block; font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.5px; }
 .vd-state-text  { display: block; font-size: 13px; color: #eee; margin-top: 2px; line-height: 1.5; }
 .chip.vd-chip-warn { background: rgba(255,167,38,0.12); color: #FFA726; }
 
