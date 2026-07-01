@@ -464,23 +464,17 @@
 
     // Fallback width nếu container chưa measured (clientWidth=0)
     const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
+    const _ct = getChartTheme();
     chartInstance = window.LightweightCharts.createChart(container, {
       width: chartWidth,
       height: 320,
-      layout: {
-        background: { color: "#0f0f1e" },
-        textColor: "#a0a0b0",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: "#1f1f2e" },
-        horzLines: { color: "#1f1f2e" },
-      },
+      layout: { ...(_ct.layout), fontSize: 11 },
+      grid: _ct.grid,
       rightPriceScale: {
-        borderColor: "#2a2a3e",
+        borderColor: _ct.border,
       },
       timeScale: {
-        borderColor: "#2a2a3e",
+        borderColor: _ct.border,
         timeVisible: isIntraday,
         secondsVisible: false,
       },
@@ -493,18 +487,18 @@
 
     // Candlesticks
     const candleSeries = chartInstance.addCandlestickSeries({
-      upColor: "#4CAF50",
-      downColor: "#ff4444",
-      borderUpColor: "#4CAF50",
-      borderDownColor: "#ff4444",
-      wickUpColor: "#4CAF50",
-      wickDownColor: "#ff4444",
+      upColor: _ct.up,
+      downColor: _ct.down,
+      borderUpColor: _ct.up,
+      borderDownColor: _ct.down,
+      wickUpColor: _ct.up,
+      wickDownColor: _ct.down,
     });
     candleSeries.setData(candles);
 
     // MA20 line
     const ma20Line = chartInstance.addLineSeries({
-      color: "#00d2ff",
+      color: _ct.ma20,
       lineWidth: 1,
       title: "MA20",
       priceLineVisible: false,
@@ -514,7 +508,7 @@
 
     // MA50 line
     const ma50Line = chartInstance.addLineSeries({
-      color: "#ff9800",
+      color: _ct.ma50,
       lineWidth: 1,
       title: "MA50",
       priceLineVisible: false,
@@ -995,30 +989,31 @@
     const ma50Series = computeSMASeries(closes, times, 50);
     const ma200Series = computeSMASeries(closes, times, 200);
     const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
+    const _ct = getChartTheme();
     technicalChartInstance = window.LightweightCharts.createChart(container, {
       width: chartWidth, height: 320,
-      layout: { background: { color: "#0f0f1e" }, textColor: "#a0a0b0", fontSize: 11 },
-      grid: { vertLines: { color: "#1f1f2e" }, horzLines: { color: "#1f1f2e" } },
-      rightPriceScale: { borderColor: "#2a2a3e" },
-      timeScale: { borderColor: "#2a2a3e", timeVisible: false },
+      layout: { ...(_ct.layout), fontSize: 11 },
+      grid: _ct.grid,
+      rightPriceScale: { borderColor: _ct.border },
+      timeScale: { borderColor: _ct.border, timeVisible: false },
       crosshair: { mode: 1 },
     });
     const candleSeries = technicalChartInstance.addCandlestickSeries({
-      upColor: "#4CAF50", downColor: "#ff4444",
-      borderUpColor: "#4CAF50", borderDownColor: "#ff4444",
-      wickUpColor: "#4CAF50", wickDownColor: "#ff4444",
+      upColor: _ct.up, downColor: _ct.down,
+      borderUpColor: _ct.up, borderDownColor: _ct.down,
+      wickUpColor: _ct.up, wickDownColor: _ct.down,
     });
     candleSeries.setData(candles);
     if (ma20Series.length) {
-      const ma20Line = technicalChartInstance.addLineSeries({ color: "#00d2ff", lineWidth: 1, title: "MA20", priceLineVisible: false, lastValueVisible: false });
+      const ma20Line = technicalChartInstance.addLineSeries({ color: _ct.ma20, lineWidth: 1, title: "MA20", priceLineVisible: false, lastValueVisible: false });
       ma20Line.setData(ma20Series.filter((p) => p.value !== null));
     }
     if (ma50Series.length) {
-      const ma50Line = technicalChartInstance.addLineSeries({ color: "#FFC107", lineWidth: 1, title: "MA50", priceLineVisible: false, lastValueVisible: false });
+      const ma50Line = technicalChartInstance.addLineSeries({ color: _ct.ma50, lineWidth: 1, title: "MA50", priceLineVisible: false, lastValueVisible: false });
       ma50Line.setData(ma50Series.filter((p) => p.value !== null));
     }
     if (ma200Series.length) {
-      const ma200Line = technicalChartInstance.addLineSeries({ color: "#ef5350", lineWidth: 1, title: "MA200", priceLineVisible: false, lastValueVisible: false });
+      const ma200Line = technicalChartInstance.addLineSeries({ color: _ct.ma200, lineWidth: 1, title: "MA200", priceLineVisible: false, lastValueVisible: false });
       ma200Line.setData(ma200Series.filter((p) => p.value !== null));
     }
 
@@ -5302,22 +5297,21 @@
         vnindexChartInstance = null;
       }
       const chartWidth = container.clientWidth || container.parentElement?.clientWidth || window.innerWidth - 32;
+      const _ct = getChartTheme();
       vnindexChartInstance = window.LightweightCharts.createChart(container, {
         width: chartWidth,
         height: 220,
-        layout: { background: { color: "transparent" }, textColor: "#a0a0b0", fontSize: 10 },
-        grid: {
-          vertLines: { color: "rgba(255,255,255,0.04)" },
-          horzLines: { color: "rgba(255,255,255,0.04)" },
-        },
-        rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
-        timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: false },
+        // Keep transparent background — card has its own background
+        layout: { background: { color: "transparent" }, textColor: _ct.layout.textColor, fontSize: 10 },
+        grid: _ct.grid,
+        rightPriceScale: { borderColor: _ct.border },
+        timeScale: { borderColor: _ct.border, timeVisible: false },
         crosshair: { mode: 0 },
       });
       const series = vnindexChartInstance.addCandlestickSeries({
-        upColor: "#4CAF50", downColor: "#ff5722",
-        borderUpColor: "#4CAF50", borderDownColor: "#ff5722",
-        wickUpColor: "#4CAF50", wickDownColor: "#ff5722",
+        upColor: _ct.up, downColor: _ct.down,
+        borderUpColor: _ct.up, borderDownColor: _ct.down,
+        wickUpColor: _ct.up, wickDownColor: _ct.down,
       });
       series.setData(candles);
       vnindexChartInstance.timeScale().fitContent();
@@ -6224,27 +6218,21 @@
       close: data.closes[i],
     }));
 
+    const _ct = getChartTheme();
     hdChartInstance = window.LightweightCharts.createChart(cur, {
       width: cur.clientWidth,
       height: 220,
-      layout: {
-        background: { color: "#0f0f1e" },
-        textColor: "#a0a0b0",
-        fontSize: 10,
-      },
-      grid: {
-        vertLines: { color: "#1f1f2e" },
-        horzLines: { color: "#1f1f2e" },
-      },
-      rightPriceScale: { borderColor: "#2a2a3e" },
-      timeScale: { borderColor: "#2a2a3e", timeVisible: false, secondsVisible: false },
+      layout: { ...(_ct.layout), fontSize: 10 },
+      grid: _ct.grid,
+      rightPriceScale: { borderColor: _ct.border },
+      timeScale: { borderColor: _ct.border, timeVisible: false, secondsVisible: false },
       crosshair: { mode: 1 },
     });
 
     const candleSeries = hdChartInstance.addCandlestickSeries({
-      upColor: "#4CAF50", downColor: "#ff4444",
-      borderUpColor: "#4CAF50", borderDownColor: "#ff4444",
-      wickUpColor: "#4CAF50", wickDownColor: "#ff4444",
+      upColor: _ct.up, downColor: _ct.down,
+      borderUpColor: _ct.up, borderDownColor: _ct.down,
+      wickUpColor: _ct.up, wickDownColor: _ct.down,
     });
     candleSeries.setData(candles);
 
@@ -6252,7 +6240,7 @@
     const ma20Pts = computeSMASeries(data.closes, data.times, 20).filter((p) => p.value !== null);
     if (ma20Pts.length) {
       const ma20Line = hdChartInstance.addLineSeries({
-        color: "#888", lineWidth: 1, title: "MA20",
+        color: _ct.ma20, lineWidth: 1, title: "MA20",
         priceLineVisible: false, lastValueVisible: false,
       });
       ma20Line.setData(ma20Pts);
