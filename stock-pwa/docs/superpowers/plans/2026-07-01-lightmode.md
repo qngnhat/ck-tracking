@@ -1,5 +1,16 @@
 # Lightmode Implementation Plan
 
+> **STATUS 2026-07-01 — DONE.** 8 task hoàn tất, mỗi task review clean.
+> Kết quả: 943 hex hardcode → **8 hex literal còn lại** (chỉ cam/salmon/gold đặc thù,
+> cố ý giữ vì không có token khớp). Coverage ~99%.
+> Tokens thực tế (nhiều hơn plan gốc do phát sinh khi convert): base palette +
+> `--chart-ma200, --accent-panel, --surface-deep, --purple-soft, --neutral, --gold, --warn-deep`.
+> Light palette đã tune contrast WCAG: text-faint/accent/warn/gold chỉnh đậm đạt ≥3 (UI) — ≥4.3 (body).
+> 4 chart canvas đọc token qua getChartTheme(), redraw khi toggle. Toggle 🌙/☀️ + localStorage `theme_pref`.
+> **CHƯA làm (việc của user):** mở PWA bật/tắt theme trên từng tab để duyệt layout bằng mắt
+> (env không có Chrome — chỉ verify được token/contrast/cú pháp bằng script, không render thật).
+> Chi tiết tiến độ: `.superpowers/sdd/progress.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Thêm lightmode user tự bật/tắt cho Stock PWA, không phá dark mode, không đổi layout/logic.

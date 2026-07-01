@@ -33,16 +33,16 @@ body[data-theme="light"] {
   --surface: #ffffff;   --surface-2: #f0f2f6;   --surface-3: #e7eaf0;
   --border: #d8dce4;    --border-dim: #e4e7ee;
   --text: #1a1d26;      --text-strong: #0d0f16;
-  --text-dim: #3a3f4c;  --text-mute: #6a7080;   --text-faint: #9aa0ad;
-  --accent: #0090c0;    --accent-soft: #2bb3d4;
+  --text-dim: #3a3f4c;  --text-mute: #6a7080;   --text-faint: #6f7480;
+  --accent: #007ba8;    --accent-soft: #2bb3d4;
   --pos: #14883b;       --pos-soft: #43a35f;
   --neg: #d32f2f;       --neg-soft: #e06055;
-  --warn: #c77700;      --warn-soft: #d99a2b;
+  --warn: #b56b00;      --warn-soft: #d99a2b;
   --info: #1976d2;      --purple: #8e24aa;
   --chart-ma200: #c62828;
   --accent-panel: #dbe9f5;  --surface-deep: #eef0f4;
   --purple-soft: #a83fb8;   --neutral: #b8bcc4;
-  --gold: #c79a00;          --warn-deep: #e64a19;
+  --gold: #9a7700;          --warn-deep: #e64a19;
   --accent-rgb: 0,144,192;  --pos-rgb: 20,136,59;
   --neg-rgb: 211,47,47;     --warn-rgb: 217,119,43;
   --shadow: rgba(20,30,60,0.10);
@@ -4362,7 +4362,7 @@ details.ctx-plan-collapsed[open] > .ctx-plan-summary::after {
 }
 
 .tplus-watch-btn.active {
-  background: linear-gradient(135deg, var(--pos) 0%, #66bb6a 100%);
+  background: linear-gradient(135deg, var(--pos) 0%, var(--pos-soft) 100%);
   color: var(--text-strong);
   box-shadow: 0 2px 8px rgba(var(--pos-rgb), 0.3);
 }
