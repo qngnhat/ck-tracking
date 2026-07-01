@@ -39,7 +39,7 @@
       down: chartCssVar("--neg", "#ff4444"),
       ma20: chartCssVar("--accent", "#00d2ff"),
       ma50: chartCssVar("--warn-soft", "#ffb74d"),
-      ma200: chartCssVar("--neg", "#ef5350"),
+      ma200: chartCssVar("--chart-ma200", "#ef5350"),
       accentSoft: chartCssVar("--accent-soft", "#4dd0e1"),
       border: chartCssVar("--border", "#2a2a3e"),
     };
@@ -49,7 +49,7 @@
     [chartInstance, technicalChartInstance, vnindexChartInstance, hdChartInstance]
       .forEach((c) => {
         if (!c) return;
-        try { c.applyOptions({ layout: t.layout, grid: t.grid }); } catch (e) {}
+        try { c.applyOptions({ layout: t.layout, grid: t.grid }); } catch (e) { console.warn("applyChartTheme:", e); }
       });
   }
   function applyTheme() {
