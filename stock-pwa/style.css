@@ -21,6 +21,7 @@
   --warn: #ff9800;      --warn-soft: #ffb74d;
   --info: #2196f3;      --purple: #9c27b0;
   --chart-ma200: #ef5350;
+  --accent-panel: #0f3460;  --surface-deep: #16162a;
   --accent-rgb: 0,210,255;  --pos-rgb: 76,175,80;
   --neg-rgb: 255,68,68;     --warn-rgb: 255,152,0;
   --shadow: rgba(0,0,0,0.3);
@@ -37,6 +38,7 @@ body[data-theme="light"] {
   --warn: #c77700;      --warn-soft: #d99a2b;
   --info: #1976d2;      --purple: #8e24aa;
   --chart-ma200: #c62828;
+  --accent-panel: #dbe9f5;  --surface-deep: #eef0f4;
   --accent-rgb: 0,144,192;  --pos-rgb: 20,136,59;
   --neg-rgb: 211,47,47;     --warn-rgb: 217,119,43;
   --shadow: rgba(20,30,60,0.10);
@@ -231,7 +233,7 @@ button {
 }
 
 .auth-btn {
-  background: var(--surface-2);
+  background: var(--accent-panel);
   color: var(--accent);
   border: 1px solid var(--accent);
   border-radius: 18px;
@@ -304,7 +306,7 @@ button {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background-color: var(--surface-2);
+  background-color: var(--accent-panel);
   background-size: cover;
   background-position: center;
   color: var(--accent);
@@ -447,11 +449,11 @@ button {
 }
 
 .alert-row.unread {
-  background: var(--surface-2);
+  background: var(--accent-panel);
 }
 
 .alert-row:active {
-  background: var(--surface-2);
+  background: var(--accent-panel);
 }
 
 .alert-row-head {
@@ -499,7 +501,7 @@ button {
   padding: 10px 16px;
   display: flex;
   gap: 8px;
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--border-dim);
 }
 
 .search-input-wrap {
@@ -510,7 +512,7 @@ button {
 #symbol-input {
   width: 100%;
   background: var(--surface);
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text-strong);
   font-size: 16px;
@@ -575,7 +577,7 @@ button {
 
 .suggestion-item:active,
 .suggestion-item.active {
-  background: #0f3460;
+  background: var(--accent-panel);
 }
 
 .sugg-code {
@@ -609,7 +611,7 @@ button {
 }
 
 .btn-primary {
-  background: #0f3460;
+  background: var(--accent-panel);
   color: var(--accent);
   border-radius: 10px;
   padding: 12px 18px;
@@ -618,7 +620,7 @@ button {
 }
 
 .btn-primary:active {
-  background: #1a4a7a;
+  background: var(--accent-panel);
   transform: scale(0.97);
 }
 
@@ -715,7 +717,7 @@ button {
 }
 
 .chip:active {
-  background: #0f3460;
+  background: var(--accent-panel);
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -744,7 +746,7 @@ button {
   transform: translate(-50%, -10px);
   width: min(560px, calc(100vw - 24px));
   max-height: 70vh;
-  background: #16162a;
+  background: var(--surface-deep);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
@@ -869,7 +871,7 @@ button {
   gap: 14px;
   padding: 10px 14px;
   border-top: 1px solid var(--border);
-  background: #14142a;
+  background: var(--surface-deep);
   font-size: 11px;
   color: var(--text-faint);
 }
@@ -1198,7 +1200,7 @@ button {
   transform: translate(-50%, calc(-50% + 16px));
   width: min(560px, calc(100vw - 24px));
   max-height: calc(100vh - 64px);
-  background: #16162a;
+  background: var(--surface-deep);
   border: 1px solid var(--border);
   border-radius: 14px;
   z-index: 201;
@@ -1392,7 +1394,7 @@ body.is-offline {
 
 .analysis-tab {
   flex: 1;
-  background: #16162a;
+  background: var(--surface-deep);
   border: 1px solid var(--border);
   color: var(--text-mute);
   font-size: 13px;
@@ -1406,7 +1408,7 @@ body.is-offline {
 
 .analysis-tab:hover {
   background: rgba(var(--accent-rgb), 0.06);
-  color: #d0e0e8;
+  color: var(--text-dim);
 }
 
 .analysis-tab:active {
