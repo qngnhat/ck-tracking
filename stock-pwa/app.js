@@ -6240,7 +6240,7 @@
     const ma20Pts = computeSMASeries(data.closes, data.times, 20).filter((p) => p.value !== null);
     if (ma20Pts.length) {
       const ma20Line = hdChartInstance.addLineSeries({
-        color: _ct.ma20, lineWidth: 1, title: "MA20",
+        color: chartCssVar("--text-mute", "#888888"), lineWidth: 1, title: "MA20",
         priceLineVisible: false, lastValueVisible: false,
       });
       ma20Line.setData(ma20Pts);
