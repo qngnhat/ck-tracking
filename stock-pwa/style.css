@@ -822,11 +822,11 @@ button {
 }
 
 .cmdp-row:hover {
-  background: rgba(0, 210, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .cmdp-row-active {
-  background: rgba(0, 210, 255, 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
   color: var(--text-strong);
 }
 
@@ -924,7 +924,7 @@ button {
 }
 
 .vni-range-btn.active {
-  background: rgba(0, 210, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent);
 }
 
@@ -955,7 +955,7 @@ button {
 }
 
 .watch-row:hover, .watch-row:active {
-  background: rgba(0, 210, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .watch-row-info {
@@ -987,18 +987,18 @@ button {
 }
 
 .watch-status-met {
-  background: rgba(76, 175, 80, 0.18);
+  background: rgba(var(--pos-rgb), 0.18);
   color: var(--pos);
 }
 
 .watch-status-pending {
-  background: rgba(255, 152, 0, 0.12);
+  background: rgba(var(--warn-rgb), 0.12);
   color: var(--warn);
 }
 
 .watch-row-dismiss {
   background: none;
-  border: 1px solid rgba(255, 68, 68, 0.3);
+  border: 1px solid rgba(var(--neg-rgb), 0.3);
   color: var(--neg-soft);
   width: 30px;
   height: 30px;
@@ -1013,7 +1013,7 @@ button {
 }
 
 .watch-row-dismiss:hover {
-  background: rgba(255, 68, 68, 0.1);
+  background: rgba(var(--neg-rgb), 0.1);
   color: var(--neg);
 }
 
@@ -1042,8 +1042,8 @@ button {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-strong);
-  background: rgba(0, 210, 255, 0.1);
-  border: 1px solid rgba(0, 210, 255, 0.25);
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   padding: 3px 8px;
   border-radius: 10px;
 }
@@ -1062,7 +1062,7 @@ button {
 
 /* ── Stock Personality Profile card ── */
 .stock-profile-card {
-  background: linear-gradient(135deg, rgba(0, 210, 255, 0.04), rgba(76, 175, 80, 0.03));
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.04), rgba(var(--pos-rgb), 0.03));
 }
 
 .profile-chips {
@@ -1097,7 +1097,7 @@ button {
 
 .profile-chip.has-tip:hover,
 .profile-chip.has-tip:active {
-  background: rgba(0, 210, 255, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .profile-rows {
@@ -1124,7 +1124,7 @@ button {
 
 .profile-row.has-tip:hover,
 .profile-row.has-tip:active {
-  background: rgba(0, 210, 255, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
 }
 
 .profile-row.has-tip .profile-label::after {
@@ -1158,7 +1158,7 @@ button {
 .profile-hint {
   margin-top: 10px;
   padding: 8px 10px;
-  background: rgba(0, 210, 255, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   border-radius: 6px;
   font-size: 10px;
   color: var(--text-mute);
@@ -1307,7 +1307,7 @@ button {
 }
 
 .settings-radio:has(input:checked) {
-  background: rgba(0, 210, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent);
 }
 
@@ -1330,17 +1330,17 @@ button {
 }
 
 .settings-btn:hover {
-  background: rgba(0, 210, 255, 0.06) !important;
-  border-color: rgba(0, 210, 255, 0.3) !important;
+  background: rgba(var(--accent-rgb), 0.06) !important;
+  border-color: rgba(var(--accent-rgb), 0.3) !important;
 }
 
 .settings-btn-danger {
   color: var(--neg-soft) !important;
-  border-color: rgba(255, 68, 68, 0.3) !important;
+  border-color: rgba(var(--neg-rgb), 0.3) !important;
 }
 
 .settings-btn-danger:hover {
-  background: rgba(255, 68, 68, 0.08) !important;
+  background: rgba(var(--neg-rgb), 0.08) !important;
 }
 
 @media (max-width: 600px) {
@@ -1372,7 +1372,7 @@ button {
   font-weight: 600;
   text-align: center;
   padding: 6px 14px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 6px var(--shadow);
 }
 
 .offline-banner[hidden] {
@@ -1405,7 +1405,7 @@ body.is-offline {
 }
 
 .analysis-tab:hover {
-  background: rgba(0, 210, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   color: #d0e0e8;
 }
 
@@ -1414,9 +1414,9 @@ body.is-offline {
 }
 
 .analysis-tab.active {
-  background: rgba(0, 210, 255, 0.14);
-  border-color: rgba(0, 210, 255, 0.55);
-  color: #00d2ff;
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  color: var(--accent);
 }
 
 @media (max-width: 480px) {
