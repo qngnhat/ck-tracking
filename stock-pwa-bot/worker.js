@@ -2925,10 +2925,12 @@ async function sendMarketDigest(env, precomputedResult = null) {
   const { matches, market, gainers, losers, topVol } = result;
   console.log(`[digest] ${matches.length} climax · ${market.upCount}↑/${market.downCount}↓ · avg ${market.avgChange.toFixed(2)}%`);
 
-  // Fetch VN-Index để có index data
+  // Fetch VN-Index để có index data + market health (MA20/MA50 cần ≥50 phiên)
   let vniInfo = null;
+  let vniCloses = null;
   try {
-    const vni = await fetchVndHistory("VNINDEX", 5);
+    const vni = await fetchVndHistory("VNINDEX", 100);
+    vniCloses = vni.closes;
     const n = vni.closes.length;
     if (n >= 2) {
       const cur = vni.closes[n - 1];
@@ -2942,6 +2944,11 @@ async function sendMarketDigest(env, precomputedResult = null) {
   } catch (e) {
     console.warn("[digest] VN-Index fetch fail:", e.message);
   }
+
+  // Market health — phân biệt correction bounce-able vs falling-knife (breadth + VNI MA)
+  const health = computeMarketHealth(vniCloses || [], market.upCount, market.downCount);
+  const weakFlag = health.level === "weak" ? " ⚠️" : "";
+  console.log(`[digest] market health=${health.level} breadth=${market.upCount}↑/${market.downCount}↓`);
 
   // Fetch all connected users
   const sb = sbClient(env);
@@ -3020,6 +3027,12 @@ async function sendMarketDigest(env, precomputedResult = null) {
     text += `🐂 _VN-Index bull (+${result.vniRet20.toFixed(1)}% 20p) — Climax edge thấp hơn correction regime._\n`;
   }
 
+  // Market health warning — cảnh báo falling-knife khi VNI thủng MA + breadth sụp
+  if (health.banner) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += health.banner;
+  }
+
   // Bắt đáy T+ section
   const isEliteRegime = result.isEliteRegime;
   const premiumMatches = matches.filter((m) => m.is_premium);
@@ -3040,7 +3053,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
       const target = cur * 1.03 * 0.995;
       const sl = cur * 0.92;
       const nnTag = m.nn_net_5d_bn != null ? `NN +${m.nn_net_5d_bn}B/5d` : "";
-      text += `💎 *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag}\n`;
+      text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag}\n`;
       text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
     }
     text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly-adjusted, Sharpe 1.90 justifies bigger size)\n`;
@@ -3076,7 +3089,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
       const sl = entryMid * 0.92;
       const target = entryMid * 1.03;
 
-      const tierTag = isEliteRegime ? "⚡ Elite" : m.tier === "A" ? "🟢 A" : "🔵 B";
+      const tierTag = (isEliteRegime ? "⚡ Elite" : m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
       text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
       text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
     }
@@ -3210,20 +3223,8 @@ function computeMarketHealth(vniCloses, upCount, downCount) {
 
 async function sendClimaxAlerts(env) {
   console.log("[climax] scanning universe...");
-  const scan = await scanAllSymbols();
-  const matches = scan.matches;
-  const market = scan.market || {};
+  const matches = await scanVolClimaxMatches();
   console.log(`[climax] ${matches.length} matches found`);
-
-  // Market health — phân biệt correction bounce-able vs falling-knife (soft gate)
-  let health = { level: "ok", banner: "" };
-  try {
-    const vni = await fetchVndHistory("VNINDEX", 100);
-    health = computeMarketHealth(vni.closes, market.upCount, market.downCount);
-    console.log(`[climax] market health=${health.level} breadth=${market.upCount}↑/${market.downCount}↓`);
-  } catch (e) {
-    console.warn("[climax] market health fetch fail:", e.message);
-  }
 
   // Fetch all connected users (luôn gửi EOD tổng kết, kể cả 0 matches)
   const sb = sbClient(env);
@@ -3241,7 +3242,6 @@ async function sendClimaxAlerts(env) {
     const today = new Date();
     const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
     const emptyText = `🔻 *Bắt đáy T+ — ${todayLabel}*\n\n` +
-      health.banner +
       `📭 *Không có signal hôm nay* (cả Tier A + Tier B đều rỗng).\n\n` +
       `Đã scan ${VOL_CLIMAX_UNIVERSE.length} mã Large+Mid cap. Không mã nào match pattern:\n` +
       `• Tier A: drop >7% + vol >2× + RSI <35\n` +
@@ -3296,7 +3296,6 @@ async function sendClimaxAlerts(env) {
 
   let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
   text += `*${tierA.length}* Tier A (Edge cao) · *${tierB.length}* Tier B (Edge vừa)\n\n`;
-  if (health.banner) text += health.banner;
 
   // Show Tier A first (priority), then Tier B
   const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)];
@@ -3308,8 +3307,7 @@ async function sendClimaxAlerts(env) {
     const sl = entryMid * 0.92; // -8% close-based (backtest: -4% intraday destroy edge)
     const target = entryMid * 1.03; // +3% early exit threshold
 
-    const weakFlag = health.level === "weak" ? " ⚠️" : "";
-    const tierTag = (m.tier === "A" ? "🟢 Tier A" : "🔵 Tier B") + weakFlag;
+    const tierTag = m.tier === "A" ? "🟢 Tier A" : "🔵 Tier B";
     text += `━━━━━━━━━━━━━━━\n`;
     text += `${tierTag} · *${m.symbol}*  @ ${cur.toFixed(2)}\n`;
     text += `📉 3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n\n`;
