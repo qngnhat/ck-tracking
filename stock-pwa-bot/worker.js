@@ -3164,10 +3164,66 @@ async function sendMarketDigest(env, precomputedResult = null) {
   });
 }
 
+// ── Market health cho climax alert ────────────────────────────────
+// Climax = mean-reversion bắt oversold TRONG correction. Nhưng correction có
+// 2 loại: bounce-able (breadth chưa sụp) vs falling-knife (breadth sập, mọi
+// nhịp hồi bị bán ngược). Lớp này phân biệt để CẢNH BÁO, không chặn pick (giữ
+// mềm — user tự quyết). breadth = up/down trên 35 mã Large+Mid của scan.
+// Fail-open: thiếu VNI data hoặc breadth sample quá nhỏ → coi như "ok".
+function computeMarketHealth(vniCloses, upCount, downCount) {
+  const up = upCount || 0;
+  const down = downCount || 0;
+  const breadthRatio = up / Math.max(down, 1);
+  const n = vniCloses?.length || 0;
+  if (n < 50 || up + down < 5) {
+    return { level: "ok", breadthRatio, banner: "" };
+  }
+  const cur = vniCloses[n - 1];
+  const ma20 = vniCloses.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+  const ma50 = vniCloses.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+  const aboveMa20 = cur >= ma20;
+  const aboveMa50 = cur >= ma50;
+
+  // WEAK (dao rơi): VNI thủng MA50 VÀ phe giảm áp đảo ~2:1
+  // CAUTION (chớm yếu): dưới MA20 HOẶC breadth lệch
+  const level = (!aboveMa50 && breadthRatio < 0.5) ? "weak"
+              : (!aboveMa20 || breadthRatio < 0.6) ? "caution"
+              : "ok";
+
+  let banner = "";
+  const breadthStr = `${up}↑/${down}↓`;
+  if (level === "weak") {
+    banner =
+      `🔴 *Thị trường YẾU — cẩn thận dao rơi*\n` +
+      `VNI ${cur.toFixed(1)} thủng MA50 (${ma50.toFixed(1)}) · breadth ${breadthStr}\n` +
+      `Setup bắt đáy dưới đây rủi ro cao. Cân nhắc chờ 1 phiên xác nhận lực bán suy yếu (VNI hồi, đóng gần đỉnh ngày) trước khi vào.\n\n`;
+  } else if (level === "caution") {
+    const reason = !aboveMa20
+      ? `VNI ${cur.toFixed(1)} dưới MA20 (${ma20.toFixed(1)})`
+      : `breadth lệch ${breadthStr}`;
+    banner =
+      `🟡 *Thị trường chớm yếu* — ${reason}\n` +
+      `Vào nhỏ, ưu tiên mã NN mua ròng.\n\n`;
+  }
+  return { level, breadthRatio, cur, ma20, ma50, aboveMa20, aboveMa50, banner };
+}
+
 async function sendClimaxAlerts(env) {
   console.log("[climax] scanning universe...");
-  const matches = await scanVolClimaxMatches();
+  const scan = await scanAllSymbols();
+  const matches = scan.matches;
+  const market = scan.market || {};
   console.log(`[climax] ${matches.length} matches found`);
+
+  // Market health — phân biệt correction bounce-able vs falling-knife (soft gate)
+  let health = { level: "ok", banner: "" };
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 100);
+    health = computeMarketHealth(vni.closes, market.upCount, market.downCount);
+    console.log(`[climax] market health=${health.level} breadth=${market.upCount}↑/${market.downCount}↓`);
+  } catch (e) {
+    console.warn("[climax] market health fetch fail:", e.message);
+  }
 
   // Fetch all connected users (luôn gửi EOD tổng kết, kể cả 0 matches)
   const sb = sbClient(env);
@@ -3185,6 +3241,7 @@ async function sendClimaxAlerts(env) {
     const today = new Date();
     const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
     const emptyText = `🔻 *Bắt đáy T+ — ${todayLabel}*\n\n` +
+      health.banner +
       `📭 *Không có signal hôm nay* (cả Tier A + Tier B đều rỗng).\n\n` +
       `Đã scan ${VOL_CLIMAX_UNIVERSE.length} mã Large+Mid cap. Không mã nào match pattern:\n` +
       `• Tier A: drop >7% + vol >2× + RSI <35\n` +
@@ -3239,6 +3296,7 @@ async function sendClimaxAlerts(env) {
 
   let text = `🔻 *Bắt đáy T+ — ${todayLabel}*\n`;
   text += `*${tierA.length}* Tier A (Edge cao) · *${tierB.length}* Tier B (Edge vừa)\n\n`;
+  if (health.banner) text += health.banner;
 
   // Show Tier A first (priority), then Tier B
   const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)];
@@ -3250,7 +3308,8 @@ async function sendClimaxAlerts(env) {
     const sl = entryMid * 0.92; // -8% close-based (backtest: -4% intraday destroy edge)
     const target = entryMid * 1.03; // +3% early exit threshold
 
-    const tierTag = m.tier === "A" ? "🟢 Tier A" : "🔵 Tier B";
+    const weakFlag = health.level === "weak" ? " ⚠️" : "";
+    const tierTag = (m.tier === "A" ? "🟢 Tier A" : "🔵 Tier B") + weakFlag;
     text += `━━━━━━━━━━━━━━━\n`;
     text += `${tierTag} · *${m.symbol}*  @ ${cur.toFixed(2)}\n`;
     text += `📉 3p: ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n\n`;
