@@ -132,6 +132,15 @@ export default {
       ctx.waitUntil(sendMarketDigest(env));
       return new Response("Market digest triggered", { status: 200 });
     }
+    if (url.pathname === "/morning-test" && request.method === "POST") {
+      // Manual trigger morning briefing (gồm tử vi) — gửi Telegram thật
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(sendMorningBriefing(env));
+      return new Response("Morning briefing triggered", { status: 200 });
+    }
     if (url.pathname === "/climax-dryrun" && request.method === "GET") {
       // Scan + return matches as JSON (no Telegram broadcast) — debug only
       const secret = url.searchParams.get("secret");
