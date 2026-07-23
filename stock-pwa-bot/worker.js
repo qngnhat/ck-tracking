@@ -2856,19 +2856,19 @@ async function getVniMood() {
 
 const HOROSCOPE_FALLBACK = {
   weak: [
-    "Sao Thái Bạch chiếu mệnh, tài khoản dễ bị 'quét vôi'. Thần Tài khuyên: hôm nay ngồi im giữ tiền, đừng đua lệnh bắt dao. 🍀 Số may mắn: 0 (số lệnh nên vào). Màu may mắn: xanh (màu tiền mặt).",
-    "Cung Tài Bạch động, mà động theo chiều... đỏ. Tay to đang gom hàng của mấy bạn hoảng loạn — đừng làm 'lá cải' cho họ. 🍀 Số may mắn: 3 (số ngày nên kiên nhẫn). Màu may mắn: trắng.",
+    "Sao Thái Bạch chiếu mệnh, cung Tài Bạch nhuốm màu đỏ quạch, tài khoản dễ bị 'quét vôi' như tường nhà mới. Thần Tài hôm nay bận đi... nhặt rác dưới đáy, chưa rảnh ghé thăm ai.\n\nViệc nên làm: ngồi im giữ tiền, pha ấm trà, xem người khác đua lệnh bắt dao. Đại kỵ: nghe phím hàng rồi múc đuổi giữa phiên rơi — coi chừng gồng lỗ tới Tết.\n\nThầy phán: kiên nhẫn là một loại vị thế. Chờ chợ tạo đáy rồi hãy tính.\n🍀 Số may mắn: 0 (số lệnh nên vào). Màu may mắn: xanh — màu của tiền mặt trong tài khoản.",
+    "Cung Tài Bạch động, mà động theo chiều... lao dốc. 'Tay to' đang bày mâm gom hàng của mấy bạn hoảng loạn, đừng vội làm 'lá cải' cho họ xào.\n\nViệc nên làm: hạ tỷ trọng, giữ tâm lý vững, đừng để 'lái' dắt mũi. Đại kỵ: trung bình giá xuống theo kiểu 'càng giảm càng múc' khi xu hướng chưa gãy phe bán.\n\nThầy phán: bảo toàn vốn hôm nay, để mai còn cửa đánh.\n🍀 Số may mắn: 3 (số phiên nên đứng ngoài). Màu may mắn: trắng — cho tâm hồn thanh tịnh.",
   ],
   strong: [
-    "Thần Tài gõ cửa, dòng tiền hưng phấn. Nhưng hưng phấn quá dễ 'fomo đu đỉnh' — ăn vừa đủ rồi chốt, tham thì thâm. 🍀 Số may mắn: 5 (%% nên chốt lời). Màu may mắn: xanh lá.",
-    "Cát tinh chiếu mệnh, sóng đang lên. Cưỡi sóng nhớ đội mũ bảo hiểm (stop-loss). 🍀 Số may mắn: 7. Màu may mắn: vàng (màu Thần Tài).",
+    "Cát tinh chiếu mệnh, Thần Tài gõ cửa ba tiếng, dòng tiền hưng phấn chảy như suối tháng Ba. Sóng đang lên, cung Quan Lộc rạng rỡ.\n\nViệc nên làm: cưỡi sóng nhưng nhớ đội mũ bảo hiểm (stop-loss), ăn đủ no thì buông đũa. Đại kỵ: 'fomo đu đỉnh', tham một miếng cuối rồi kẹp cả mâm.\n\nThầy phán: tham thì thâm, chốt lời không bao giờ là sai.\n🍀 Số may mắn: 7. Màu may mắn: vàng — màu áo Thần Tài.",
+    "Sao Hồng Loan gặp cổ phiếu, duyên tài lộc phơi phới, tài khoản có cửa xanh lè. Nhưng phúc bất trùng lai.\n\nViệc nên làm: gồng lãi cho khéo, dời stop theo giá. Đại kỵ: nhô hào 'all-in' rồi khoe lãi sớm — chợ ghét nhất kẻ tự tin quá đà.\n\nThầy phán: kỷ luật giữ lãi khó hơn cắt lỗ, ai làm được người đó thắng.\n🍀 Số may mắn: 5. Màu may mắn: xanh lá.",
   ],
   sideways: [
-    "Thị trường lình xình như lòng người chưa quyết. Sao chiếu mệnh hôm nay: sao... chờ. Kiên nhẫn là vàng. 🍀 Số may mắn: 2 (cốc cà phê để tỉnh táo). Màu may mắn: xám.",
-    "Cung Tài Bạch đang 'buffering'. Đừng ép sóng khi biển lặng. 🍀 Số may mắn: 4. Màu may mắn: be.",
+    "Thị trường lình xình như lòng người chưa quyết, sao chiếu mệnh hôm nay là sao... Chờ. Biển lặng, sóng không, cần câu chưa giật.\n\nViệc nên làm: quan sát, ghi watchlist, tỉa cỏ danh mục. Đại kỵ: ép sóng khi biển lặng, giao dịch cho đỡ buồn tay rồi mất phí oan.\n\nThầy phán: không giao dịch cũng là một quyết định khôn ngoan.\n🍀 Số may mắn: 2 (cốc cà phê để tỉnh táo). Màu may mắn: xám — như tâm trạng cái chợ.",
+    "Cung Tài Bạch đang 'buffering', vạn sự chờ nạp. Âm dương giằng co, phe mua phe bán ngang tài.\n\nViệc nên làm: giữ tiền, giữ sức, đợi tín hiệu rõ. Đại kỵ: vào lệnh theo cảm xúc lúc chợ vô định.\n\nThầy phán: người biết chờ mới là tay to thật sự.\n🍀 Số may mắn: 4. Màu may mắn: be — trung tính như thị trường.",
   ],
   unknown: [
-    "Thiên cơ bất khả lộ (VNI hôm nay bói không ra 😅). Nguyên tắc muôn đời: quản trị rủi ro trước, lợi nhuận sau. 🍀 Số may mắn: 8. Màu may mắn: xanh.",
+    "Thiên cơ bất khả lộ (VNI hôm nay bói mãi không ra 😅), sao trời khuất mây, thầy cũng chịu.\n\nViệc nên làm: bám nguyên tắc — quản trị rủi ro trước, lợi nhuận sau. Đại kỵ: đánh lớn khi chính mình còn mù mờ.\n\nThầy phán: khi không chắc, cỡ lệnh nhỏ lại là thượng sách.\n🍀 Số may mắn: 8. Màu may mắn: xanh.",
   ],
 };
 
@@ -2886,19 +2886,21 @@ async function buildHoroscope(env) {
       const today = new Date();
       const dateStr = `${today.getDate()}/${today.getMonth() + 1}`;
       const prompt =
-        `Bạn là "thầy bói chứng khoán" hài hước. Viết 1 lá tử vi NGẮN GỌN (2-3 câu) cho dân lướt sóng ` +
-        `chứng khoán Việt Nam ngày ${dateStr}, phong cách vui nhộn lầy lội, dùng ẩn dụ tử vi/phong thủy ` +
-        `pha thuật ngữ chứng khoán (sao Thái Bạch, Thần Tài, cung Tài Bạch, bắt đáy, cắt lỗ, tay to, đu đỉnh...).\n` +
-        (moodDesc ? `Tâm trạng thị trường hôm nay: ${moodDesc}. Để lá tử vi phản ánh nhẹ tâm trạng này.\n` : "") +
+        `Bạn là "thầy bói chứng khoán" hài hước. Viết 1 lá tử vi DÀI DẶN, có chiều sâu (khoảng 6-9 câu, ` +
+        `chia 3 đoạn ngắn: (1) vận thị trường chung hôm nay, (2) việc NÊN làm & ĐẠI KỴ hôm nay, ` +
+        `(3) lời thầy phán chốt hạ) cho dân lướt sóng chứng khoán Việt Nam ngày ${dateStr}, phong cách ` +
+        `vui nhộn lầy lội, dùng ẩn dụ tử vi/phong thủy pha thuật ngữ chứng khoán (sao Thái Bạch, Thần Tài, ` +
+        `cung Tài Bạch, bắt đáy, cắt lỗ, tay to, đu đỉnh, gồng lãi, gồng lỗ, múc, xúc, bay màu...).\n` +
+        (moodDesc ? `Tâm trạng thị trường hôm nay: ${moodDesc}. Để lá tử vi phản ánh RÕ tâm trạng này.\n` : "") +
         `TUYỆT ĐỐI KHÔNG khuyến nghị mua/bán mã cụ thể, KHÔNG hứa lợi nhuận. ` +
-        `Kết bằng "Số may mắn" và "Màu may mắn" cho vui. Chỉ trả về nội dung lá tử vi, không giải thích thêm.`;
+        `Kết bằng "Số may mắn" và "Màu may mắn" kèm 1 câu bông đùa. Chỉ trả về nội dung lá tử vi, không giải thích thêm.`;
       const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.95, maxOutputTokens: 400 },
+          generationConfig: { temperature: 0.95, maxOutputTokens: 800 },
           safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
