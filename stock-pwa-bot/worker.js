@@ -2982,6 +2982,16 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   let text = `📊 *Tổng kết phiên ${todayLabel}*\n\n`;
 
+  // ── Market verdict lên đầu: "có nên giao dịch không" > "mua mã nào" ──
+  const verdictLine = health.level === "weak"
+    ? `🔴 *Hạn chế bắt đáy* — thị trường yếu, ưu tiên giữ tiền / chờ phiên xác nhận lực bán suy yếu.`
+    : health.level === "caution"
+    ? `🟡 *Thận trọng* — vào nhỏ, ưu tiên mã khỏe nhất (NN mua ròng).`
+    : `🟢 *Điều kiện bắt đáy chấp nhận được* — theo tín hiệu, tuân thủ size + SL.`;
+  text += `🚦 *Giao dịch hôm nay?*\n${verdictLine}\n`;
+  if (health.banner) text += `\n${health.banner}`;
+  text += `━━━━━━━━━━━━━━━\n\n`;
+
   // VN-Index
   if (vniInfo) {
     const arrow = vniInfo.change >= 0 ? "🟢" : "🔴";
@@ -3027,12 +3037,6 @@ async function sendMarketDigest(env, precomputedResult = null) {
     text += `🐂 _VN-Index bull (+${result.vniRet20.toFixed(1)}% 20p) — Climax edge thấp hơn correction regime._\n`;
   }
 
-  // Market health warning — cảnh báo falling-knife khi VNI thủng MA + breadth sụp
-  if (health.banner) {
-    text += `\n━━━━━━━━━━━━━━━\n`;
-    text += health.banner;
-  }
-
   // Bắt đáy T+ section
   const isEliteRegime = result.isEliteRegime;
   const premiumMatches = matches.filter((m) => m.is_premium);
@@ -3043,7 +3047,8 @@ async function sendMarketDigest(env, precomputedResult = null) {
   if (premiumMatches.length > 0) {
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `💎 *Premium picks* (${premiumMatches.length}) — Climax + NN net mua\n`;
-    text += `_Backtest 7.4y: Win 61%, Sharpe 1.90 vs Tier A base Sharpe 0.36._\n\n`;
+    text += `_Backtest 7.4y: Win 61%, Sharpe 1.90 vs Tier A base Sharpe 0.36._\n`;
+    text += `_Khác Elite: Premium = Climax + NN mua ròng 5d xác nhận; Elite = Climax khi VNI correction (chưa cần NN)._\n\n`;
     const t1 = addTradingDays(today, 1);
     const t3 = addTradingDays(today, 4);
     const t5 = addTradingDays(today, 6);
@@ -3053,8 +3058,12 @@ async function sendMarketDigest(env, precomputedResult = null) {
       const target = cur * 1.03 * 0.995;
       const sl = cur * 0.92;
       const nnTag = m.nn_net_5d_bn != null ? `NN +${m.nn_net_5d_bn}B/5d` : "";
-      text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag}\n`;
-      text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
+      text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag} · _hist Win 61%_\n`;
+      if (health.level === "weak") {
+        text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (SL < ${sl.toFixed(2)})\n\n`;
+      } else {
+        text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
+      }
     }
     text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly-adjusted, Sharpe 1.90 justifies bigger size)\n`;
   }
@@ -3090,8 +3099,13 @@ async function sendMarketDigest(env, precomputedResult = null) {
       const target = entryMid * 1.03;
 
       const tierTag = (isEliteRegime ? "⚡ Elite" : m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
-      text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
-      text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
+      const hist = isEliteRegime ? "hist Win 61%" : m.tier === "A" ? "hist Win 59%" : "edge vừa";
+      text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · _${hist}_\n`;
+      if (health.level === "weak") {
+        text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (CẮT < ${sl.toFixed(2)})\n\n`;
+      } else {
+        text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
+      }
     }
     text += isEliteRegime
       ? `💰 Size: 18% NAV/Elite. Max 2-3 lệnh đồng thời.\n`
