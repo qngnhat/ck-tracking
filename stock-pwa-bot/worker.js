@@ -144,6 +144,15 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/horoscope-test" && request.method === "GET") {
+      // Preview tử vi (KHÔNG gửi Telegram) — debug
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const horo = await buildHoroscope(env);
+      return new Response(horo, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
     if (url.pathname === "/active-picks" && request.method === "GET") {
       // Public read: climax active picks (Bắt đáy T+ holding window).
       // Used by PWA portfolio tab to detect climax positions per-holding.
@@ -2815,6 +2824,96 @@ function buildExitAlertMessage(pick, r, cfg) {
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
 // Top 2 — Daily morning briefing 8:30 VN
 // Concise Telegram summary: last 5d performance + active picks countdown + day expectation.
+// ── Tử vi lướt sóng (morning briefing, cho vui) ───────────────────────
+// Gemini sinh 1 lá tử vi CK hài hước, pha market mood từ VNI. Fallback template.
+async function getVniMood() {
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 100);
+    const cs = vni.closes;
+    const n = cs.length;
+    if (n < 50) return "sideways";
+    const cur = cs[n - 1];
+    const ma20 = cs.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+    const ma50 = cs.slice(n - 50).reduce((a, b) => a + b, 0) / 50;
+    const ret5 = ((cur - cs[n - 6]) / cs[n - 6]) * 100;
+    if (cur < ma50 && ret5 < -2) return "weak";
+    if (cur > ma20 && ret5 > 1) return "strong";
+    return "sideways";
+  } catch (e) {
+    console.warn("[horoscope] vni mood fail:", e.message);
+    return "unknown";
+  }
+}
+
+const HOROSCOPE_FALLBACK = {
+  weak: [
+    "Sao Thái Bạch chiếu mệnh, tài khoản dễ bị 'quét vôi'. Thần Tài khuyên: hôm nay ngồi im giữ tiền, đừng đua lệnh bắt dao. 🍀 Số may mắn: 0 (số lệnh nên vào). Màu may mắn: xanh (màu tiền mặt).",
+    "Cung Tài Bạch động, mà động theo chiều... đỏ. Tay to đang gom hàng của mấy bạn hoảng loạn — đừng làm 'lá cải' cho họ. 🍀 Số may mắn: 3 (số ngày nên kiên nhẫn). Màu may mắn: trắng.",
+  ],
+  strong: [
+    "Thần Tài gõ cửa, dòng tiền hưng phấn. Nhưng hưng phấn quá dễ 'fomo đu đỉnh' — ăn vừa đủ rồi chốt, tham thì thâm. 🍀 Số may mắn: 5 (%% nên chốt lời). Màu may mắn: xanh lá.",
+    "Cát tinh chiếu mệnh, sóng đang lên. Cưỡi sóng nhớ đội mũ bảo hiểm (stop-loss). 🍀 Số may mắn: 7. Màu may mắn: vàng (màu Thần Tài).",
+  ],
+  sideways: [
+    "Thị trường lình xình như lòng người chưa quyết. Sao chiếu mệnh hôm nay: sao... chờ. Kiên nhẫn là vàng. 🍀 Số may mắn: 2 (cốc cà phê để tỉnh táo). Màu may mắn: xám.",
+    "Cung Tài Bạch đang 'buffering'. Đừng ép sóng khi biển lặng. 🍀 Số may mắn: 4. Màu may mắn: be.",
+  ],
+  unknown: [
+    "Thiên cơ bất khả lộ (VNI hôm nay bói không ra 😅). Nguyên tắc muôn đời: quản trị rủi ro trước, lợi nhuận sau. 🍀 Số may mắn: 8. Màu may mắn: xanh.",
+  ],
+};
+
+async function buildHoroscope(env) {
+  const mood = await getVniMood();
+  const moodDesc = {
+    weak: "thị trường đang điều chỉnh, phe bán mạnh, VNI dưới MA50",
+    strong: "thị trường khỏe, dòng tiền hưng phấn, VNI trên MA20",
+    sideways: "thị trường lình xình đi ngang chờ hướng",
+    unknown: "",
+  }[mood];
+
+  if (env.GEMINI_API_KEY) {
+    try {
+      const today = new Date();
+      const dateStr = `${today.getDate()}/${today.getMonth() + 1}`;
+      const prompt =
+        `Bạn là "thầy bói chứng khoán" hài hước. Viết 1 lá tử vi NGẮN GỌN (2-3 câu) cho dân lướt sóng ` +
+        `chứng khoán Việt Nam ngày ${dateStr}, phong cách vui nhộn lầy lội, dùng ẩn dụ tử vi/phong thủy ` +
+        `pha thuật ngữ chứng khoán (sao Thái Bạch, Thần Tài, cung Tài Bạch, bắt đáy, cắt lỗ, tay to, đu đỉnh...).\n` +
+        (moodDesc ? `Tâm trạng thị trường hôm nay: ${moodDesc}. Để lá tử vi phản ánh nhẹ tâm trạng này.\n` : "") +
+        `TUYỆT ĐỐI KHÔNG khuyến nghị mua/bán mã cụ thể, KHÔNG hứa lợi nhuận. ` +
+        `Kết bằng "Số may mắn" và "Màu may mắn" cho vui. Chỉ trả về nội dung lá tử vi, không giải thích thêm.`;
+      const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.95, maxOutputTokens: 400 },
+          safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+          ],
+        }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const t = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
+        if (t) return t;
+      } else {
+        console.warn("[horoscope] gemini", r.status);
+      }
+    } catch (e) {
+      console.warn("[horoscope] gemini fail:", e.message);
+    }
+  }
+  // Fallback template — chọn theo mood, xoay theo ngày
+  const arr = HOROSCOPE_FALLBACK[mood] || HOROSCOPE_FALLBACK.unknown;
+  return arr[new Date().getDate() % arr.length];
+}
+
 async function sendMorningBriefing(env) {
   const sb = sbClient(env);
 
@@ -2896,6 +2995,14 @@ async function sendMorningBriefing(env) {
   text += `  · Chờ EOD scan 14:50 cho signal mới\n`;
   text += `  · Intraday spike alerts mỗi 3 phút cho active picks\n`;
   text += `  · Check tab Hiệu suất trong app để xem equity curve\n`;
+
+  // Tử vi lướt sóng (cho vui, cuối briefing)
+  try {
+    const horo = await buildHoroscope(env);
+    if (horo) text += `\n━━━━━━━━━━━━━━━\n🔮 *Tử vi lướt sóng hôm nay*\n_${horo}_\n\n_(bói cho vui thôi, tiền của bạn do bạn quyết 😄)_\n`;
+  } catch (e) {
+    console.warn("[morning] horoscope fail:", e.message);
+  }
 
   let sent = 0;
   for (const chatId of chats) {
