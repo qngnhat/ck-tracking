@@ -2893,7 +2893,9 @@ async function buildHoroscope(env) {
         `cung Tài Bạch, bắt đáy, cắt lỗ, tay to, đu đỉnh, gồng lãi, gồng lỗ, múc, xúc, bay màu...).\n` +
         (moodDesc ? `Tâm trạng thị trường hôm nay: ${moodDesc}. Để lá tử vi phản ánh RÕ tâm trạng này.\n` : "") +
         `TUYỆT ĐỐI KHÔNG khuyến nghị mua/bán mã cụ thể, KHÔNG hứa lợi nhuận. ` +
-        `Kết bằng "Số may mắn" và "Màu may mắn" kèm 1 câu bông đùa. Chỉ trả về nội dung lá tử vi, không giải thích thêm.`;
+        `Kết bằng "Số may mắn" và "Màu may mắn" kèm 1 câu bông đùa. ` +
+        `Viết văn xuôi thuần, KHÔNG thêm tiêu đề, KHÔNG dùng ký hiệu markdown (* ** # _). ` +
+        `Chỉ trả về nội dung lá tử vi, không giải thích thêm.`;
       const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
       const r = await fetch(url, {
         method: "POST",
@@ -2911,8 +2913,12 @@ async function buildHoroscope(env) {
       });
       if (r.ok) {
         const data = await r.json();
-        const t = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
-        if (t) return t;
+        let t = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim();
+        if (t) {
+          // Strip markdown: Telegram legacy Markdown vỡ với **/#/_ từ Gemini
+          t = t.replace(/[*#`_]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+          return t;
+        }
       } else {
         console.warn("[horoscope] gemini", r.status);
       }
@@ -3010,7 +3016,7 @@ async function sendMorningBriefing(env) {
   // Tử vi lướt sóng (cho vui, cuối briefing)
   try {
     const horo = await buildHoroscope(env);
-    if (horo) text += `\n━━━━━━━━━━━━━━━\n🔮 *Tử vi lướt sóng hôm nay*\n_${horo}_\n\n_(bói cho vui thôi, tiền của bạn do bạn quyết 😄)_\n`;
+    if (horo) text += `\n━━━━━━━━━━━━━━━\n🔮 *Tử vi lướt sóng hôm nay*\n${horo}\n\n_(bói cho vui thôi, tiền của bạn do bạn quyết 😄)_\n`;
   } catch (e) {
     console.warn("[morning] horoscope fail:", e.message);
   }
