@@ -18,45 +18,155 @@ import { FULL_UNIVERSE } from "./full_universe_data.js";
  */
 
 const VND_HISTORY_URL = "https://dchart-api.vndirect.com.vn/dchart/history";
+// dchart trả 406 nếu Accept là "application/json" thuần — phải có text/plain hoặc */*.
+// Dùng chung cho mọi call dchart để khỏi lệch header giữa các hàm.
+const VND_CHART_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+  "Origin": "https://dchart.vndirect.com.vn",
+  "Referer": "https://dchart.vndirect.com.vn/",
+};
 
 // ── VN trading session + holidays ──
-// KEEP IN SYNC với stock-pwa/app.js VN_HOLIDAYS. Update khi có lịch nghỉ chính thức.
-const VN_HOLIDAYS = new Set([
-  "2025-01-01",
-  "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-03",
-  "2025-04-07",
-  "2025-04-30", "2025-05-01",
-  "2025-09-02",
-  "2026-01-01",
-  "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
-  "2026-04-27",
-  "2026-04-30", "2026-05-01",
-  "2026-09-02",
-  "2027-01-01",
-  "2027-02-08", "2027-02-09", "2027-02-10", "2027-02-11", "2027-02-12",
-  "2027-04-15",
-  "2027-04-30", "2027-05-01",
-  "2027-09-02",
+// KEEP IN SYNC danh sách ngày với stock-pwa/market-session.js VN_HOLIDAYS
+// (bên đó là Set, bên này Map vì cần tên lễ để hiển thị). Update khi có lịch
+// nghỉ chính thức.
+const VN_HOLIDAYS = new Map([
+  ["2025-01-01", "Tết Dương lịch"],
+  ["2025-01-28", "Tết Nguyên đán"], ["2025-01-29", "Tết Nguyên đán"],
+  ["2025-01-30", "Tết Nguyên đán"], ["2025-01-31", "Tết Nguyên đán"],
+  ["2025-02-03", "Tết Nguyên đán"],
+  ["2025-04-07", "Giỗ Tổ Hùng Vương"],
+  ["2025-04-30", "Giải phóng miền Nam"], ["2025-05-01", "Quốc tế Lao động"],
+  ["2025-09-02", "Quốc khánh"],
+  ["2026-01-01", "Tết Dương lịch"],
+  ["2026-02-16", "Tết Nguyên đán"], ["2026-02-17", "Tết Nguyên đán"],
+  ["2026-02-18", "Tết Nguyên đán"], ["2026-02-19", "Tết Nguyên đán"],
+  ["2026-02-20", "Tết Nguyên đán"],
+  ["2026-04-27", "Giỗ Tổ Hùng Vương"],
+  ["2026-04-30", "Giải phóng miền Nam"], ["2026-05-01", "Quốc tế Lao động"],
+  ["2026-09-02", "Quốc khánh"],
+  ["2027-01-01", "Tết Dương lịch"],
+  ["2027-02-08", "Tết Nguyên đán"], ["2027-02-09", "Tết Nguyên đán"],
+  ["2027-02-10", "Tết Nguyên đán"], ["2027-02-11", "Tết Nguyên đán"],
+  ["2027-02-12", "Tết Nguyên đán"],
+  ["2027-04-15", "Giỗ Tổ Hùng Vương"],
+  ["2027-04-30", "Giải phóng miền Nam"], ["2027-05-01", "Quốc tế Lao động"],
+  ["2027-09-02", "Quốc khánh"],
 ]);
 
+const VN_WEEKDAY_NAMES = ["Chủ nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
+
+// Worker chạy UTC → mọi thứ liên quan "hôm nay" phải quy về Asia/Ho_Chi_Minh,
+// nếu không 0:00-7:00 giờ VN sẽ lùi 1 ngày.
+function vnNow(d = new Date()) {
+  return new Date(d.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+}
+
 function vnDateString(d = new Date()) {
-  const vn = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  const vn = vnNow(d);
   const y = vn.getFullYear();
   const m = String(vn.getMonth() + 1).padStart(2, "0");
   const dd = String(vn.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 
+// "2026-08-03" → "03/08"
+function fmtVnDM(dateStr) {
+  const [, m, dd] = dateStr.split("-");
+  return `${dd}/${m}`;
+}
+
+// "2026-08-03" → "03/08/2026"
+function fmtVnDMY(dateStr) {
+  const [y, m, dd] = dateStr.split("-");
+  return `${dd}/${m}/${y}`;
+}
+
+// "03/08/2026" theo giờ VN
+function vnDayLabel(d = new Date()) {
+  return fmtVnDMY(vnDateString(d));
+}
+
 function isVnHoliday(d = new Date()) {
   return VN_HOLIDAYS.has(vnDateString(d));
 }
 
+// Phiên giao dịch: T2-T6, không lễ. Nhận Date hoặc "YYYY-MM-DD".
+function isVnTradingDay(d = new Date()) {
+  const dateStr = typeof d === "string" ? d : vnDateString(d);
+  if (VN_HOLIDAYS.has(dateStr)) return false;
+  const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return dow !== 0 && dow !== 6;
+}
+
+// Cộng n phiên giao dịch (bỏ T7/CN + lễ). In/out đều "YYYY-MM-DD".
+function addVnTradingDays(dateStr, n) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  let added = 0;
+  while (added < n) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (isVnTradingDay(d.toISOString().slice(0, 10))) added++;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// Đếm số phiên giữa 2 ngày, EXCLUSIVE đầu, INCLUSIVE cuối.
+// signal day = T+0, phiên kế tiếp = T+1. Bỏ T7/CN + lễ.
+function vnTradingDaysBetween(fromDateStr, toDateStr) {
+  const start = new Date(`${fromDateStr}T00:00:00Z`);
+  const end = new Date(`${toDateStr}T00:00:00Z`);
+  if (!(end > start)) return 0;
+  let count = 0;
+  const d = new Date(start);
+  while (d < end) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (isVnTradingDay(d.toISOString().slice(0, 10))) count++;
+  }
+  return count;
+}
+
+// Lễ gần nhất trong `withinDays` ngày tới (kể cả hôm nay) — để nhắc "mai nghỉ lễ".
+function nextVnHoliday(fromDateStr, withinDays = 5) {
+  const d = new Date(`${fromDateStr}T00:00:00Z`);
+  for (let i = 0; i <= withinDays; i++) {
+    const key = d.toISOString().slice(0, 10);
+    if (VN_HOLIDAYS.has(key)) return { date: key, name: VN_HOLIDAYS.get(key), daysAway: i };
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return null;
+}
+
+// Ngữ cảnh 1 ngày theo giờ VN — nguồn sự thật cho mọi label ngày + prompt tử vi.
+// Trước đây prompt chỉ đưa "3/8" nên Gemini tự bịa thứ → sai.
+function vnDayContext(d = new Date()) {
+  const dateStr = vnDateString(d);
+  const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  const weekday = VN_WEEKDAY_NAMES[dow];
+  const holidayName = VN_HOLIDAYS.get(dateStr) || null;
+  const isWeekend = dow === 0 || dow === 6;
+  const upcoming = nextVnHoliday(dateStr, 5);
+  return {
+    dateStr,
+    dayLabel: vnDayLabel(d),
+    weekday,
+    fullLabel: `${weekday}, ${vnDayLabel(d)}`,
+    isTradingDay: !isWeekend && !holidayName,
+    closedReason: holidayName ? `nghỉ lễ ${holidayName}` : (isWeekend ? "cuối tuần" : null),
+    // Lễ sắp tới (bỏ qua lễ của chính hôm nay để không tự nhắc lại)
+    upcomingHoliday: upcoming && upcoming.daysAway > 0 ? upcoming : null,
+  };
+}
+
 // Actively trading right now? Mon-Fri 9:00-11:30 hoặc 13:00-14:45 VN time, skip holidays.
 function isVnTradingNow(d = new Date()) {
-  const vn = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  const vn = vnNow(d);
   const day = vn.getDay();
   if (day === 0 || day === 6) return false;
-  if (isVnHoliday(vn)) return false;
+  // Truyền `d` (instant gốc), KHÔNG truyền `vn` — vn đã shift sang wall-clock VN,
+  // đưa lại vào vnDateString sẽ shift lần 2 và lệch ngày sau 17:00 VN.
+  if (isVnHoliday(d)) return false;
   const min = vn.getHours() * 60 + vn.getMinutes();
   if (min >= 540 && min <= 690) return true;   // 9:00 - 11:30
   if (min >= 780 && min <= 885) return true;   // 13:00 - 14:45
@@ -997,6 +1107,12 @@ async function handleTelegramWebhook(request, env, ctx) {
     return new Response("ok");
   }
 
+  // /signals — mã đã & đang signal trong 7 ngày
+  if (text === "/signals" || text === "/sg") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildSignalsMessage(env));
+    return new Response("ok");
+  }
+
   // /stats — recent forward-test stats
   if (text === "/stats" || text === "/st") {
     await tgSendMessage(env.BOT_TOKEN, chatId, await buildStatsMessage(env));
@@ -1037,6 +1153,7 @@ function buildHelpMessage() {
     `/scan-status (/ss) — Check progress full scan\n` +
     `/quick (/q, /s) — Quét nhanh 45 mã large+mid cap (instant ~10s)\n` +
     `/picks (/p) — Show active picks (Base Breakout + FBO + Climax)\n` +
+    `/signals (/sg) — Mã đã & đang signal 7 ngày qua (T+, lãi/lỗ)\n` +
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
     `\n*Stats + Regime:*\n` +
     `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
@@ -1190,7 +1307,10 @@ async function buildStatsMessage(env) {
   if (trades.length === 0) {
     return `📊 *Stats 30 ngày*\n\nChưa có trade nào được resolve trong window. Bot scan EOD T2-T6 — đợi sau khi có signal + T+5 hoặc T+30 resolve.`;
   }
-  const resolved = trades.filter((t) => t.resolved_at);
+  // exit_reason='unresolved' = bỏ cuộc vì thiếu data, không có net_ret → loại
+  // khỏi thống kê kẻo kéo tụt win rate bằng số 0 giả.
+  const resolved = trades.filter((t) => t.resolved_at && t.exit_reason !== "unresolved");
+  const giveUp = trades.filter((t) => t.exit_reason === "unresolved");
   const active = trades.filter((t) => !t.resolved_at);
   const wins = resolved.filter((t) => t.is_win).length;
   const winRate = resolved.length > 0 ? (wins / resolved.length) * 100 : 0;
@@ -1212,6 +1332,8 @@ async function buildStatsMessage(env) {
   text += `*Avg return:* ${avgRet >= 0 ? "+" : ""}${avgRet.toFixed(2)}%/trade\n`;
   text += `*Cumulative:* ${totalRet >= 0 ? "+" : ""}${(totalRet * 100).toFixed(1)}%\n`;
 
+  if (giveUp.length > 0) text += `_(${giveUp.length} trade bỏ qua — thiếu data)_\n`;
+
   if (Object.keys(tiers).length > 0) {
     text += `\n*Per tier:*\n`;
     for (const [tier, s] of Object.entries(tiers)) {
@@ -1220,6 +1342,134 @@ async function buildStatsMessage(env) {
       text += `• ${tier}: ${s.n} trade · ${tWin.toFixed(0)}% win · ${tAvg >= 0 ? "+" : ""}${tAvg.toFixed(2)}%/trade\n`;
     }
   }
+
+  // Regime + màu VNI phiên signal — chỉ có data từ khi bổ sung context columns
+  const withCtx = resolved.filter((t) => t.vni_regime);
+  if (withCtx.length > 0) {
+    const agg = (rows) => {
+      const n = rows.length;
+      if (n === 0) return null;
+      const w = rows.filter((t) => t.is_win).length;
+      const avg = rows.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0) / n * 100;
+      return `${n} trade · ${((w / n) * 100).toFixed(0)}% win · ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%/trade`;
+    };
+    text += `\n*Theo regime:*\n`;
+    for (const rg of ["correction", "neutral", "bull"]) {
+      const line = agg(withCtx.filter((t) => t.vni_regime === rg));
+      if (line) text += `• ${rg}: ${line}\n`;
+    }
+    const green = agg(withCtx.filter((t) => t.vni_change_pct > 0));
+    const red = agg(withCtx.filter((t) => t.vni_change_pct <= 0));
+    if (green || red) {
+      text += `\n*Màu VNI phiên signal:*\n`;
+      if (green) text += `• 🟢 xanh: ${green}\n`;
+      if (red) text += `• 🔴 đỏ: ${red}\n`;
+    }
+  }
+  return text;
+}
+
+// ── /signals — mã ĐÃ và ĐANG signal trong 7 ngày ────────────────────
+// trade_log là nguồn chính (Climax tiers / FBO / MidTerm). Momentum không được
+// ghi vào trade_log nên phải đọc thêm từ climax_active_picks, nếu không sẽ sót.
+const SIGNALS_WINDOW_DAYS = 7;
+
+const TIER_ICONS = {
+  Premium: "💎", Elite: "⚡", A: "🟢", B: "🔵",
+  FBO: "🌊", MidTerm: "🔍", Momentum: "🚀",
+};
+
+const EXIT_REASON_LABELS = {
+  target: "chạm target", sl: "cắt lỗ", trail: "trail stop",
+  force: "hết hạn hold", unresolved: "không resolve được",
+};
+
+async function buildSignalsMessage(env) {
+  const sb = sbClient(env);
+  const headers = { apikey: sb.key, authorization: `Bearer ${sb.key}` };
+  const today = vnDateString();
+  const since = vnDateString(new Date(Date.now() - SIGNALS_WINDOW_DAYS * 24 * 3600 * 1000));
+  const cols = "symbol,signal_date,tier,pattern_type,entry_price,max_hold_days,resolved_at,exit_price,exit_day,exit_reason,net_ret,is_win,is_premium";
+
+  const [recentRes, staleRes, climaxPicks, midtermPicks] = await Promise.all([
+    fetch(`${sb.url}/rest/v1/trade_log?select=${cols}&signal_date=gte.${since}&order=signal_date.desc&limit=100`, { headers }),
+    // Signal cũ hơn window nhưng CHƯA đóng (MidTerm hold tới 30 phiên) — gom 1 dòng
+    fetch(`${sb.url}/rest/v1/trade_log?select=symbol,signal_date,tier&resolved_at=is.null&signal_date=lt.${since}&order=signal_date.desc&limit=50`, { headers }),
+    sbQuery(sb, "climax_active_picks", { select: "symbol,signal_date,entry_price,tier,expires_at" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,signal_date,entry_price,max_hold_days,expires_at" }),
+  ]);
+
+  if (!recentRes.ok) return "❌ Lỗi fetch signals";
+  const trades = await recentRes.json();
+  const stale = staleRes.ok ? await staleRes.json() : [];
+
+  const openFromLog = trades.filter((t) => !t.resolved_at);
+  const closed = trades.filter((t) => t.resolved_at);
+
+  // Bảng active picks mới là nguồn chuẩn cho "đang mở": Momentum không được ghi
+  // vào trade_log, và pick nào miss trade_log (lỗi lúc persist) vẫn phải hiện ra.
+  const stillActive = (p) => !p.expires_at || new Date(p.expires_at) > new Date();
+  const inLog = new Set(openFromLog.map((t) => `${t.symbol}|${t.signal_date}`));
+  const extraPicks = [
+    ...(climaxPicks || []).filter(stillActive).map((p) => ({
+      ...p, max_hold_days: p.tier === "Momentum" ? 30 : 5,
+    })),
+    ...(midtermPicks || []).filter(stillActive).map((p) => ({
+      ...p, tier: "MidTerm", max_hold_days: p.max_hold_days || 30,
+    })),
+  ].filter((p) => !inLog.has(`${p.symbol}|${p.signal_date}`));
+
+  const open = [...openFromLog, ...extraPicks].sort((a, b) =>
+    b.signal_date.localeCompare(a.signal_date)
+  );
+
+  if (open.length === 0 && closed.length === 0 && stale.length === 0) {
+    return `📭 *Signals ${SIGNALS_WINDOW_DAYS} ngày qua*\n\n` +
+      `Chưa có signal nào từ ${fmtVnDMY(since)}.\n` +
+      `Pattern selective — đa số ngày 0-2 picks. Gõ /scan để quét ngay.`;
+  }
+
+  const fmtOpen = (t) => {
+    const icon = TIER_ICONS[t.tier] || "•";
+    const held = vnTradingDaysBetween(t.signal_date, today);
+    const hold = t.max_hold_days || 5;
+    const left = hold - held;
+    const status = left > 0 ? `còn ${left} phiên` : "quá hạn, chờ resolve";
+    const entry = t.entry_price != null ? ` @${parseFloat(t.entry_price).toFixed(2)}` : "";
+    return `${icon} *${t.symbol}*${entry} · ${t.tier} · ${fmtVnDM(t.signal_date)} — T+${held}/${hold}, ${status}`;
+  };
+
+  const fmtClosed = (t) => {
+    const ret = parseFloat(t.net_ret || 0) * 100;
+    const icon = t.is_win ? "✅" : "❌";
+    const reason = EXIT_REASON_LABELS[t.exit_reason] || t.exit_reason || "?";
+    const dayTag = t.exit_day ? ` T+${t.exit_day}` : "";
+    return `${icon} *${t.symbol}* · ${t.tier} · ${fmtVnDM(t.signal_date)} — ${ret >= 0 ? "+" : ""}${ret.toFixed(2)}% (${reason}${dayTag})`;
+  };
+
+  let text = `📡 *Signals ${SIGNALS_WINDOW_DAYS} ngày qua* (từ ${fmtVnDMY(since)})\n`;
+  text += `${open.length} đang mở · ${closed.length} đã đóng\n\n`;
+
+  if (open.length > 0) {
+    text += `🟡 *ĐANG MỞ*\n`;
+    open.forEach((t) => { text += fmtOpen(t) + "\n"; });
+    text += `\n`;
+  }
+
+  if (closed.length > 0) {
+    const wins = closed.filter((t) => t.is_win).length;
+    const sumRet = closed.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0) * 100;
+    text += `⚪ *ĐÃ ĐÓNG* — win ${((wins / closed.length) * 100).toFixed(0)}% (${wins}/${closed.length}), tổng ${sumRet >= 0 ? "+" : ""}${sumRet.toFixed(2)}%\n`;
+    closed.forEach((t) => { text += fmtClosed(t) + "\n"; });
+    text += `\n`;
+  }
+
+  if (stale.length > 0) {
+    const syms = stale.map((t) => t.symbol).join(", ");
+    text += `➕ _${stale.length} mã đang mở từ trước ${fmtVnDMY(since)}: ${syms}_\n\n`;
+  }
+
+  text += `_/picks xem chi tiết plan · /stats xem hiệu suất 30 ngày._`;
   return text;
 }
 
@@ -2129,22 +2379,41 @@ async function finalizeScan(env, state) {
   });
   console.log(`[finalize] status set to completed early`);
 
+  const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
+
+  // Chụp context thị trường TRƯỚC khi persist — trade_log cần nó để sau này
+  // group-by regime / màu VNI mà không phải replay lại detector.
+  const ctxResult = {
+    vniRegime: state.vni_regime,
+    vniRet20: state.vni_ret20,
+    market: { upCount: marketStats.upCount || 0, downCount: marketStats.downCount || 0 },
+  };
+  let signalCtx = buildSignalContext(ctxResult, null, null);
+  try {
+    const vni = await fetchVndHistory("VNINDEX", 100);
+    const n = vni.closes.length;
+    const vniInfo = n >= 2 ? { change: ((vni.closes[n - 1] - vni.closes[n - 2]) / vni.closes[n - 2]) * 100 } : null;
+    const health = computeMarketHealth(vni.closes, marketStats.upCount || 0, marketStats.downCount || 0);
+    signalCtx = buildSignalContext(ctxResult, vniInfo, health);
+  } catch (e) {
+    console.warn("[finalize] signal context VNI fetch fail:", e.message);
+  }
+
   // Now run persist + digest with error tolerance
   try {
-    await persistClimaxMatches(env, matches);
+    await persistClimaxMatches(env, matches, signalCtx);
   } catch (e) { console.warn("[finalize] persistClimax fail:", e.message); }
   try {
-    await persistMomentumMatches(env, momentumMatches);
+    await persistMomentumMatches(env, momentumMatches, signalCtx);
   } catch (e) { console.warn("[finalize] persistMomentum fail:", e.message); }
   try {
     await persistMidTermMatches(env, baseBreakoutMatches);
   } catch (e) { console.warn("[finalize] persistMidTerm fail:", e.message); }
   try {
-    await persistFBOMatches(env, fboMatches);
+    await persistFBOMatches(env, fboMatches, signalCtx);
   } catch (e) { console.warn("[finalize] persistFBO fail:", e.message); }
 
   // Send full-coverage digest
-  const avgChange = marketStats.totalScanned > 0 ? marketStats.totalChange / marketStats.totalScanned : 0;
   const fullDigestResult = {
     matches,
     momentumMatches,
@@ -2184,8 +2453,12 @@ const SPIKE_COOLDOWN_MIN = 10;      // tối thiểu 10 min giữa 2 alerts cùn
 // detect đúng kế hoạch (target = entry × 1.035, init SL = entry × 0.92).
 const MOMENTUM_HOLD_DAYS = 45;  // 30 phiên ~ 45 calendar days
 const MOMENTUM_AVG_RETURN_PCT = 3.5;  // backtest avg
+// Exit params dùng cho trade_log — khớp với con số digest nói với user (T+20, trail 7%)
+const MOMENTUM_MAX_HOLD_TRADING = 20;
+const MOMENTUM_TRAIL_PCT = 7;
+const MOMENTUM_INIT_SL_PCT = 8;
 
-async function persistMomentumMatches(env, matches) {
+async function persistMomentumMatches(env, matches, ctx = null) {
   if (!matches || matches.length === 0) return;
   const sb = sbClient(env);
   const expiresAt = new Date(Date.now() + MOMENTUM_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
@@ -2202,12 +2475,15 @@ async function persistMomentumMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} Momentum saved (expires ${expiresAt.slice(0, 10)})`);
+
+  // climax_active_picks bị xoá khi expire → trade_log là nơi duy nhất giữ lịch sử
+  await logMomentumInitialTrades(env, matches, today, ctx);
 }
 
 // ── FBO (Foreign-Backed Oversold) persist ──────────────────────
 // Reuse climax_active_picks schema. Hold T+5, target +3%, SL -8% (Climax-like).
 // V1 backtest: Test 2026 Sharpe +1.42, Win 71%, PF 1.61 (n=14 small sample).
-async function persistFBOMatches(env, matches) {
+async function persistFBOMatches(env, matches, ctx = null) {
   if (!matches || matches.length === 0) {
     console.log("[fbo persist] no matches");
     return;
@@ -2243,8 +2519,10 @@ async function persistFBOMatches(env, matches) {
     is_premium: false,
     pattern_type: "fbo_oversold",
     max_hold_days: 5,
+    ...signalFeatures(m),
+    ...(ctx || {}),
   }));
-  const okLog = await sbUpsert(sb, "trade_log", logRows, "symbol,signal_date");
+  const okLog = await upsertTradeLog(sb, logRows, "fbo");
   console.log(`[trade-log fbo] ${okLog ? "✓" : "✗"} ${logRows.length} FBO logged`);
 }
 
@@ -2289,7 +2567,7 @@ async function persistMidTermMatches(env, matches) {
   await logMidTermInitialTrades(env, matches, today);
 }
 
-async function persistClimaxMatches(env, matches) {
+async function persistClimaxMatches(env, matches, ctx = null) {
   const sb = sbClient(env);
   // 1. Cleanup picks đã expire
   const nowIso = new Date().toISOString();
@@ -2318,13 +2596,55 @@ async function persistClimaxMatches(env, matches) {
   }));
   const ok = await sbUpsert(sb, "climax_active_picks", rows, "symbol");
   const premiumCount = rows.filter((r) => r.tier === "Premium").length;
+  const eliteCount = rows.filter((r) => r.tier === "Elite").length;
   console.log(`[persist] ${ok ? "✓" : "✗"} ${rows.length} matches saved (${premiumCount} Premium, ${eliteCount} Elite, expires ${expiresAt.slice(0, 10)})`);
 
   // ALSO log to trade_log for forward-test tracker (unresolved, resolveCron sẽ fill)
-  await logInitialTrades(env, matches, today);
+  await logInitialTrades(env, matches, today, ctx);
 }
 
-async function logInitialTrades(env, matches, signalDate) {
+// Cột do sql/011 thêm. Nếu migration chưa chạy, PostgREST từ chối cả batch →
+// mất luôn log. Upsert lại không kèm context còn hơn không có row nào.
+const TRADE_LOG_CONTEXT_COLS = [
+  "vni_regime", "vni_ret20", "vni_change_pct", "market_health",
+  "breadth_up", "breadth_down", "ret3d", "vol_ratio", "rsi",
+];
+
+async function upsertTradeLog(sb, rows, label) {
+  if (await sbUpsert(sb, "trade_log", rows, "symbol,signal_date")) return true;
+  const stripped = rows.map((r) => {
+    const copy = { ...r };
+    for (const c of TRADE_LOG_CONTEXT_COLS) delete copy[c];
+    return copy;
+  });
+  const ok = await sbUpsert(sb, "trade_log", stripped, "symbol,signal_date");
+  console.warn(`[trade-log ${label}] retry không kèm context: ${ok ? "✓" : "✗"} (chạy sql/011 chưa?)`);
+  return ok;
+}
+
+// Context thị trường lúc signal — không tái tạo được sau này (giá VND là giá đã
+// điều chỉnh, data NN không có lịch sử), nên phải chụp lại ngay lúc vào lệnh.
+function buildSignalContext(result, vniInfo, health) {
+  return {
+    vni_regime: result?.vniRegime ?? null,
+    vni_ret20: result?.vniRet20 ?? null,
+    vni_change_pct: vniInfo ? +vniInfo.change.toFixed(2) : null,
+    market_health: health?.level ?? null,
+    breadth_up: result?.market?.upCount ?? null,
+    breadth_down: result?.market?.downCount ?? null,
+  };
+}
+
+// Đặc trưng signal per-mã — để sau này soi ngưỡng detector nào thực sự có edge
+function signalFeatures(m) {
+  return {
+    ret3d: m.ret3d ?? null,
+    vol_ratio: m.volRatio ?? null,
+    rsi: m.rsi ?? null,
+  };
+}
+
+async function logInitialTrades(env, matches, signalDate, ctx = null) {
   if (!matches || matches.length === 0) return;
   const sb = sbClient(env);
   const rows = matches.map((m) => ({
@@ -2338,9 +2658,34 @@ async function logInitialTrades(env, matches, signalDate) {
     is_premium: !!m.is_premium,
     pattern_type: "vol_climax",
     max_hold_days: 5,
+    ...signalFeatures(m),
+    ...(ctx || {}),
   }));
-  const ok = await sbUpsert(sb, "trade_log", rows, "symbol,signal_date");
+  const ok = await upsertTradeLog(sb, rows, "climax");
   console.log(`[trade-log climax] ${ok ? "✓" : "✗"} ${rows.length} logged`);
+}
+
+// Momentum: trail stop + hold T+20, không phải target/SL fix như Climax →
+// resolve bằng resolveTrailingPicks (chung với MidTerm), không phải T+5 resolver.
+async function logMomentumInitialTrades(env, matches, signalDate, ctx = null) {
+  if (!matches || matches.length === 0) return;
+  const sb = sbClient(env);
+  const rows = matches.map((m) => ({
+    symbol: m.symbol,
+    signal_date: signalDate,
+    tier: "Momentum",
+    entry_price: m.currentPrice,
+    target_price: +(m.currentPrice * (1 + MOMENTUM_AVG_RETURN_PCT / 100)).toFixed(4),
+    sl_price: +(m.currentPrice * (1 - MOMENTUM_INIT_SL_PCT / 100)).toFixed(4),
+    pattern_type: "momentum_swing",
+    max_hold_days: MOMENTUM_MAX_HOLD_TRADING,
+    trail_pct: MOMENTUM_TRAIL_PCT,
+    init_sl_pct: MOMENTUM_INIT_SL_PCT,
+    ...signalFeatures(m),
+    ...(ctx || {}),
+  }));
+  const ok = await upsertTradeLog(sb, rows, "momentum");
+  console.log(`[trade-log momentum] ${ok ? "✓" : "✗"} ${rows.length} logged`);
 }
 
 // Mid-term (Base Breakout) — pattern khác Climax: trail stop thay vì fix target,
@@ -2363,7 +2708,7 @@ async function logMidTermInitialTrades(env, matches, signalDate) {
     trail_pct: BASE_BREAKOUT_TRAIL_PCT,
     init_sl_pct: BASE_BREAKOUT_INIT_SL_PCT,
   }));
-  const ok = await sbUpsert(sb, "trade_log", rows, "symbol,signal_date");
+  const ok = await upsertTradeLog(sb, rows, "midterm");
   console.log(`[trade-log midterm] ${ok ? "✓" : "✗"} ${rows.length} logged`);
 }
 
@@ -2379,18 +2724,29 @@ async function fetchOhlcvForResolve(symbol, sigTs, daysBuffer) {
   const to = Math.floor((sigTs + daysBuffer * 24 * 3600 * 1000) / 1000);
   const from = Math.floor((sigTs - 5 * 24 * 3600 * 1000) / 1000);
   const url = `${VND_HISTORY_URL}?resolution=D&symbol=${symbol}&from=${from}&to=${to}`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "application/json",
-      "Origin": "https://dchart.vndirect.com.vn",
-      "Referer": "https://dchart.vndirect.com.vn/",
-    },
-  });
-  if (!res.ok) return null;
+  const res = await fetch(url, { headers: VND_CHART_HEADERS });
+  if (!res.ok) {
+    console.warn(`[resolve fetch] ${symbol} HTTP ${res.status}`);
+    return null;
+  }
   const data = await res.json();
   if (data.s !== "ok" || !data.c?.length) return null;
   return data;
+}
+
+// Trade không resolve được (data lỗi, mã ngừng giao dịch, signal_date không phải
+// phiên) sẽ kẹt unresolved mãi và bị quét lại mỗi lần cron. Quá hạn này thì đóng
+// sổ với exit_reason='unresolved' — /stats bỏ qua, khỏi bóp méo win rate.
+const RESOLVE_GIVE_UP_DAYS = 30;
+
+async function markUnresolvable(sb, trade, why) {
+  const ageDays = (Date.now() - new Date(trade.signal_date).getTime()) / 86400000;
+  if (ageDays < RESOLVE_GIVE_UP_DAYS) return;
+  await sbUpdate(sb, "trade_log", {
+    eq: { id: trade.id },
+    data: { resolved_at: new Date().toISOString(), exit_reason: "unresolved" },
+  });
+  console.warn(`[resolve] give up ${trade.symbol} ${trade.signal_date} (${ageDays.toFixed(0)}d): ${why}`);
 }
 
 // Classical picks (Climax/Trend/Momentum) — T+5 hold, target/SL fix
@@ -2398,7 +2754,7 @@ async function resolveClassicalPicks(env) {
   const sb = sbClient(env);
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const r = await fetch(
-    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=neq.MidTerm&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=not.in.(MidTerm,Momentum)&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
     { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
   );
   if (!r.ok) {
@@ -2414,13 +2770,14 @@ async function resolveClassicalPicks(env) {
     try {
       const sigTs = new Date(t.signal_date).getTime();
       const data = await fetchOhlcvForResolve(t.symbol, sigTs, 15);
-      if (!data) continue;
+      if (!data) { await markUnresolvable(sb, t, "no ohlcv"); continue; }
       const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
       const sigIdx = times.indexOf(t.signal_date);
-      if (sigIdx < 0 || sigIdx + 6 >= times.length) continue;
+      if (sigIdx < 0) { await markUnresolvable(sb, t, "signal_date không có bar"); continue; }
+      if (sigIdx + 6 >= times.length) { await markUnresolvable(sb, t, "thiếu bar sau signal"); continue; }
 
       const entryPrice = data.o[sigIdx + 1];
-      if (!entryPrice || entryPrice <= 0) continue;
+      if (!entryPrice || entryPrice <= 0) { await markUnresolvable(sb, t, "entry price rỗng"); continue; }
       const slPrice = entryPrice * 0.92;
       const targetPrice = entryPrice * 1.03;
 
@@ -2433,7 +2790,7 @@ async function resolveClassicalPicks(env) {
         if (h >= 3 && cl >= targetPrice) { exitPrice = cl; exitDay = h; exitReason = "target"; break; }
         if (h === 5) { exitPrice = cl; exitDay = h; exitReason = "force"; }
       }
-      if (exitPrice === null) continue;
+      if (exitPrice === null) { await markUnresolvable(sb, t, "không tìm được exit"); continue; }
       const netRet = (exitPrice - entryPrice) / entryPrice - 0.004;
       await sbUpdate(sb, "trade_log", {
         eq: { id: t.id },
@@ -2453,13 +2810,14 @@ async function resolveClassicalPicks(env) {
   console.log(`[resolve classical] ${resolved}/${pending.length}`);
 }
 
-// Mid-term picks (Base Breakout) — T+30 trading hold (~44 calendar), trail 10% peak / SL -10%
+// Trailing-stop picks — MidTerm (T+30, trail 10%) và Momentum (T+20, trail 7%).
+// Exit params đọc từ row (init_sl_pct/trail_pct/max_hold_days) nên chung 1 resolver.
 async function resolveMidTermPicksResolver(env) {
   const sb = sbClient(env);
   // Wait 44 calendar days (= 30 trading + buffer) trước khi resolve
   const cutoff = new Date(Date.now() - 44 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const r = await fetch(
-    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=eq.MidTerm&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
+    `${sb.url}/rest/v1/trade_log?select=*&resolved_at=is.null&tier=in.(MidTerm,Momentum)&signal_date=lte.${cutoff}&order=signal_date.asc&limit=50`,
     { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
   );
   if (!r.ok) {
@@ -2476,16 +2834,18 @@ async function resolveMidTermPicksResolver(env) {
       const sigTs = new Date(t.signal_date).getTime();
       // Need ~50 calendar days buffer for T+30 trading data
       const data = await fetchOhlcvForResolve(t.symbol, sigTs, 55);
-      if (!data) continue;
+      if (!data) { await markUnresolvable(sb, t, "no ohlcv"); continue; }
       const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
       const sigIdx = times.indexOf(t.signal_date);
-      if (sigIdx < 0 || sigIdx + 32 >= times.length) continue;
+      if (sigIdx < 0) { await markUnresolvable(sb, t, "signal_date không có bar"); continue; }
 
       const entryPrice = data.o[sigIdx + 1];
-      if (!entryPrice || entryPrice <= 0) continue;
+      if (!entryPrice || entryPrice <= 0) { await markUnresolvable(sb, t, "entry price rỗng"); continue; }
       const initSlPct = (t.init_sl_pct || 10) / 100;
       const trailPct = (t.trail_pct || 10) / 100;
       const maxHold = t.max_hold_days || 30;
+      // Cần đủ bar tới hết hold window (Momentum 20 phiên, MidTerm 30)
+      if (sigIdx + maxHold + 1 >= times.length) { await markUnresolvable(sb, t, "thiếu bar sau signal"); continue; }
       const initSl = entryPrice * (1 - initSlPct);
 
       let peak = entryPrice;
@@ -2505,7 +2865,7 @@ async function resolveMidTermPicksResolver(env) {
         }
         if (h === maxHold) { exitPrice = cl; exitDay = h; exitReason = "force"; }
       }
-      if (exitPrice === null) continue;
+      if (exitPrice === null) { await markUnresolvable(sb, t, "không tìm được exit"); continue; }
       const netRet = (exitPrice - entryPrice) / entryPrice - 0.005;  // 0.5% round-trip cost for mid-term
       await sbUpdate(sb, "trade_log", {
         eq: { id: t.id },
@@ -2568,15 +2928,7 @@ async function fetchVndIntraday(symbol) {
   const from = Math.floor(todayStart.getTime() / 1000);
   const to = Math.floor(Date.now() / 1000);
   const url = `${VND_HISTORY_URL}?resolution=5&symbol=${symbol}&from=${from}&to=${to}`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
-      "Origin": "https://dchart.vndirect.com.vn",
-      "Referer": "https://dchart.vndirect.com.vn/",
-    },
-  });
+  const res = await fetch(url, { headers: VND_CHART_HEADERS });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.s !== "ok" || !data.c?.length) throw new Error("no intraday data");
@@ -2870,10 +3222,16 @@ const HOROSCOPE_FALLBACK = {
   unknown: [
     "Thiên cơ bất khả lộ (VNI hôm nay bói mãi không ra 😅), sao trời khuất mây, thầy cũng chịu.\n\nViệc nên làm: bám nguyên tắc — quản trị rủi ro trước, lợi nhuận sau. Đại kỵ: đánh lớn khi chính mình còn mù mờ.\n\nThầy phán: khi không chắc, cỡ lệnh nhỏ lại là thượng sách.\n🍀 Số may mắn: 8. Màu may mắn: xanh.",
   ],
+  // Ngày chợ đóng (T7/CN/lễ) — không bói chuyện múc/xúc, chỉ nghỉ ngơi + chuẩn bị.
+  closed: [
+    "Hôm nay bảng điện tắt đèn, sao Thiên Nhàn chiếu mệnh, cung Tài Bạch được nghỉ phép có lương. Tay to cũng đi nhậu, 'lái' cũng về quê, chợ vắng như đình giữa trưa.\n\nViệc nên làm: đóng app, ngủ nướng, ngó lại nhật ký giao dịch tuần qua xem mình sai ở đâu. Đại kỵ: mở bảng giá cũ ra ngắm rồi tự dằn vặt, hoặc lên hội nhóm nghe phím hàng cho phiên tới.\n\nThầy phán: nghỉ đúng lúc cũng là một kỹ năng. Tài khoản không cháy vào ngày chợ đóng.\n🍀 Số may mắn: 0 (số lệnh khớp hôm nay). Màu may mắn: xanh — màu của tiền nằm im.",
+    "Chợ nghỉ, thầy cũng gác quẻ, bàn tính xếp xó. Sao Thái Bạch hôm nay bận đi chơi, chưa kịp quét vôi tài khoản ai.\n\nViệc nên làm: nạp lại năng lượng, lọc watchlist cho phiên tới, xem lại kế hoạch cắt lỗ đã đặt chưa. Đại kỵ: ngồi tính lãi tưởng tượng rồi hưng phấn, phiên mở cửa lại all-in.\n\nThầy phán: người thắng lâu dài là người biết khi nào không cần đánh.\n🍀 Số may mắn: 6 (số giờ nên ngủ thêm). Màu may mắn: trắng — cho đầu óc trống trải.",
+  ],
 };
 
 async function buildHoroscope(env) {
   const mood = await getVniMood();
+  const day = vnDayContext();
   const moodDesc = {
     weak: "thị trường đang điều chỉnh, phe bán mạnh, VNI dưới MA50",
     strong: "thị trường khỏe, dòng tiền hưng phấn, VNI trên MA20",
@@ -2883,15 +3241,33 @@ async function buildHoroscope(env) {
 
   if (env.GEMINI_API_KEY) {
     try {
-      const today = new Date();
-      const dateStr = `${today.getDate()}/${today.getMonth() + 1}`;
+      // Prompt PHẢI nêu rõ thứ + ngày, nếu chỉ đưa "3/8" thì model tự suy ra thứ và bịa sai.
+      const nextClose = day.upcomingHoliday;
+      const sessionLine = day.isTradingDay
+        ? `Hôm nay CÓ phiên giao dịch (HOSE mở 9:00-11:30 và 13:00-14:45).`
+        : `Hôm nay thị trường ĐÓNG CỬA (${day.closedReason}), không có phiên giao dịch.`;
       const prompt =
         `Bạn là "thầy bói chứng khoán" hài hước. Viết 1 lá tử vi DÀI DẶN, có chiều sâu (khoảng 6-9 câu, ` +
         `chia 3 đoạn ngắn: (1) vận thị trường chung hôm nay, (2) việc NÊN làm & ĐẠI KỴ hôm nay, ` +
-        `(3) lời thầy phán chốt hạ) cho dân lướt sóng chứng khoán Việt Nam ngày ${dateStr}, phong cách ` +
+        `(3) lời thầy phán chốt hạ) cho dân lướt sóng chứng khoán Việt Nam, phong cách ` +
         `vui nhộn lầy lội, dùng ẩn dụ tử vi/phong thủy pha thuật ngữ chứng khoán (sao Thái Bạch, Thần Tài, ` +
         `cung Tài Bạch, bắt đáy, cắt lỗ, tay to, đu đỉnh, gồng lãi, gồng lỗ, múc, xúc, bay màu...).\n` +
-        (moodDesc ? `Tâm trạng thị trường hôm nay: ${moodDesc}. Để lá tử vi phản ánh RÕ tâm trạng này.\n` : "") +
+        `DỮ KIỆN NGÀY (dùng đúng, KHÔNG được suy diễn hay nhắc bất kỳ thứ/ngày nào khác):\n` +
+        `- Hôm nay là ${day.weekday}, ngày ${day.dayLabel}.\n` +
+        `- ${sessionLine}\n` +
+        (nextClose
+          ? `- Sắp tới nghỉ ${nextClose.name} ngày ${fmtVnDMY(nextClose.date)}` +
+            ` (còn ${nextClose.daysAway} ngày) — nhắc khéo 1 câu về kỳ nghỉ này.\n`
+          : "") +
+        (day.isTradingDay
+          ? ""
+          : `Vì chợ đóng cửa: TUYỆT ĐỐI KHÔNG viết như thể hôm nay có giao dịch (không "phiên hôm nay", ` +
+            `không xui múc/bắt đáy/chốt lời trong ngày). Hãy nói về nghỉ ngơi, nhìn lại danh mục, ` +
+            `chuẩn bị tinh thần cho phiên kế tiếp.\n`) +
+        (moodDesc
+          ? `Tâm trạng thị trường ${day.isTradingDay ? "hôm nay" : "phiên gần nhất"}: ${moodDesc}. ` +
+            `Để lá tử vi phản ánh RÕ tâm trạng này.\n`
+          : "") +
         `TUYỆT ĐỐI KHÔNG khuyến nghị mua/bán mã cụ thể, KHÔNG hứa lợi nhuận. ` +
         `Kết bằng "Số may mắn" và "Màu may mắn" kèm 1 câu bông đùa. ` +
         `Viết văn xuôi thuần, KHÔNG thêm tiêu đề, KHÔNG dùng ký hiệu markdown (* ** # _). ` +
@@ -2926,9 +3302,12 @@ async function buildHoroscope(env) {
       console.warn("[horoscope] gemini fail:", e.message);
     }
   }
-  // Fallback template — chọn theo mood, xoay theo ngày
-  const arr = HOROSCOPE_FALLBACK[mood] || HOROSCOPE_FALLBACK.unknown;
-  return arr[new Date().getDate() % arr.length];
+  // Fallback template — ngày chợ đóng dùng bộ riêng, còn lại chọn theo mood.
+  // Xoay theo ngày VN (getDate() của Worker là UTC → lệch ngày lúc rạng sáng VN).
+  const key = day.isTradingDay ? mood : "closed";
+  const arr = HOROSCOPE_FALLBACK[key] || HOROSCOPE_FALLBACK.unknown;
+  const body = arr[Number(day.dateStr.slice(8, 10)) % arr.length];
+  return `${day.fullLabel}${day.isTradingDay ? "" : ` — ${day.closedReason}`}.\n\n${body}`;
 }
 
 async function sendMorningBriefing(env) {
@@ -2965,9 +3344,11 @@ async function sendMorningBriefing(env) {
   }
 
   // 5. Build message
-  const today = new Date();
-  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
-  let text = `☀️ *Sáng ${todayLabel}*\n\n`;
+  const day = vnDayContext();
+  let text = `☀️ *Sáng ${day.fullLabel}*\n\n`;
+  if (!day.isTradingDay) {
+    text += `🌴 _Hôm nay ${day.closedReason} — không có phiên giao dịch._\n\n`;
+  }
 
   // Performance tuần qua
   if (recentTrades.length > 0) {
@@ -2996,9 +3377,8 @@ async function sendMorningBriefing(env) {
   if (activePicks.length > 0) {
     text += `💼 *Active T+ picks* (${activePicks.length} mã):\n`;
     for (const p of activePicks.slice(0, 5)) {
-      const sigDate = new Date(p.signal_date);
-      const daysHeld = Math.floor((today.getTime() - sigDate.getTime()) / (24 * 3600 * 1000));
-      const tradingDays = Math.max(0, Math.floor(daysHeld * 5 / 7));  // approx trading days
+      // Đếm phiên thật (bỏ T7/CN + lễ) thay vì áng chừng daysHeld × 5/7
+      const tradingDays = vnTradingDaysBetween(p.signal_date, day.dateStr);
       const remainingDays = Math.max(0, 5 - tradingDays);
       const premiumTag = p.is_premium ? "💎 " : "";
       const peakTag = p.peak_price ? ` · peak ${parseFloat(p.peak_price).toFixed(2)}` : "";
@@ -3007,11 +3387,21 @@ async function sendMorningBriefing(env) {
     text += `\n`;
   }
 
-  // Today expectation
+  // Today expectation — ngày nghỉ thì không hứa hẹn scan/alert
   text += `📅 *Hôm nay*:\n`;
-  text += `  · Chờ EOD scan 14:50 cho signal mới\n`;
-  text += `  · Intraday spike alerts mỗi 3 phút cho active picks\n`;
-  text += `  · Check tab Hiệu suất trong app để xem equity curve\n`;
+  if (day.isTradingDay) {
+    text += `  · Chờ EOD scan 14:50 cho signal mới\n`;
+    text += `  · Intraday spike alerts mỗi 3 phút cho active picks\n`;
+    text += `  · Check tab Hiệu suất trong app để xem equity curve\n`;
+  } else {
+    const nextSession = addVnTradingDays(day.dateStr, 1);
+    text += `  · Chợ đóng cửa — không scan, không alert\n`;
+    text += `  · Phiên kế tiếp: ${fmtVnDMY(nextSession)}\n`;
+  }
+  if (day.upcomingHoliday) {
+    const h = day.upcomingHoliday;
+    text += `  · 🎉 Sắp nghỉ ${h.name} (${fmtVnDMY(h.date)}, còn ${h.daysAway} ngày)\n`;
+  }
 
   // Tử vi lướt sóng (cho vui, cuối briefing)
   try {
@@ -3034,17 +3424,23 @@ async function sendMorningBriefing(env) {
   await logHeartbeat(env, "morning-sent", { sent, total: chats.length });
 }
 
+// Forward-test Elite: replay detector + exit rules lên OHLCV thật, 07/2025 → 08/2026.
+// KHÔNG phải backtest gốc 7.4y — số này để so tương quan Elite vs Climax ngoài regime.
+const ELITE_FWD_STATS = { trades: 18, winPct: 56, avgPct: 0.8, baseWinPct: 24, baseAvgPct: -5.3 };
+// Split theo màu VNI phiên signal. In-sample, mẫu 9 vs 9 lệnh — chỉ cảnh báo, không lọc.
+const ELITE_VNI_SPLIT = { greenWin: 67, greenAvg: 3.7, redWin: 44, redAvg: -2.1 };
+const ELITE_RULE = "━━━━━━━━━━━━━━━━━━";
+
 async function sendMarketDigest(env, precomputedResult = null) {
   let result;
+  const freshScan = !precomputedResult;
   if (precomputedResult) {
     console.log(`[digest] using precomputed (full coverage ${precomputedResult.fullCoverage ? "yes" : "no"})`);
     result = precomputedResult;
   } else {
     console.log("[digest] scanning universe + market stats...");
     result = await scanAllSymbols();
-    // Persist khi quét fresh (chunked scan đã persist trong finalizeScan)
-    await persistClimaxMatches(env, result.matches);
-    await persistMomentumMatches(env, result.momentumMatches || []);
+    // Persist dời xuống sau khi tính xong VNI/health — trade_log cần context đó
   }
   const { matches, market, gainers, losers, topVol } = result;
   console.log(`[digest] ${matches.length} climax · ${market.upCount}↑/${market.downCount}↓ · avg ${market.avgChange.toFixed(2)}%`);
@@ -3074,6 +3470,14 @@ async function sendMarketDigest(env, precomputedResult = null) {
   const weakFlag = health.level === "weak" ? " ⚠️" : "";
   console.log(`[digest] market health=${health.level} breadth=${market.upCount}↑/${market.downCount}↓`);
 
+  // Quét fresh (chunked scan đã persist trong finalizeScan) — persist ở đây để
+  // trade_log kèm được context regime/VNI/breadth vừa tính xong.
+  if (freshScan) {
+    const signalCtx = buildSignalContext(result, vniInfo, health);
+    await persistClimaxMatches(env, result.matches, signalCtx);
+    await persistMomentumMatches(env, result.momentumMatches || [], signalCtx);
+  }
+
   // Fetch all connected users
   const sb = sbClient(env);
   const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
@@ -3084,27 +3488,15 @@ async function sendMarketDigest(env, precomputedResult = null) {
   }
 
   // ── Compose comprehensive market digest ──
-  function addTradingDays(date, n) {
-    const d = new Date(date);
-    let added = 0;
-    while (added < n) {
-      d.setUTCDate(d.getUTCDate() + 1);
-      const dow = d.getUTCDay();
-      if (dow !== 0 && dow !== 6) added++;
-    }
-    return d;
-  }
-  function fmtDM(d) {
-    return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  }
   function fmtBn(n) {
     return (n / 1e9).toFixed(0);
   }
 
-  const today = new Date();
-  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  const day = vnDayContext();
+  // Label phiên T+n theo phiên giao dịch thật (bỏ T7/CN + lễ)
+  const tLabel = (n) => fmtVnDM(addVnTradingDays(day.dateStr, n));
 
-  let text = `📊 *Tổng kết phiên ${todayLabel}*\n\n`;
+  let text = `📊 *Tổng kết phiên ${day.fullLabel}*\n\n`;
 
   // ── Market verdict lên đầu: "có nên giao dịch không" > "mua mã nào" ──
   const verdictLine = health.level === "weak"
@@ -3112,9 +3504,73 @@ async function sendMarketDigest(env, precomputedResult = null) {
     : health.level === "caution"
     ? `🟡 *Thận trọng* — vào nhỏ, ưu tiên mã khỏe nhất (NN mua ròng).`
     : `🟢 *Điều kiện bắt đáy chấp nhận được* — theo tín hiệu, tuân thủ size + SL.`;
+  const isEliteRegime = result.isEliteRegime;
+  const premiumMatches = matches.filter((m) => m.is_premium);
+  const tierA = matches.filter((m) => m.tier === "A" && !m.is_premium);
+  const tierB = matches.filter((m) => m.tier === "B" && !m.is_premium);
+
   text += `🚦 *Giao dịch hôm nay?*\n${verdictLine}\n`;
-  if (health.banner) text += `\n${health.banner}`;
-  text += `━━━━━━━━━━━━━━━\n\n`;
+  if (health.banner) text += `\n${health.banner}`;  // banner luôn kết thúc bằng blank line
+  // Elite block ngay dưới tự mở khung → khỏi kẻ 2 vạch liền nhau
+  if (!isEliteRegime) text += `━━━━━━━━━━━━━━━\n\n`;
+  else if (!health.banner) text += `\n`;
+
+  // ── ⚡ ELITE lên đầu ──
+  // Regime hiếm + edge cao hơn hẳn Climax thường → đọc phát thấy ngay, không phải scroll.
+  // Premium ưu tiên lên trước trong list (khỏi bị cắt bởi slice) và skip section riêng ở dưới.
+  const eliteShow = isEliteRegime
+    ? [...premiumMatches, ...matches.filter((m) => !m.is_premium)].slice(0, 5)
+    : [];
+  if (isEliteRegime) {
+    const f = ELITE_FWD_STATS;
+    text += `${ELITE_RULE}\n`;
+    text += matches.length > 0
+      ? `⚡ *ELITE — ${matches.length} MÃ HÔM NAY* ⚡\n`
+      : `⚡ *ELITE REGIME ACTIVE* ⚡\n`;
+    text += `${ELITE_RULE}\n`;
+    if (result.vniRet20 != null) {
+      text += `_VN-Index 20 phiên ${result.vniRet20.toFixed(1)}% → correction._\n`;
+    }
+    text += `_Forward ${f.trades} lệnh: win ${f.winPct}% · +${f.avgPct}%/lệnh_\n`;
+    text += `_(Climax ngoài regime: win ${f.baseWinPct}% · ${f.baseAvgPct}%/lệnh)_\n`;
+    // Cảnh báo màu VNI: rule in-sample nên chỉ nhắc, vẫn hiện đủ mã để user tự quyết
+    if (vniInfo && vniInfo.change < 0) {
+      const s = ELITE_VNI_SPLIT;
+      text += `\n⚠️ _VNI phiên nay đỏ. Elite vào phiên đỏ: win ${s.redWin}% · ${s.redAvg}%/lệnh — so với phiên xanh win ${s.greenWin}% · +${s.greenAvg}%. Cân nhắc chờ phiên xanh._\n`;
+    }
+
+    if (matches.length === 0) {
+      text += `\n📭 Không có mã Elite hôm nay.\n`;
+    } else {
+      const t1Label = tLabel(1);
+      for (const m of eliteShow) {
+        const cur = m.currentPrice;
+        const entryMax = cur * 1.02;
+        const entryMid = (entryMax + cur * 0.99) / 2;
+        const sl = entryMid * 0.92;
+        const target = entryMid * 1.03;
+        const icon = m.is_premium ? "💎" : "⚡";
+        const nnTag = m.is_premium && m.nn_net_5d_bn != null ? ` · NN +${m.nn_net_5d_bn}B/5d` : "";
+        text += `\n${icon} *${m.symbol}* @ ${cur.toFixed(2)}${weakFlag}\n`;
+        text += `   3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}${nnTag}\n`;
+        if (health.level === "weak") {
+          text += `   ⏸ WATCHLIST — chờ VNI xanh + đóng gần high + breadth>1\n`;
+          text += `   🟢 rồi MUA ≤ ${entryMax.toFixed(2)} · 🔴 CẮT < ${sl.toFixed(2)}\n`;
+        } else {
+          text += `   🟢 MUA ${t1Label} ≤ ${entryMax.toFixed(2)}\n`;
+          text += `   🔴 CẮT < ${sl.toFixed(2)}\n`;
+          text += `   🎯 BÁN T+3→T+5 ≥ ${target.toFixed(2)} (+3%)\n`;
+        }
+      }
+      if (matches.length > eliteShow.length) {
+        text += `\n_+${matches.length - eliteShow.length} mã Elite khác — mở app để xem đủ._\n`;
+      }
+      text += premiumMatches.length > 0
+        ? `\n💰 Size: 20% NAV/💎 Premium · 18% NAV/⚡ Elite. Max 2-3 lệnh.\n`
+        : `\n💰 Size: 18% NAV/lệnh. Max 2-3 lệnh đồng thời.\n`;
+    }
+    text += `${ELITE_RULE}\n\n`;
+  }
 
   // VN-Index
   if (vniInfo) {
@@ -3149,33 +3605,20 @@ async function sendMarketDigest(env, precomputedResult = null) {
     text += `_(Top gainers/losers skip để fit Cloudflare free tier limits)_\n`;
   }
 
-  // VN-Index regime banner cho Tier Elite
-  if (result.vniRegime === "correction" && result.vniRet20 != null) {
-    text += `\n━━━━━━━━━━━━━━━\n`;
-    text += `⚡ *Tier Elite regime ACTIVE*\n`;
-    text += `VN-Index 20 phiên: ${result.vniRet20.toFixed(1)}% → thị trường correction.\n`;
-    text += `Backtest: regime này Win 61% / Sharpe 1.71 vs baseline Win 56% / Sharpe 0.70.\n`;
-    text += `Tất cả match Climax dưới đây = *Tier Elite*.\n`;
-  } else if (result.vniRegime === "bull" && result.vniRet20 != null) {
+  // Banner bull — correction/Elite đã lên đầu message
+  if (result.vniRegime === "bull" && result.vniRet20 != null) {
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `🐂 _VN-Index bull (+${result.vniRet20.toFixed(1)}% 20p) — Climax edge thấp hơn correction regime._\n`;
   }
 
-  // Bắt đáy T+ section
-  const isEliteRegime = result.isEliteRegime;
-  const premiumMatches = matches.filter((m) => m.is_premium);
-  const tierA = matches.filter((m) => m.tier === "A" && !m.is_premium);
-  const tierB = matches.filter((m) => m.tier === "B" && !m.is_premium);
-
-  // 💎 Premium section đầu tiên (NN net buy confirmed, Sharpe 1.90 vs base 0.36)
-  if (premiumMatches.length > 0) {
+  // 💎 Premium section (NN net buy confirmed, Sharpe 1.90 vs base 0.36)
+  // Elite regime: premium đã nằm trong khối Elite đầu message → khỏi in lại
+  if (premiumMatches.length > 0 && !isEliteRegime) {
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `💎 *Premium picks* (${premiumMatches.length}) — Climax + NN net mua\n`;
     text += `_Backtest 7.4y: Win 61%, Sharpe 1.90 vs Tier A base Sharpe 0.36._\n`;
     text += `_Khác Elite: Premium = Climax + NN mua ròng 5d xác nhận; Elite = Climax khi VNI correction (chưa cần NN)._\n\n`;
-    const t1 = addTradingDays(today, 1);
-    const t3 = addTradingDays(today, 4);
-    const t5 = addTradingDays(today, 6);
+    const t1Label = tLabel(1);
     for (const m of premiumMatches.slice(0, 5)) {
       const cur = m.currentPrice;
       const entryMax = cur * 1.02;
@@ -3186,7 +3629,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
       if (health.level === "weak") {
         text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (SL < ${sl.toFixed(2)})\n\n`;
       } else {
-        text += `  MUA ${fmtDM(t1)} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
+        text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
       }
     }
     text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly-adjusted, Sharpe 1.90 justifies bigger size)\n`;
@@ -3194,27 +3637,25 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   text += `\n━━━━━━━━━━━━━━━\n`;
   text += `🔻 *Bắt đáy T+ (Vol Climax Bounce)*\n`;
-  if (isEliteRegime) {
-    text += `⚡ ${matches.length} Tier Elite (đã bao gồm Premium ở trên)\n`;
-  } else {
+  const eliteRendered = isEliteRegime && matches.length > 0;
+  if (eliteRendered) {
+    text += `⚡ ${matches.length} Tier Elite — _xem khối ⚡ đầu message._\n`;
+  } else if (!isEliteRegime) {
     text += `${premiumMatches.length} Premium · ${tierA.length} Tier A · ${tierB.length} Tier B\n`;
   }
 
-  if (matches.length === 0) {
+  if (eliteRendered) {
+    // đã render đầu message
+  } else if (matches.length === 0) {
     text += `\n📭 Không có signal hôm nay.\n`;
     text += `Pattern hiếm ~80-95/năm = ~2 lệnh/tuần avg.\n`;
   } else {
     text += `\n`;
-    const t1 = addTradingDays(today, 1);
-    const t3 = addTradingDays(today, 4);
-    const t5 = addTradingDays(today, 6);
-    const t1Label = fmtDM(t1);
-    const t3Label = fmtDM(t3);
-    const t5Label = fmtDM(t5);
+    const t1Label = tLabel(1);
+    const t3Label = tLabel(4);  // entry + 3 phiên
+    const t5Label = tLabel(6);
 
-    const showMatches = isEliteRegime
-      ? matches.slice(0, 5)
-      : [...tierA.slice(0, 3), ...tierB.slice(0, 3)].slice(0, 5);
+    const showMatches = [...tierA.slice(0, 3), ...tierB.slice(0, 3)].slice(0, 5);
     for (const m of showMatches) {
       const cur = m.currentPrice;
       const entryMax = cur * 1.02;
@@ -3222,8 +3663,8 @@ async function sendMarketDigest(env, precomputedResult = null) {
       const sl = entryMid * 0.92;
       const target = entryMid * 1.03;
 
-      const tierTag = (isEliteRegime ? "⚡ Elite" : m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
-      const hist = isEliteRegime ? "hist Win 61%" : m.tier === "A" ? "hist Win 59%" : "edge vừa";
+      const tierTag = (m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
+      const hist = m.tier === "A" ? "hist Win 59%" : "edge vừa";
       text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · _${hist}_\n`;
       if (health.level === "weak") {
         text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (CẮT < ${sl.toFixed(2)})\n\n`;
@@ -3231,9 +3672,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
         text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
       }
     }
-    text += isEliteRegime
-      ? `💰 Size: 18% NAV/Elite. Max 2-3 lệnh đồng thời.\n`
-      : `💰 Size: 15% NAV Tier A · 10% NAV Tier B. Max 2-3 lệnh.\n`;
+    text += `💰 Size: 15% NAV Tier A · 10% NAV Tier B. Max 2-3 lệnh.\n`;
   }
 
   // Momentum Swing section (chỉ khi bull/neutral regime + có matches)
@@ -3377,9 +3816,7 @@ async function sendClimaxAlerts(env) {
 
   // 0 matches → gửi empty digest (user biết app alive + không có signal)
   if (matches.length === 0) {
-    const today = new Date();
-    const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
-    const emptyText = `🔻 *Bắt đáy T+ — ${todayLabel}*\n\n` +
+    const emptyText = `🔻 *Bắt đáy T+ — ${vnDayContext().fullLabel}*\n\n` +
       `📭 *Không có signal hôm nay* (cả Tier A + Tier B đều rỗng).\n\n` +
       `Đã scan ${VOL_CLIMAX_UNIVERSE.length} mã Large+Mid cap. Không mã nào match pattern:\n` +
       `• Tier A: drop >7% + vol >2× + RSI <35\n` +
@@ -3401,32 +3838,14 @@ async function sendClimaxAlerts(env) {
   }
 
   // Compose message — 3 phần MUA/CẮT/BÁN cho mỗi mã (actionable)
-  function addTradingDays(date, n) {
-    const d = new Date(date);
-    let added = 0;
-    while (added < n) {
-      d.setUTCDate(d.getUTCDate() + 1);
-      const dow = d.getUTCDay();
-      if (dow !== 0 && dow !== 6) added++;
-    }
-    return d;
-  }
-  function fmtDM(d) {
-    return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  }
-
-  const today = new Date();
-  const todayLabel = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  const day = vnDayContext();
+  const todayLabel = day.fullLabel;
   // T+ convention VN: T+0 = entry day (mua T+1 sau signal)
   // T+1 = next trading day = entry day. T+3, T+4, T+5 = 3, 4, 5 phiên sau
-  const t1 = addTradingDays(today, 1);
-  const t3 = addTradingDays(today, 4); // entry + 3 phiên
-  const t4 = addTradingDays(today, 5);
-  const t5 = addTradingDays(today, 6);
-  const t1Label = fmtDM(t1);
-  const t3Label = fmtDM(t3);
-  const t4Label = fmtDM(t4);
-  const t5Label = fmtDM(t5);
+  const t1Label = fmtVnDM(addVnTradingDays(day.dateStr, 1));
+  const t3Label = fmtVnDM(addVnTradingDays(day.dateStr, 4)); // entry + 3 phiên
+  const t4Label = fmtVnDM(addVnTradingDays(day.dateStr, 5));
+  const t5Label = fmtVnDM(addVnTradingDays(day.dateStr, 6));
 
   // Split tiers
   const tierA = matches.filter((m) => m.tier === "A");
@@ -3491,15 +3910,7 @@ async function fetchVndHistory(symbol, days = 5) {
   const url = `${VND_HISTORY_URL}?resolution=D&symbol=${symbol}&from=${from}&to=${to}`;
   // VND blocks Cloudflare Worker default fetch (no UA, custom origin) → 403.
   // Giả browser headers cho qua. dchart endpoint chính là widget chart VNDirect.
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
-      "Origin": "https://dchart.vndirect.com.vn",
-      "Referer": "https://dchart.vndirect.com.vn/",
-    },
-  });
+  const res = await fetch(url, { headers: VND_CHART_HEADERS });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.s !== "ok" || !data.c?.length) throw new Error("no data");
@@ -3688,8 +4099,7 @@ async function sendEodDigest(env) {
     }
 
     // Build message
-    const today = new Date().toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
-    let text = `📊 *EOD ${today}*\n\n`;
+    let text = `📊 *EOD ${vnDayContext().fullLabel}*\n\n`;
     if (met.length > 0) {
       text += `🎯 *Met today (${met.length} mã):*\n`;
       for (const m of met) {
@@ -3851,16 +4261,10 @@ async function computeDrawdownStatus(sb, tier) {
   const isPaused = consec >= DRAWDOWN_THRESHOLD;
   let pausedUntil = null;
   if (isPaused && trades.length > 0) {
-    const lastLoss = new Date(trades[0].signal_date);
-    const end = new Date(lastLoss);
-    let added = 0;
-    while (added < DRAWDOWN_COOLDOWN_TRADING_DAYS) {
-      end.setDate(end.getDate() + 1);
-      if (end.getDay() !== 0 && end.getDay() !== 6) added++;
-    }
-    pausedUntil = end.toISOString().slice(0, 10);
+    // Cooldown tính theo phiên thật (bỏ cả lễ), không chỉ bỏ T7/CN
+    pausedUntil = addVnTradingDays(trades[0].signal_date, DRAWDOWN_COOLDOWN_TRADING_DAYS);
     // Re-check: if today already past pausedUntil, not paused anymore
-    const today = new Date().toISOString().slice(0, 10);
+    const today = vnDateString();
     if (today > pausedUntil) {
       return { tier, consecLosses: consec, isPaused: false, pausedUntil: null, recent: trades.length };
     }
