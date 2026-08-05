@@ -1373,6 +1373,8 @@ async function buildStatsMessage(env) {
 // trade_log là nguồn chính (Climax tiers / FBO / MidTerm). Momentum không được
 // ghi vào trade_log nên phải đọc thêm từ climax_active_picks, nếu không sẽ sót.
 const SIGNALS_WINDOW_DAYS = 7;
+// Mỗi mã = 1 subrequest VND; chặn trần để /signals không đụng limit của Worker
+const SIGNALS_QUOTE_LIMIT = 12;
 
 const TIER_ICONS = {
   Premium: "💎", Elite: "⚡", A: "🟢", B: "🔵",
@@ -1389,13 +1391,13 @@ async function buildSignalsMessage(env) {
   const headers = { apikey: sb.key, authorization: `Bearer ${sb.key}` };
   const today = vnDateString();
   const since = vnDateString(new Date(Date.now() - SIGNALS_WINDOW_DAYS * 24 * 3600 * 1000));
-  const cols = "symbol,signal_date,tier,pattern_type,entry_price,max_hold_days,resolved_at,exit_price,exit_day,exit_reason,net_ret,is_win,is_premium";
+  const cols = "symbol,signal_date,tier,pattern_type,entry_price,target_price,sl_price,max_hold_days,trail_pct,resolved_at,exit_price,exit_day,exit_reason,net_ret,is_win,is_premium,vni_regime";
 
   const [recentRes, staleRes, climaxPicks, midtermPicks] = await Promise.all([
     fetch(`${sb.url}/rest/v1/trade_log?select=${cols}&signal_date=gte.${since}&order=signal_date.desc&limit=100`, { headers }),
     // Signal cũ hơn window nhưng CHƯA đóng (MidTerm hold tới 30 phiên) — gom 1 dòng
     fetch(`${sb.url}/rest/v1/trade_log?select=symbol,signal_date,tier&resolved_at=is.null&signal_date=lt.${since}&order=signal_date.desc&limit=50`, { headers }),
-    sbQuery(sb, "climax_active_picks", { select: "symbol,signal_date,entry_price,tier,expires_at" }),
+    sbQuery(sb, "climax_active_picks", { select: "symbol,signal_date,entry_price,target_price,tier,expires_at" }),
     sbQuery(sb, "mid_term_active_picks", { select: "symbol,signal_date,entry_price,max_hold_days,expires_at" }),
   ]);
 
@@ -1429,14 +1431,53 @@ async function buildSignalsMessage(env) {
       `Pattern selective — đa số ngày 0-2 picks. Gõ /scan để quét ngay.`;
   }
 
+  // Giá hiện tại cho lệnh đang mở — không có nó thì /signals chỉ nói "đang mở"
+  // mà không nói đang lãi lỗ bao nhiêu, tức là thiếu đúng thứ cần để quyết định.
+  const quotes = new Map();
+  await Promise.all(
+    open.slice(0, SIGNALS_QUOTE_LIMIT).map(async (t) => {
+      try {
+        const h = await fetchVndHistory(t.symbol, 10);
+        const last = h.closes[h.closes.length - 1];
+        if (last > 0) quotes.set(t.symbol, last);
+      } catch (e) {
+        console.warn(`[signals] quote ${t.symbol}: ${e.message}`);
+      }
+    })
+  );
+
   const fmtOpen = (t) => {
     const icon = TIER_ICONS[t.tier] || "•";
     const held = vnTradingDaysBetween(t.signal_date, today);
     const hold = t.max_hold_days || 5;
     const left = hold - held;
     const status = left > 0 ? `còn ${left} phiên` : "quá hạn, chờ resolve";
-    const entry = t.entry_price != null ? ` @${parseFloat(t.entry_price).toFixed(2)}` : "";
-    return `${icon} *${t.symbol}*${entry} · ${t.tier} · ${fmtVnDM(t.signal_date)} — T+${held}/${hold}, ${status}`;
+    const entry = t.entry_price != null ? parseFloat(t.entry_price) : null;
+    const entryTag = entry != null ? ` @${entry.toFixed(2)}` : "";
+    let line = `${icon} *${t.symbol}*${entryTag} · ${t.tier} · ${fmtVnDM(t.signal_date)} — T+${held}/${hold}, ${status}\n`;
+
+    const cur = quotes.get(t.symbol);
+    if (cur == null || entry == null) return line;
+
+    const ret = ((cur - entry) / entry) * 100;
+    line += `   Nay ${cur.toFixed(2)} · *${ret >= 0 ? "+" : ""}${ret.toFixed(2)}%*`;
+
+    // MidTerm/Momentum chốt bằng trailing stop — target_price của chúng chỉ là
+    // giá trị lấp cột NOT NULL, hiện ra như mốc chốt sẽ khiến bán sớm.
+    if (t.trail_pct) {
+      line += ` · trail ${t.trail_pct}% từ đỉnh`;
+      return line + "\n";
+    }
+
+    const tp = t.target_price != null ? parseFloat(t.target_price) : null;
+    const sl = t.sl_price != null ? parseFloat(t.sl_price) : entry * 0.92;
+    if (tp != null && cur >= tp) line += ` · 🎯 chạm TP ${tp.toFixed(2)}`;
+    else if (cur <= sl) line += ` · 🔴 thủng SL ${sl.toFixed(2)}`;
+    else {
+      if (tp != null) line += ` · TP ${tp.toFixed(2)}`;
+      line += ` · SL ${sl.toFixed(2)}`;
+    }
+    return line + "\n";
   };
 
   const fmtClosed = (t) => {
@@ -1451,8 +1492,17 @@ async function buildSignalsMessage(env) {
   text += `${open.length} đang mở · ${closed.length} đã đóng\n\n`;
 
   if (open.length > 0) {
-    text += `🟡 *ĐANG MỞ*\n`;
-    open.forEach((t) => { text += fmtOpen(t) + "\n"; });
+    const marked = open.filter((t) => quotes.has(t.symbol) && t.entry_price != null);
+    let header = `🟡 *ĐANG MỞ*`;
+    if (marked.length > 0) {
+      const sum = marked.reduce((s, t) => {
+        const e = parseFloat(t.entry_price);
+        return s + ((quotes.get(t.symbol) - e) / e) * 100;
+      }, 0);
+      header += ` — tạm tính ${sum >= 0 ? "+" : ""}${sum.toFixed(2)}% (${marked.length} mã)`;
+    }
+    text += `${header}\n`;
+    open.forEach((t) => { text += fmtOpen(t); });
     text += `\n`;
   }
 
