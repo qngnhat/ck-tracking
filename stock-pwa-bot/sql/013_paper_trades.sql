@@ -8,7 +8,7 @@
 -- với kết quả bot trên cùng mã, và tách lệnh theo signal vs lệnh tự chế.
 --
 -- 1 lot = 1 row. Mua 2 lần cùng mã = 2 row, /s đóng lot cũ nhất (FIFO).
--- Không có khối lượng: đang paper trade nên chỉ cần % mỗi lệnh.
+-- Bán một phần thì lot gốc teo quantity lại, phần đã bán tách thành row closed.
 
 CREATE TABLE IF NOT EXISTS paper_trades (
   id              BIGSERIAL PRIMARY KEY,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   symbol          TEXT NOT NULL,
   entry_price     NUMERIC NOT NULL,
   entry_date      DATE NOT NULL,
-  sl_price        NUMERIC,                 -- SL tự đặt; NULL = chưa đặt
+  quantity        INTEGER,                 -- số lượng CP; NULL = chỉ theo dõi %
   exit_price      NUMERIC,
   exit_date       DATE,
   -- Tên có hậu tố _pct vì trade_log.net_ret là TỶ LỆ (0.05 = +5%) — hai bảng

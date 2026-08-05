@@ -1160,10 +1160,6 @@ async function handleTelegramWebhook(request, env, ctx) {
     await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperBuy(env, chatId, text));
     return new Response("ok");
   }
-  if (/^\/sl\s/i.test(text)) {
-    await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperSetSl(env, chatId, text));
-    return new Response("ok");
-  }
   if (/^\/(s|sell)\s/i.test(text)) {
     await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperSell(env, chatId, text));
     return new Response("ok");
@@ -1205,10 +1201,9 @@ function buildHelpMessage() {
     `/signals (/sg) — Mã đã & đang signal 7 ngày qua (T+, lãi/lỗ)\n` +
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
     `\n*Sổ lệnh tay:*\n` +
-    `/b GMD 72.2 68 — Ghi lệnh MUA (giá, SL)\n` +
-    `/sl GMD 70 — Dời/đặt SL cho lệnh đang mở\n` +
-    `/s GMD 76 — Ghi lệnh BÁN (đóng lot cũ nhất)\n` +
-    `/pos — Lệnh đang mở + lãi/lỗ tạm tính + SL\n` +
+    `/b SHS 17.88 1000 — Ghi MUA (giá, số lượng)\n` +
+    `/s SHS 18.5 400 — Ghi BÁN (bỏ SL = đóng cả lot cũ nhất)\n` +
+    `/pos — Lệnh đang mở + lãi/lỗ tạm tính\n` +
     `/pnl — Tổng kết đã đóng + so với bot\n` +
     `\n*Stats + Regime:*\n` +
     `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
@@ -1451,28 +1446,43 @@ const EXIT_REASON_LABELS = {
 // Sổ lệnh của USER, không phải của bot: mã nào cũng ghi được, kể cả mã bot
 // không hề gợi ý. Nhãn bot_tier chỉ để lúc thống kê tách được "theo signal"
 // vs "tự chế" — không phải điều kiện để ghi.
-// Chỉ lưu giá + SL, không khối lượng: đang đo hiệu suất theo %, chưa quản vốn.
 const PAPER_FEE_PCT = 0.4;      // khứ hồi, cùng mức trade_log dùng để hai bên so được
 const PAPER_QUOTE_LIMIT = 12;   // mỗi mã 1 subrequest VND
 const PAPER_SIGNAL_LOOKBACK = 10;  // signal cũ hơn ngần này phiên thì coi như không liên quan
 
-// `/b MÃ GIÁ [SL]` — SL tuỳ chọn để không chặn lúc gõ vội, nhưng thiếu thì nhắc.
+// `/b MÃ GIÁ [SL]` — SL = số lượng cổ phiếu, tuỳ chọn (không có thì chỉ theo dõi %).
 function parsePaperCommand(text) {
   const parts = text.trim().split(/\s+/);
   const symbol = (parts[1] || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const price = parseFloat(parts[2]);
-  if (symbol.length < 3 || !Number.isFinite(price) || price <= 0) return null;
-  let sl = null;
-  if (parts[3] != null) {
-    sl = parseFloat(parts[3]);
-    if (!Number.isFinite(sl) || sl <= 0) return null;
-  }
-  return { symbol, price, sl };
+  const nums = parts.slice(2).map((p) => parseFloat(p));
+  if (symbol.length < 3 || nums.length === 0 || nums.length > 2) return null;
+  if (nums.some((n) => !Number.isFinite(n) || n <= 0)) return null;
+  const qty = nums[1] ?? null;
+  if (qty != null && !Number.isInteger(qty)) return null;
+  return { symbol, price: nums[0], qty };
 }
 
-function fmtSlLine(entry, sl) {
-  const risk = (sl / entry - 1) * 100;
-  return `   SL ${sl.toFixed(2)} · rủi ro ${risk.toFixed(2)}%\n`;
+// Giá niêm yết đơn vị nghìn đồng (17.88 = 17.880đ), SL đơn vị cổ phiếu.
+function paperCost(price, qty) {
+  return price * qty * 1000;
+}
+
+// Luôn kèm dấu: số tiền hay nằm trong ngoặc, không có dấu thì không biết lãi hay lỗ.
+function fmtVnd(amount) {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "+";
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2)} tỷ`;
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(1)} tr`;
+  return `${sign}${Math.round(abs / 1e3)} ngh`;
+}
+
+// Vốn bỏ ra thì không có chiều lãi/lỗ — đừng gắn dấu vào.
+function fmtVndAbs(amount) {
+  return fmtVnd(Math.abs(amount)).slice(1);
+}
+
+function fmtQty(qty) {
+  return qty.toLocaleString("en-US");
 }
 
 // Bot có bắn signal cho mã này gần đây không → tách "theo bot" vs "tự chế".
@@ -1488,12 +1498,11 @@ async function findRecentBotSignal(sb, symbol) {
     .sort((a, b) => (a.signal_date < b.signal_date ? 1 : -1))[0] || null;
 }
 
+const PAPER_BUY_USAGE = "Usage: `/b <MÃ> <GIÁ> [SL]` — vd `/b SHS 17.88 1000`\n(SL = số lượng cổ phiếu, bỏ trống thì chỉ theo dõi %)";
+
 async function handlePaperBuy(env, chatId, text) {
   const cmd = parsePaperCommand(text);
-  if (!cmd) return "Usage: `/b <MÃ> <GIÁ> [SL]` — vd `/b GMD 72.2 68`";
-  if (cmd.sl != null && cmd.sl >= cmd.price) {
-    return `❌ SL ${cmd.sl.toFixed(2)} phải THẤP hơn giá mua ${cmd.price.toFixed(2)} — gõ nhầm thứ tự?`;
-  }
+  if (!cmd) return PAPER_BUY_USAGE;
 
   const sb = sbClient(env);
   const signal = await findRecentBotSignal(sb, cmd.symbol);
@@ -1502,17 +1511,16 @@ async function handlePaperBuy(env, chatId, text) {
     symbol: cmd.symbol,
     entry_price: cmd.price,
     entry_date: vnDateString(),
-    sl_price: cmd.sl,
+    quantity: cmd.qty,
     status: "open",
     bot_tier: signal?.tier ?? null,
     bot_signal_date: signal?.signal_date ?? null,
   });
   if (!ok) return "❌ Không ghi được lệnh (chạy `sql/013` chưa?)";
 
-  let msg = `✅ Ghi MUA *${cmd.symbol}* @ ${cmd.price.toFixed(2)} · ${vnDayLabel()}\n`;
-  msg += cmd.sl != null
-    ? fmtSlLine(cmd.price, cmd.sl)
-    : `   ⚠️ Chưa đặt SL — \`/sl ${cmd.symbol} <giá>\` bổ sung sau\n`;
+  let msg = `✅ Ghi MUA *${cmd.symbol}* @ ${cmd.price.toFixed(2)}`;
+  msg += cmd.qty != null ? ` × ${fmtQty(cmd.qty)} = ${fmtVndAbs(paperCost(cmd.price, cmd.qty))}` : "";
+  msg += ` · ${vnDayLabel()}\n`;
   msg += signal
     ? `   Khớp signal bot: *${signal.tier}* ${fmtVnDMY(signal.signal_date)}\n`
     : `   Bot không signal mã này ${PAPER_SIGNAL_LOOKBACK} phiên qua — lệnh tự chế\n`;
@@ -1526,95 +1534,108 @@ async function handlePaperBuy(env, chatId, text) {
   return `${msg}\n\`/pos\` xem lệnh đang mở · \`/s ${cmd.symbol} <giá>\` để đóng`;
 }
 
-// Sửa SL sau khi đã mua (dời SL, hoặc bổ sung khi lúc /b quên nhập).
-async function handlePaperSetSl(env, chatId, text) {
-  const parts = text.trim().split(/\s+/);
-  const symbol = (parts[1] || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const sl = parseFloat(parts[2]);
-  if (symbol.length < 3 || !Number.isFinite(sl) || sl <= 0) {
-    return "Usage: `/sl <MÃ> <GIÁ SL>` — vd `/sl GMD 68`";
-  }
-
-  const sb = sbClient(env);
-  const rows = await sbQuery(sb, "paper_trades", {
-    select: "id,entry_price,entry_date,sl_price",
-    eq: { chat_id: chatId, symbol, status: "open" },
-  });
-  if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
-  if (rows.length === 0) return `Không có lệnh *${symbol}* nào đang mở. \`/pos\` xem danh sách.`;
-
-  // Chốt số cũ TRƯỚC khi PATCH — sau update thì không đọc lại được nữa.
-  const lots = rows.map((r) => ({
-    entry: parseFloat(r.entry_price),
-    date: r.entry_date,
-    oldSl: r.sl_price != null ? parseFloat(r.sl_price) : null,
-  }));
-
-  // Nhiều lot cùng mã thì đặt chung một mức SL — SL là mức giá, không theo lot.
-  const ok = await sbUpdate(sb, "paper_trades", {
-    eq: { chat_id: chatId, symbol, status: "open" },
-    data: { sl_price: sl },
-  });
-  if (!ok) return "❌ Không cập nhật được SL.";
-
-  const prev = lots.find((l) => l.oldSl != null)?.oldSl;
-  let msg = `✅ SL *${symbol}* = ${sl.toFixed(2)}`;
-  msg += prev != null ? ` (trước ${prev.toFixed(2)})\n` : `\n`;
-  for (const l of lots) {
-    msg += `   lot ${fmtVnDMY(l.date)} @${l.entry.toFixed(2)} → rủi ro ${((sl / l.entry - 1) * 100).toFixed(2)}%\n`;
-  }
-  return msg;
-}
+const PAPER_SELL_USAGE = "Usage: `/s <MÃ> <GIÁ> [SL]` — vd `/s SHS 18.5 400`\n(bỏ SL = đóng nguyên lot cũ nhất · `/s` không tham số vẫn là quick scan)";
 
 async function handlePaperSell(env, chatId, text) {
   const cmd = parsePaperCommand(text);
-  if (!cmd) return "Usage: `/s <MÃ> <GIÁ>` — vd `/s GMD 76`\n(`/s` không tham số vẫn là quick scan)";
+  if (!cmd) return PAPER_SELL_USAGE;
+  const sellQty = cmd.qty;
 
   const sb = sbClient(env);
   const rows = await sbQuery(sb, "paper_trades", {
-    select: "id,symbol,entry_price,entry_date,sl_price",
+    select: "id,symbol,entry_price,entry_date,quantity,bot_tier,bot_signal_date",
     eq: { chat_id: chatId, symbol: cmd.symbol, status: "open" },
   });
   if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
   if (rows.length === 0) return `Không có lệnh *${cmd.symbol}* nào đang mở. \`/pos\` xem danh sách.`;
 
-  const lot = [...rows].sort((a, b) => (a.entry_date < b.entry_date ? -1 : 1))[0];  // FIFO
-  const entry = parseFloat(lot.entry_price);
-  const netRet = (cmd.price / entry - 1) * 100 - PAPER_FEE_PCT;
-  const today = vnDateString();
-  const ok = await sbUpdate(sb, "paper_trades", {
-    eq: { id: lot.id },
-    data: {
-      exit_price: cmd.price, exit_date: today,
-      net_ret_pct: +netRet.toFixed(2), status: "closed",
-    },
-  });
-  if (!ok) return "❌ Không cập nhật được lệnh.";
+  const lots = [...rows].sort((a, b) => (a.entry_date < b.entry_date ? -1 : 1));  // FIFO
+  const held = lots.reduce((s, l) => s + (l.quantity != null ? +l.quantity : 0), 0);
 
-  const held = vnTradingDaysBetween(lot.entry_date, today);
-  let msg = `✅ Ghi BÁN *${cmd.symbol}* @ ${cmd.price.toFixed(2)}\n`;
-  msg += `   Mua ${entry.toFixed(2)} (${fmtVnDMY(lot.entry_date)}) · giữ ${held} phiên\n`;
-  msg += `   ${netRet >= 0 ? "🟢" : "🔴"} *${netRet >= 0 ? "+" : ""}${netRet.toFixed(2)}%* (đã trừ phí ${PAPER_FEE_PCT}%)\n`;
-  // Bán dưới SL = SL đã thủng mà chưa cắt — chỗ này mới là cái đáng soi lại,
-  // không phải con số lãi/lỗ.
-  const lotSl = lot.sl_price != null ? parseFloat(lot.sl_price) : null;
-  if (lotSl != null) {
-    msg += cmd.price < lotSl
-      ? `   ⚠️ Bán dưới SL ${lotSl.toFixed(2)} — cắt trễ ${((cmd.price / lotSl - 1) * 100).toFixed(2)}%\n`
-      : `   SL ${lotSl.toFixed(2)} · không thủng\n`;
+  // Chia KL bán cho từng lot TRƯỚC khi ghi, để lệnh quá tay bị chặn sạch chứ
+  // không ghi được nửa chừng rồi mới lỗi.
+  const plan = [];
+  if (sellQty == null) {
+    plan.push({ lot: lots[0], qtyOut: lots[0].quantity != null ? +lots[0].quantity : null, partial: false });
+  } else {
+    if (lots.some((l) => l.quantity == null)) {
+      return `❌ Có lot *${cmd.symbol}* chưa ghi số lượng nên không chia phần được. Bỏ số lượng đi để đóng nguyên lot cũ nhất.`;
+    }
+    if (sellQty > held) return `❌ Đang giữ ${fmtQty(held)} ${cmd.symbol}, không bán được ${fmtQty(sellQty)}.`;
+    let remain = sellQty;
+    for (const lot of lots) {
+      if (remain <= 0) break;
+      const q = Math.min(+lot.quantity, remain);
+      plan.push({ lot, qtyOut: q, partial: q < +lot.quantity });
+      remain -= q;
+    }
   }
-  if (rows.length > 1) msg += `   Còn ${rows.length - 1} lot ${cmd.symbol} đang mở\n`;
+
+  const today = vnDateString();
+  const netRetOf = (entry) => (cmd.price / entry - 1) * 100 - PAPER_FEE_PCT;
+  for (const p of plan) {
+    const netRet = +netRetOf(parseFloat(p.lot.entry_price)).toFixed(2);
+    if (p.partial) {
+      // Bán một phần: lot gốc giữ id và teo SL lại, phần đã bán tách thành row closed.
+      const okSplit = await sbUpdate(sb, "paper_trades", {
+        eq: { id: p.lot.id },
+        data: { quantity: +p.lot.quantity - p.qtyOut },
+      });
+      if (!okSplit) return "❌ Không tách được lot.";
+      await sbUpsert(sb, "paper_trades", {
+        chat_id: chatId, symbol: cmd.symbol,
+        entry_price: p.lot.entry_price, entry_date: p.lot.entry_date,
+        quantity: p.qtyOut,
+        exit_price: cmd.price, exit_date: today,
+        net_ret_pct: netRet, status: "closed",
+        bot_tier: p.lot.bot_tier, bot_signal_date: p.lot.bot_signal_date,
+      });
+    } else {
+      const ok = await sbUpdate(sb, "paper_trades", {
+        eq: { id: p.lot.id },
+        data: {
+          exit_price: cmd.price, exit_date: today,
+          net_ret_pct: netRet, status: "closed",
+        },
+      });
+      if (!ok) return "❌ Không cập nhật được lệnh.";
+    }
+  }
+
+  const soldQty = plan.every((p) => p.qtyOut != null)
+    ? plan.reduce((s, p) => s + p.qtyOut, 0) : null;
+  let msg = `✅ Ghi BÁN *${cmd.symbol}* @ ${cmd.price.toFixed(2)}`;
+  msg += soldQty != null ? ` × ${fmtQty(soldQty)}\n` : `\n`;
+
+  let pnlVnd = 0;
+  for (const p of plan) {
+    const entry = parseFloat(p.lot.entry_price);
+    const netRet = netRetOf(entry);
+    const days = vnTradingDaysBetween(p.lot.entry_date, today);
+    const money = p.qtyOut != null ? paperCost(entry, p.qtyOut) * (netRet / 100) : 0;
+    pnlVnd += money;
+    msg += `   Mua ${entry.toFixed(2)} (${fmtVnDMY(p.lot.entry_date)}) · giữ ${days} phiên · `;
+    msg += `${netRet >= 0 ? "🟢 +" : "🔴 "}${netRet.toFixed(2)}%`;
+    msg += p.qtyOut != null ? ` (${fmtVnd(money)})\n` : `\n`;
+  }
+  if (plan.length > 1 || soldQty != null) {
+    msg += `   ${pnlVnd >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnlVnd)}* (đã trừ phí ${PAPER_FEE_PCT}%)\n`;
+  }
+
+  const leftQty = soldQty != null ? held - soldQty : null;
+  if (leftQty != null && leftQty > 0) msg += `   Còn ${fmtQty(leftQty)} ${cmd.symbol} đang mở\n`;
+  else if (leftQty == null && lots.length > 1) msg += `   Còn ${lots.length - 1} lot ${cmd.symbol} đang mở\n`;
   return `${msg}\n\`/pnl\` xem tổng kết`;
 }
 
 async function buildPaperPositionsMessage(env, chatId) {
   const sb = sbClient(env);
   const rows = await sbQuery(sb, "paper_trades", {
-    select: "symbol,entry_price,entry_date,sl_price,bot_tier,bot_signal_date",
+    select: "symbol,entry_price,entry_date,quantity,bot_tier,bot_signal_date",
     eq: { chat_id: chatId, status: "open" },
   });
   if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
-  if (rows.length === 0) return "📭 Chưa có lệnh nào đang mở.\nGhi lệnh: `/b GMD 72.2 68`";
+  if (rows.length === 0) return "📭 Chưa có lệnh nào đang mở.\nGhi lệnh: `/b SHS 17.88 1000`";
 
   const quotes = new Map();
   await Promise.all(rows.slice(0, PAPER_QUOTE_LIMIT).map(async (r) => {
@@ -1628,26 +1649,28 @@ async function buildPaperPositionsMessage(env, chatId) {
   }));
 
   const today = vnDateString();
-  let sum = 0, counted = 0, breached = 0, noSl = 0, body = "";
+  let sum = 0, counted = 0, capital = 0, pnlVnd = 0, body = "";
   for (const r of [...rows].sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1))) {
     const entry = parseFloat(r.entry_price);
-    const sl = r.sl_price != null ? parseFloat(r.sl_price) : null;
+    const qty = r.quantity != null ? +r.quantity : null;
     const held = vnTradingDaysBetween(r.entry_date, today);
     const tag = r.bot_tier ? `${r.bot_tier} ${fmtVnDMY(r.bot_signal_date)}` : "tự chế";
-    if (sl == null) noSl++;
-    body += `• *${r.symbol}* @${entry.toFixed(2)} · ${fmtVnDMY(r.entry_date)} · T+${held} · ${tag}\n`;
+    body += `• *${r.symbol}* @${entry.toFixed(2)}`;
+    body += qty != null ? ` ×${fmtQty(qty)} = ${fmtVndAbs(paperCost(entry, qty))}` : "";
+    body += ` · ${fmtVnDMY(r.entry_date)} · T+${held} · ${tag}\n`;
     const cur = quotes.get(r.symbol);
     if (cur != null) {
       const ret = (cur / entry - 1) * 100 - PAPER_FEE_PCT;
       sum += ret;
       counted++;
       body += `   Nay ${cur.toFixed(2)} · ${ret >= 0 ? "🟢 +" : "🔴 "}${ret.toFixed(2)}%`;
-      if (sl == null) body += ` · chưa có SL`;
-      else if (cur <= sl) { breached++; body += ` · ⚠️ *THỦNG SL ${sl.toFixed(2)}*`; }
-      else body += ` · SL ${sl.toFixed(2)} (còn ${((sl / cur - 1) * 100).toFixed(2)}%)`;
+      if (qty != null) {
+        const money = paperCost(entry, qty) * (ret / 100);
+        capital += paperCost(entry, qty);
+        pnlVnd += money;
+        body += ` (${fmtVnd(money)})`;
+      }
       body += `\n`;
-    } else if (sl != null) {
-      body += `   SL ${sl.toFixed(2)} · rủi ro ${((sl / entry - 1) * 100).toFixed(2)}%\n`;
     }
   }
   let head = `📓 *Lệnh đang mở* (${rows.length})`;
@@ -1655,16 +1678,17 @@ async function buildPaperPositionsMessage(env, chatId) {
     const avg = sum / counted;
     head += ` — tạm tính ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%/lệnh`;
   }
-  let foot = `_Đã trừ phí ${PAPER_FEE_PCT}%._ \`/s <MÃ> <giá>\` _để đóng._`;
-  if (breached > 0) foot = `⚠️ *${breached} lệnh đang thủng SL.*\n${foot}`;
-  if (noSl > 0) foot += ` \`/sl <MÃ> <giá>\` _đặt SL._`;
-  return `${head}\n\n${body}\n${foot}`;
+  // Chỉ cộng tiền cho lot có ghi SL — lot thiếu SL vẫn tính % nhưng không kéo tổng.
+  if (capital > 0) {
+    head += `\nVốn ${fmtVndAbs(capital)} · ${pnlVnd >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnlVnd)}* (${((pnlVnd / capital) * 100).toFixed(2)}%)`;
+  }
+  return `${head}\n\n${body}\n_Đã trừ phí ${PAPER_FEE_PCT}%._ \`/s <MÃ> <giá>\` _để đóng._`;
 }
 
 async function buildPaperPnlMessage(env, chatId) {
   const sb = sbClient(env);
   const rows = await sbQuery(sb, "paper_trades", {
-    select: "symbol,entry_price,entry_date,exit_price,exit_date,sl_price,net_ret_pct,bot_tier,bot_signal_date",
+    select: "symbol,entry_price,entry_date,exit_price,exit_date,quantity,net_ret_pct,bot_tier,bot_signal_date",
     eq: { chat_id: chatId, status: "closed" },
   });
   if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
@@ -1688,18 +1712,17 @@ async function buildPaperPnlMessage(env, chatId) {
   msg += seg("Theo signal bot", followed);
   msg += seg("Tự chế", rows.filter((r) => !r.bot_tier));
 
-  // Cắt dưới SL = lỗ vượt mức đã tự cho phép. Tách riêng vì nó là lỗi thi hành,
-  // không phải lỗi của signal.
-  const withSl = rows.filter((r) => r.sl_price != null && r.exit_price != null);
-  if (withSl.length > 0) {
-    const late = withSl.filter((r) => parseFloat(r.exit_price) < parseFloat(r.sl_price));
-    msg += `\n*Kỷ luật SL:* ${withSl.length}/${rows.length} lệnh có đặt SL`;
-    if (late.length > 0) {
-      const slip = mean(late.map((r) => (parseFloat(r.exit_price) / parseFloat(r.sl_price) - 1) * 100));
-      msg += ` · ${late.length} lệnh cắt dưới SL (trượt TB ${slip.toFixed(2)}%)`;
-    } else {
-      msg += ` · không lệnh nào cắt dưới SL`;
+  // Tiền chỉ cộng được cho lệnh có ghi SL; lệnh thiếu SL vẫn nằm trong phần % ở trên.
+  const withQty = rows.filter((r) => r.quantity != null);
+  if (withQty.length > 0) {
+    let cap = 0, pnl = 0;
+    for (const r of withQty) {
+      const c = paperCost(parseFloat(r.entry_price), +r.quantity);
+      cap += c;
+      pnl += c * (parseFloat(r.net_ret_pct || 0) / 100);
     }
+    msg += `\n*Tiền:* ${pnl >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnl)}* trên vốn ${fmtVndAbs(cap)} (${((pnl / cap) * 100).toFixed(2)}%)`;
+    if (withQty.length < rows.length) msg += ` — ${rows.length - withQty.length} lệnh không ghi số lượng nên không tính`;
     msg += `\n`;
   }
 
