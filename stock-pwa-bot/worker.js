@@ -391,6 +391,28 @@ export default {
       ctx.waitUntil(checkSpikeAlerts(env));
       return new Response("Spike alert check triggered", { status: 200 });
     }
+    if (url.pathname === "/presignal-test" && request.method === "POST") {
+      // Manual trigger cảnh báo sớm. Vẫn tôn trọng cửa sổ 13:30-14:45 VN.
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      ctx.waitUntil(checkPreSignalAlerts(env));
+      return new Response("Pre-signal check triggered", { status: 200 });
+    }
+    if (url.pathname === "/presignal-watch" && request.method === "GET") {
+      // Soi ứng viên đang theo dõi (debug, không gửi Telegram).
+      const secret = url.searchParams.get("secret");
+      if (secret !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const rows = await sbQuery(sbClient(env), "presignal_watch", {
+        select: "symbol,watch_date,snapshot_date,ret3d_at_scan,rsi_at_scan,vol_avg20,alerted_at",
+      });
+      return new Response(JSON.stringify(rows ?? { error: "query fail — chạy sql/012 chưa?" }, null, 2), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/scan-init" && request.method === "POST") {
       // Manual trigger full-universe scan init
       const secret = url.searchParams.get("secret");
@@ -911,6 +933,7 @@ export default {
     ctx.waitUntil(checkAllWatches(env));
     ctx.waitUntil(checkSpikeAlerts(env));
     ctx.waitUntil(checkExitAlerts(env));
+    ctx.waitUntil(checkPreSignalAlerts(env));   // tự no-op ngoài 13:30-14:45
   },
 };
 
@@ -1131,6 +1154,31 @@ async function handleTelegramWebhook(request, env, ctx) {
     return new Response("ok");
   }
 
+  // /b <SYM> <GIÁ> [SL] — ghi lệnh mua tay. Lưu ý `/s` trần vẫn là quick scan,
+  // chỉ khi có tham số mới hiểu là lệnh bán.
+  if (/^\/(b|buy)\s/i.test(text)) {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperBuy(env, chatId, text));
+    return new Response("ok");
+  }
+  if (/^\/sl\s/i.test(text)) {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperSetSl(env, chatId, text));
+    return new Response("ok");
+  }
+  if (/^\/(s|sell)\s/i.test(text)) {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperSell(env, chatId, text));
+    return new Response("ok");
+  }
+
+  // /pos — lệnh paper đang mở, /pnl — tổng kết đã đóng + so với bot
+  if (text === "/pos" || text === "/positions") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildPaperPositionsMessage(env, chatId));
+    return new Response("ok");
+  }
+  if (text === "/pnl") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildPaperPnlMessage(env, chatId));
+    return new Response("ok");
+  }
+
   // /regime — show current VNI volatility regime
   if (text === "/regime" || text === "/r") {
     await tgSendMessage(env.BOT_TOKEN, chatId, await buildRegimeMessage(env));
@@ -1152,9 +1200,16 @@ function buildHelpMessage() {
     `/scan — Quét FULL 1411 mã background (~1-2 giờ qua cron)\n` +
     `/scan-status (/ss) — Check progress full scan\n` +
     `/quick (/q, /s) — Quét nhanh 45 mã large+mid cap (instant ~10s)\n` +
+    `  _(\`/s\` trần = quét nhanh; \`/s <MÃ> <giá>\` = ghi lệnh bán)_\n` +
     `/picks (/p) — Show active picks (Base Breakout + FBO + Climax)\n` +
     `/signals (/sg) — Mã đã & đang signal 7 ngày qua (T+, lãi/lỗ)\n` +
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
+    `\n*Sổ lệnh tay:*\n` +
+    `/b GMD 72.2 68 — Ghi lệnh MUA (giá, SL)\n` +
+    `/sl GMD 70 — Dời/đặt SL cho lệnh đang mở\n` +
+    `/s GMD 76 — Ghi lệnh BÁN (đóng lot cũ nhất)\n` +
+    `/pos — Lệnh đang mở + lãi/lỗ tạm tính + SL\n` +
+    `/pnl — Tổng kết đã đóng + so với bot\n` +
     `\n*Stats + Regime:*\n` +
     `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
     `/regime (/r) — VNI volatility regime hiện tại\n` +
@@ -1162,6 +1217,12 @@ function buildHelpMessage() {
     `/status — Trạng thái kết nối + watches\n` +
     `/start <token> — Kết nối account (lấy token từ app)\n` +
     `/help (/?) — Show menu này\n` +
+    `\n*Bot tự bắn (không cần gõ):*\n` +
+    `08:30 — Briefing sáng: tuần qua + active picks\n` +
+    `13:30-14:45 — Cảnh báo sớm mã đang hình thành Climax\n` +
+    `14:50 — Digest cuối phiên: signal mới + level mua\n` +
+    `15:00-16:00 — Full scan 1411 mã, có gì bắn tiếp\n` +
+    `Trong phiên — Spike alert (tăng mạnh) + exit alert (chạm SL/target)\n` +
     `\n_Tip: /scan chậm vì Cloudflare limit. Nếu cần nhanh → /quick (45 mã)._`;
 }
 
@@ -1385,6 +1446,291 @@ const EXIT_REASON_LABELS = {
   target: "chạm target", sl: "cắt lỗ", trail: "trail stop",
   force: "hết hạn hold", unresolved: "không resolve được",
 };
+
+// ── Paper trade: nhật ký lệnh tay của user ────────────────────────────
+// Sổ lệnh của USER, không phải của bot: mã nào cũng ghi được, kể cả mã bot
+// không hề gợi ý. Nhãn bot_tier chỉ để lúc thống kê tách được "theo signal"
+// vs "tự chế" — không phải điều kiện để ghi.
+// Chỉ lưu giá + SL, không khối lượng: đang đo hiệu suất theo %, chưa quản vốn.
+const PAPER_FEE_PCT = 0.4;      // khứ hồi, cùng mức trade_log dùng để hai bên so được
+const PAPER_QUOTE_LIMIT = 12;   // mỗi mã 1 subrequest VND
+const PAPER_SIGNAL_LOOKBACK = 10;  // signal cũ hơn ngần này phiên thì coi như không liên quan
+
+// `/b MÃ GIÁ [SL]` — SL tuỳ chọn để không chặn lúc gõ vội, nhưng thiếu thì nhắc.
+function parsePaperCommand(text) {
+  const parts = text.trim().split(/\s+/);
+  const symbol = (parts[1] || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const price = parseFloat(parts[2]);
+  if (symbol.length < 3 || !Number.isFinite(price) || price <= 0) return null;
+  let sl = null;
+  if (parts[3] != null) {
+    sl = parseFloat(parts[3]);
+    if (!Number.isFinite(sl) || sl <= 0) return null;
+  }
+  return { symbol, price, sl };
+}
+
+function fmtSlLine(entry, sl) {
+  const risk = (sl / entry - 1) * 100;
+  return `   SL ${sl.toFixed(2)} · rủi ro ${risk.toFixed(2)}%\n`;
+}
+
+// Bot có bắn signal cho mã này gần đây không → tách "theo bot" vs "tự chế".
+async function findRecentBotSignal(sb, symbol) {
+  const rows = await sbQuery(sb, "trade_log", {
+    select: "symbol,signal_date,tier",
+    eq: { symbol },
+  });
+  if (!rows?.length) return null;
+  const today = vnDateString();
+  return rows
+    .filter((r) => vnTradingDaysBetween(r.signal_date, today) <= PAPER_SIGNAL_LOOKBACK)
+    .sort((a, b) => (a.signal_date < b.signal_date ? 1 : -1))[0] || null;
+}
+
+async function handlePaperBuy(env, chatId, text) {
+  const cmd = parsePaperCommand(text);
+  if (!cmd) return "Usage: `/b <MÃ> <GIÁ> [SL]` — vd `/b GMD 72.2 68`";
+  if (cmd.sl != null && cmd.sl >= cmd.price) {
+    return `❌ SL ${cmd.sl.toFixed(2)} phải THẤP hơn giá mua ${cmd.price.toFixed(2)} — gõ nhầm thứ tự?`;
+  }
+
+  const sb = sbClient(env);
+  const signal = await findRecentBotSignal(sb, cmd.symbol);
+  const ok = await sbUpsert(sb, "paper_trades", {
+    chat_id: chatId,
+    symbol: cmd.symbol,
+    entry_price: cmd.price,
+    entry_date: vnDateString(),
+    sl_price: cmd.sl,
+    status: "open",
+    bot_tier: signal?.tier ?? null,
+    bot_signal_date: signal?.signal_date ?? null,
+  });
+  if (!ok) return "❌ Không ghi được lệnh (chạy `sql/013` chưa?)";
+
+  let msg = `✅ Ghi MUA *${cmd.symbol}* @ ${cmd.price.toFixed(2)} · ${vnDayLabel()}\n`;
+  msg += cmd.sl != null
+    ? fmtSlLine(cmd.price, cmd.sl)
+    : `   ⚠️ Chưa đặt SL — \`/sl ${cmd.symbol} <giá>\` bổ sung sau\n`;
+  msg += signal
+    ? `   Khớp signal bot: *${signal.tier}* ${fmtVnDMY(signal.signal_date)}\n`
+    : `   Bot không signal mã này ${PAPER_SIGNAL_LOOKBACK} phiên qua — lệnh tự chế\n`;
+  try {
+    const h = await fetchVndHistory(cmd.symbol, 5);
+    const last = h.closes[h.closes.length - 1];
+    if (last > 0) msg += `   Giá thị trường gần nhất ${last.toFixed(2)}\n`;
+  } catch (e) {
+    console.warn(`[paper] quote ${cmd.symbol}: ${e.message}`);
+  }
+  return `${msg}\n\`/pos\` xem lệnh đang mở · \`/s ${cmd.symbol} <giá>\` để đóng`;
+}
+
+// Sửa SL sau khi đã mua (dời SL, hoặc bổ sung khi lúc /b quên nhập).
+async function handlePaperSetSl(env, chatId, text) {
+  const parts = text.trim().split(/\s+/);
+  const symbol = (parts[1] || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const sl = parseFloat(parts[2]);
+  if (symbol.length < 3 || !Number.isFinite(sl) || sl <= 0) {
+    return "Usage: `/sl <MÃ> <GIÁ SL>` — vd `/sl GMD 68`";
+  }
+
+  const sb = sbClient(env);
+  const rows = await sbQuery(sb, "paper_trades", {
+    select: "id,entry_price,entry_date,sl_price",
+    eq: { chat_id: chatId, symbol, status: "open" },
+  });
+  if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
+  if (rows.length === 0) return `Không có lệnh *${symbol}* nào đang mở. \`/pos\` xem danh sách.`;
+
+  // Chốt số cũ TRƯỚC khi PATCH — sau update thì không đọc lại được nữa.
+  const lots = rows.map((r) => ({
+    entry: parseFloat(r.entry_price),
+    date: r.entry_date,
+    oldSl: r.sl_price != null ? parseFloat(r.sl_price) : null,
+  }));
+
+  // Nhiều lot cùng mã thì đặt chung một mức SL — SL là mức giá, không theo lot.
+  const ok = await sbUpdate(sb, "paper_trades", {
+    eq: { chat_id: chatId, symbol, status: "open" },
+    data: { sl_price: sl },
+  });
+  if (!ok) return "❌ Không cập nhật được SL.";
+
+  const prev = lots.find((l) => l.oldSl != null)?.oldSl;
+  let msg = `✅ SL *${symbol}* = ${sl.toFixed(2)}`;
+  msg += prev != null ? ` (trước ${prev.toFixed(2)})\n` : `\n`;
+  for (const l of lots) {
+    msg += `   lot ${fmtVnDMY(l.date)} @${l.entry.toFixed(2)} → rủi ro ${((sl / l.entry - 1) * 100).toFixed(2)}%\n`;
+  }
+  return msg;
+}
+
+async function handlePaperSell(env, chatId, text) {
+  const cmd = parsePaperCommand(text);
+  if (!cmd) return "Usage: `/s <MÃ> <GIÁ>` — vd `/s GMD 76`\n(`/s` không tham số vẫn là quick scan)";
+
+  const sb = sbClient(env);
+  const rows = await sbQuery(sb, "paper_trades", {
+    select: "id,symbol,entry_price,entry_date,sl_price",
+    eq: { chat_id: chatId, symbol: cmd.symbol, status: "open" },
+  });
+  if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
+  if (rows.length === 0) return `Không có lệnh *${cmd.symbol}* nào đang mở. \`/pos\` xem danh sách.`;
+
+  const lot = [...rows].sort((a, b) => (a.entry_date < b.entry_date ? -1 : 1))[0];  // FIFO
+  const entry = parseFloat(lot.entry_price);
+  const netRet = (cmd.price / entry - 1) * 100 - PAPER_FEE_PCT;
+  const today = vnDateString();
+  const ok = await sbUpdate(sb, "paper_trades", {
+    eq: { id: lot.id },
+    data: {
+      exit_price: cmd.price, exit_date: today,
+      net_ret_pct: +netRet.toFixed(2), status: "closed",
+    },
+  });
+  if (!ok) return "❌ Không cập nhật được lệnh.";
+
+  const held = vnTradingDaysBetween(lot.entry_date, today);
+  let msg = `✅ Ghi BÁN *${cmd.symbol}* @ ${cmd.price.toFixed(2)}\n`;
+  msg += `   Mua ${entry.toFixed(2)} (${fmtVnDMY(lot.entry_date)}) · giữ ${held} phiên\n`;
+  msg += `   ${netRet >= 0 ? "🟢" : "🔴"} *${netRet >= 0 ? "+" : ""}${netRet.toFixed(2)}%* (đã trừ phí ${PAPER_FEE_PCT}%)\n`;
+  // Bán dưới SL = SL đã thủng mà chưa cắt — chỗ này mới là cái đáng soi lại,
+  // không phải con số lãi/lỗ.
+  const lotSl = lot.sl_price != null ? parseFloat(lot.sl_price) : null;
+  if (lotSl != null) {
+    msg += cmd.price < lotSl
+      ? `   ⚠️ Bán dưới SL ${lotSl.toFixed(2)} — cắt trễ ${((cmd.price / lotSl - 1) * 100).toFixed(2)}%\n`
+      : `   SL ${lotSl.toFixed(2)} · không thủng\n`;
+  }
+  if (rows.length > 1) msg += `   Còn ${rows.length - 1} lot ${cmd.symbol} đang mở\n`;
+  return `${msg}\n\`/pnl\` xem tổng kết`;
+}
+
+async function buildPaperPositionsMessage(env, chatId) {
+  const sb = sbClient(env);
+  const rows = await sbQuery(sb, "paper_trades", {
+    select: "symbol,entry_price,entry_date,sl_price,bot_tier,bot_signal_date",
+    eq: { chat_id: chatId, status: "open" },
+  });
+  if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
+  if (rows.length === 0) return "📭 Chưa có lệnh nào đang mở.\nGhi lệnh: `/b GMD 72.2 68`";
+
+  const quotes = new Map();
+  await Promise.all(rows.slice(0, PAPER_QUOTE_LIMIT).map(async (r) => {
+    try {
+      const h = await fetchVndHistory(r.symbol, 5);
+      const last = h.closes[h.closes.length - 1];
+      if (last > 0) quotes.set(r.symbol, last);
+    } catch (e) {
+      console.warn(`[paper] quote ${r.symbol}: ${e.message}`);
+    }
+  }));
+
+  const today = vnDateString();
+  let sum = 0, counted = 0, breached = 0, noSl = 0, body = "";
+  for (const r of [...rows].sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1))) {
+    const entry = parseFloat(r.entry_price);
+    const sl = r.sl_price != null ? parseFloat(r.sl_price) : null;
+    const held = vnTradingDaysBetween(r.entry_date, today);
+    const tag = r.bot_tier ? `${r.bot_tier} ${fmtVnDMY(r.bot_signal_date)}` : "tự chế";
+    if (sl == null) noSl++;
+    body += `• *${r.symbol}* @${entry.toFixed(2)} · ${fmtVnDMY(r.entry_date)} · T+${held} · ${tag}\n`;
+    const cur = quotes.get(r.symbol);
+    if (cur != null) {
+      const ret = (cur / entry - 1) * 100 - PAPER_FEE_PCT;
+      sum += ret;
+      counted++;
+      body += `   Nay ${cur.toFixed(2)} · ${ret >= 0 ? "🟢 +" : "🔴 "}${ret.toFixed(2)}%`;
+      if (sl == null) body += ` · chưa có SL`;
+      else if (cur <= sl) { breached++; body += ` · ⚠️ *THỦNG SL ${sl.toFixed(2)}*`; }
+      else body += ` · SL ${sl.toFixed(2)} (còn ${((sl / cur - 1) * 100).toFixed(2)}%)`;
+      body += `\n`;
+    } else if (sl != null) {
+      body += `   SL ${sl.toFixed(2)} · rủi ro ${((sl / entry - 1) * 100).toFixed(2)}%\n`;
+    }
+  }
+  let head = `📓 *Lệnh đang mở* (${rows.length})`;
+  if (counted > 0) {
+    const avg = sum / counted;
+    head += ` — tạm tính ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%/lệnh`;
+  }
+  let foot = `_Đã trừ phí ${PAPER_FEE_PCT}%._ \`/s <MÃ> <giá>\` _để đóng._`;
+  if (breached > 0) foot = `⚠️ *${breached} lệnh đang thủng SL.*\n${foot}`;
+  if (noSl > 0) foot += ` \`/sl <MÃ> <giá>\` _đặt SL._`;
+  return `${head}\n\n${body}\n${foot}`;
+}
+
+async function buildPaperPnlMessage(env, chatId) {
+  const sb = sbClient(env);
+  const rows = await sbQuery(sb, "paper_trades", {
+    select: "symbol,entry_price,entry_date,exit_price,exit_date,sl_price,net_ret_pct,bot_tier,bot_signal_date",
+    eq: { chat_id: chatId, status: "closed" },
+  });
+  if (rows == null) return "❌ Lỗi đọc lệnh (chạy `sql/013` chưa?)";
+  if (rows.length === 0) return "📭 Chưa đóng lệnh nào. `/pos` xem lệnh đang mở.";
+
+  const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  const seg = (label, arr) => {
+    if (arr.length === 0) return `${label}: chưa có\n`;
+    const a = arr.map((r) => parseFloat(r.net_ret_pct || 0));
+    const w = a.filter((x) => x > 0).length;
+    return `${label}: ${arr.length} lệnh · win ${((w / arr.length) * 100).toFixed(0)}% · avg ${mean(a) >= 0 ? "+" : ""}${mean(a).toFixed(2)}%\n`;
+  };
+
+  const rets = rows.map((r) => parseFloat(r.net_ret_pct || 0));
+  const wins = rets.filter((x) => x > 0).length;
+  const followed = rows.filter((r) => r.bot_tier);
+  let msg = `📈 *Paper trade* — ${rows.length} lệnh đã đóng\n\n`;
+  msg += `Win ${wins}/${rows.length} (${((wins / rows.length) * 100).toFixed(0)}%) · avg ${mean(rets) >= 0 ? "+" : ""}${mean(rets).toFixed(2)}%/lệnh\n`;
+  msg += `Cộng dồn ${rets.reduce((s, x) => s + x, 0).toFixed(2)}%\n\n`;
+  msg += `*Nguồn lệnh:*\n`;
+  msg += seg("Theo signal bot", followed);
+  msg += seg("Tự chế", rows.filter((r) => !r.bot_tier));
+
+  // Cắt dưới SL = lỗ vượt mức đã tự cho phép. Tách riêng vì nó là lỗi thi hành,
+  // không phải lỗi của signal.
+  const withSl = rows.filter((r) => r.sl_price != null && r.exit_price != null);
+  if (withSl.length > 0) {
+    const late = withSl.filter((r) => parseFloat(r.exit_price) < parseFloat(r.sl_price));
+    msg += `\n*Kỷ luật SL:* ${withSl.length}/${rows.length} lệnh có đặt SL`;
+    if (late.length > 0) {
+      const slip = mean(late.map((r) => (parseFloat(r.exit_price) / parseFloat(r.sl_price) - 1) * 100));
+      msg += ` · ${late.length} lệnh cắt dưới SL (trượt TB ${slip.toFixed(2)}%)`;
+    } else {
+      msg += ` · không lệnh nào cắt dưới SL`;
+    }
+    msg += `\n`;
+  }
+
+  // Cùng signal đó bot tự chấm ra bao nhiêu — đây mới là câu trả lời cho
+  // "follow bot thì hơn hay kém tự đánh".
+  if (followed.length > 0) {
+    const botRows = await sbQuery(sb, "trade_log", {
+      select: "symbol,signal_date,net_ret,resolved_at,exit_reason",
+      in: { symbol: [...new Set(followed.map((r) => r.symbol))] },
+    });
+    const pairs = [];
+    for (const f of followed) {
+      const b = (botRows || []).find((x) =>
+        x.symbol === f.symbol && x.signal_date === f.bot_signal_date &&
+        x.resolved_at && x.exit_reason !== "unresolved" && x.net_ret != null);
+      if (b) pairs.push({ sym: f.symbol, mine: parseFloat(f.net_ret_pct || 0), bot: parseFloat(b.net_ret) * 100 });
+    }
+    if (pairs.length > 0) {
+      msg += `\n*Mày vs bot* (${pairs.length} lệnh bot đã chốt xong):\n`;
+      for (const p of pairs) {
+        msg += `  ${p.sym}: mày ${p.mine >= 0 ? "+" : ""}${p.mine.toFixed(2)}% · bot ${p.bot >= 0 ? "+" : ""}${p.bot.toFixed(2)}%\n`;
+      }
+      const dm = mean(pairs.map((p) => p.mine));
+      const db = mean(pairs.map((p) => p.bot));
+      msg += `  → mày ${dm >= 0 ? "+" : ""}${dm.toFixed(2)}% vs bot ${db >= 0 ? "+" : ""}${db.toFixed(2)}%/lệnh\n`;
+    } else {
+      msg += `\n_Bot chưa chốt xong lệnh nào cùng signal để so._\n`;
+    }
+  }
+  return `${msg}\n_Mẫu còn nhỏ thì đừng vội kết luận._`;
+}
 
 async function buildSignalsMessage(env) {
   const sb = sbClient(env);
@@ -2287,7 +2633,8 @@ async function processScanChunk(env) {
       const baseBreakout = detectBaseBreakout(data);
       const fboBase = detectForeignBackedOversoldBase(data);
       const stats = computeStockStats(data);
-      return { symbol: sym, climax, momentum, baseBreakout, fboBase, stats };
+      const presignal = collectPreSignalCandidate(data);
+      return { symbol: sym, climax, momentum, baseBreakout, fboBase, stats, presignal };
     } catch (e) {
       fetchFails++;
       return null;
@@ -2365,6 +2712,14 @@ async function processScanChunk(env) {
     if (r.baseBreakout) baseBreakoutPartial.push({ symbol: r.symbol, ...r.baseBreakout });
     if (r.fbo) fboPartial.push({ symbol: r.symbol, ...r.fbo });
   }
+
+  // Ứng viên cảnh báo sớm cho phiên sau. Ghi thẳng bảng riêng thay vì nhét vào
+  // scan_state — sql/012 chưa chạy thì chỉ mất cảnh báo sớm, chunk scan vẫn sống.
+  // Mã đã match climax hôm nay thì bỏ: mai nó là active pick rồi.
+  const presignalRows = results
+    .filter((r) => r?.presignal && !r.climax)
+    .map((r) => ({ symbol: r.symbol, ...r.presignal }));
+  await persistPreSignalCandidates(env, presignalRows, state.scan_date || vnDateString());
 
   const newOffset = offset + chunk.length;
   await setScanState(env, {
@@ -2464,6 +2819,10 @@ async function finalizeScan(env, state) {
   try {
     await persistFBOMatches(env, fboMatches, signalCtx);
   } catch (e) { console.warn("[finalize] persistFBO fail:", e.message); }
+  // Ứng viên cảnh báo sớm chỉ sống 1 phiên — dọn row cũ để bảng khỏi phình.
+  try {
+    await sbDelete(sbClient(env), "presignal_watch", { lt: { watch_date: vnDateString() } });
+  } catch (e) { console.warn("[finalize] cleanup presignal fail:", e.message); }
 
   // Send full-coverage digest
   const fullDigestResult = {
@@ -2989,6 +3348,7 @@ async function fetchVndIntraday(symbol) {
     highs: data.h,
     lows: data.l,
     closes: data.c,
+    volumes: data.v,
     times: data.t,
   };
 }
@@ -3079,6 +3439,195 @@ async function checkSpikeAlerts(env) {
     }
     // else: no state change, no alert
   }
+}
+
+// ── Cảnh báo sớm: mã ĐANG hình thành Climax trong phiên ───────────────
+// Detector thật ăn close + volume cả phiên nên chỉ chốt được lúc EOD. Ở đây tái
+// tính detector giữa phiên bằng giá hiện tại + volume chiếu về cả ngày.
+//
+// Đường cong dưới đo trên 616 phiên-mã (20 large/mid × ~30 phiên, bar 5 phút):
+// tới mốc giờ VN đó thì median đã khớp bao nhiêu % volume cả ngày. Spread p10-p90
+// lúc 11:30 rộng 32pp (chiếu lệch ±35% → báo bậy đầy) nhưng co còn 16pp lúc 14:30,
+// nên chỉ bắn từ 13:30 — vẫn kịp mua trước ATC mà số đã đủ tin.
+const PRESIGNAL_VOL_CURVE = [
+  [13 * 60 + 30, 61.1], [14 * 60, 76.2], [14 * 60 + 30, 93.0], [14 * 60 + 45, 100],
+];
+// Đo cùng bộ data: mã đang xanh ở mốc đó thì bao nhiêu % đóng cửa đỏ (mất
+// dayGreen = signal không thành). Bơm vào message để cảnh báo tự khai sai số.
+const PRESIGNAL_FLIP_RISK = [[13 * 60 + 30, 20], [14 * 60, 16], [14 * 60 + 30, 10], [14 * 60 + 45, 0]];
+const PRESIGNAL_START_MIN = 13 * 60 + 30;
+const PRESIGNAL_END_MIN = 14 * 60 + 45;
+// 1 subrequest/mã, dùng chung ngân sách 50/invocation với watch + spike + exit alert.
+const PRESIGNAL_MAX_SYMBOLS = 12;
+
+// Nội suy tuyến tính trên bảng mốc giờ; ngoài biên thì kẹp về đầu/cuối.
+function presignalInterp(curve, vnMin) {
+  if (vnMin <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i++) {
+    if (vnMin <= curve[i][0]) {
+      const [x0, y0] = curve[i - 1];
+      const [x1, y1] = curve[i];
+      return y0 + ((y1 - y0) * (vnMin - x0)) / (x1 - x0);
+    }
+  }
+  return curve[curve.length - 1][1];
+}
+
+function presignalVolFraction(vnMin) {
+  return presignalInterp(PRESIGNAL_VOL_CURVE, vnMin) / 100;
+}
+
+// Ứng viên = đã rơi đủ sâu + chưa quá mua, chỉ còn thiếu phiên xanh + volume.
+// Chạy lúc EOD khi chunk scan đang cầm sẵn 220 phiên daily; snapshot lại đúng
+// những số phiên sau cần, để giữa phiên khỏi phải fetch lại history.
+function collectPreSignalCandidate(data) {
+  const { closes, highs, lows, volumes } = data;
+  const n = closes?.length || 0;
+  if (n < 62 || !highs || !lows) return null;
+
+  const turnovers = [];
+  for (let i = n - 20; i < n; i++) turnovers.push(closes[i] * volumes[i] * 1000);
+  turnovers.sort((a, b) => a - b);
+  const medianTurnover = turnovers[Math.floor(turnovers.length / 2)];
+  if (medianTurnover < CLIMAX_TURNOVER_MIN) return null;
+
+  const cur = closes[n - 1];
+  const ret3d = ((cur - closes[n - 4]) / closes[n - 4]) * 100;
+  const rsi = calcRsi(closes, 14);
+  // -5 / 50 = ngưỡng Tier B (lỏng nhất) — lọc rộng ở đây, siết lại lúc bắn.
+  if (rsi == null || rsi >= 50 || ret3d >= -5) return null;
+
+  // ATR14 phiên sau trượt cửa sổ sang [n-13 .. n]: 13 phiên này chốt được ngay,
+  // TR của chính phiên sau ghép vào lúc chạy (cần high/low intraday).
+  let trSum13 = 0;
+  for (let i = n - 13; i < n; i++) {
+    trSum13 += Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+  }
+  const volSlice = volumes.slice(n - 20);
+  return {
+    // Phiên sau mảng thành [...closes, cur] nên ret3d lấy mẫu số closes[n-3],
+    // vol_avg20 / median_turnover là 20 phiên gần nhất kể cả hôm nay.
+    prev3_close: closes[n - 3],
+    prev_close: cur,
+    vol_avg20: volSlice.reduce((a, b) => a + b, 0) / volSlice.length,
+    tr_sum13: trSum13,
+    median_turnover: medianTurnover,
+    closes60: closes.slice(-60),
+    ret3d_at_scan: +ret3d.toFixed(2),
+    rsi_at_scan: +rsi.toFixed(1),
+  };
+}
+
+async function persistPreSignalCandidates(env, candidates, snapshotDate) {
+  if (!candidates.length) return;
+  const watchDate = addVnTradingDays(snapshotDate, 1);
+  const rows = candidates.map((c) => ({
+    symbol: c.symbol,
+    watch_date: watchDate,
+    snapshot_date: snapshotDate,
+    prev3_close: c.prev3_close,
+    prev_close: c.prev_close,
+    vol_avg20: c.vol_avg20,
+    tr_sum13: c.tr_sum13,
+    median_turnover: c.median_turnover,
+    closes60: c.closes60,
+    ret3d_at_scan: c.ret3d_at_scan,
+    rsi_at_scan: c.rsi_at_scan,
+    alerted_at: null,
+  }));
+  const ok = await sbUpsert(sbClient(env), "presignal_watch", rows, "symbol,watch_date");
+  if (!ok) console.warn(`[presignal] upsert ${rows.length} ứng viên fail (chạy sql/012 chưa?)`);
+}
+
+async function checkPreSignalAlerts(env) {
+  const vn = vnNow();
+  const min = vn.getHours() * 60 + vn.getMinutes();
+  if (min < PRESIGNAL_START_MIN || min > PRESIGNAL_END_MIN) return;
+
+  const sb = sbClient(env);
+  const today = vnDateString();
+  const rows = await sbQuery(sb, "presignal_watch", {
+    select: "symbol,prev3_close,prev_close,vol_avg20,tr_sum13,closes60,ret3d_at_scan,alerted_at",
+    eq: { watch_date: today },
+  });
+  if (!rows || rows.length === 0) return;
+
+  // Rơi sâu nhất trước — cắt theo ngân sách subrequest.
+  const pending = rows
+    .filter((r) => !r.alerted_at)
+    .sort((a, b) => parseFloat(a.ret3d_at_scan ?? 0) - parseFloat(b.ret3d_at_scan ?? 0))
+    .slice(0, PRESIGNAL_MAX_SYMBOLS);
+  if (pending.length === 0) return;
+
+  const frac = presignalVolFraction(min);
+  console.log(`[presignal] check ${pending.length} ứng viên, volume chiếu từ ${(frac * 100).toFixed(0)}%`);
+
+  const hits = [];
+  await Promise.all(pending.map(async (r) => {
+    try {
+      const bars = await fetchVndIntraday(r.symbol);
+      const n = bars.closes.length;
+      if (!n || !bars.volumes) return;
+      const cur = bars.closes[n - 1];
+      const openToday = bars.opens[0];
+      if (cur <= openToday) return;                       // dayGreen — điều kiện cứng của detector
+
+      const volAvg20 = parseFloat(r.vol_avg20);
+      const volSoFar = bars.volumes.reduce((a, b) => a + b, 0);
+      const volRatio = volAvg20 > 0 ? volSoFar / frac / volAvg20 : 0;
+      if (volRatio <= 2.0) return;
+
+      const rsi = calcRsi([...(r.closes60 || []), cur], 14);
+      if (rsi == null) return;
+      const prev3 = parseFloat(r.prev3_close);
+      const ret3d = ((cur - prev3) / prev3) * 100;
+      // Ghép TR phiên đang chạy vào 13 phiên đã chốt cho khớp ATR của detector EOD.
+      const prevClose = parseFloat(r.prev_close);
+      const hiToday = Math.max(...bars.highs);
+      const loToday = Math.min(...bars.lows);
+      const trToday = Math.max(hiToday - loToday, Math.abs(hiToday - prevClose), Math.abs(loToday - prevClose));
+      const trSum13 = r.tr_sum13 != null ? parseFloat(r.tr_sum13) : null;
+      const atr14 = trSum13 != null ? (trSum13 + trToday) / 14 : null;
+      const dropThreshA = atr14 ? -3.0 * ((atr14 / cur) * 100) : -7;
+      const tier = ret3d < dropThreshA && rsi < 35 ? "A" : ret3d < -5 && rsi < 50 ? "B" : null;
+      if (!tier) return;
+
+      hits.push({
+        symbol: r.symbol, tier, cur, ret3d, volRatio, rsi,
+        intradayPct: (cur / openToday - 1) * 100,
+      });
+    } catch (e) {
+      console.warn(`[presignal] ${r.symbol}: ${e.message}`);
+    }
+  }));
+  if (hits.length === 0) return;
+
+  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
+  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  if (chats.length === 0) return;
+
+  const minsLeft = PRESIGNAL_END_MIN - min;
+  let msg = `⏳ *ĐANG HÌNH THÀNH* — chưa xác nhận\n\n`;
+  for (const h of hits) {
+    msg += `🔍 *${h.symbol}* ${h.cur.toFixed(2)} (+${h.intradayPct.toFixed(1)}% trong phiên)\n`;
+    msg += `   Tier ${h.tier} tạm đạt · vol ~${h.volRatio.toFixed(1)}× · 3p ${h.ret3d.toFixed(1)}% · RSI ${h.rsi.toFixed(0)}\n`;
+  }
+  const flipRisk = presignalInterp(PRESIGNAL_FLIP_RISK, min);
+  msg += `\nCòn ${minsLeft} phút tới 14:45. Volume mới khớp ${(frac * 100).toFixed(0)}% phiên nên còn chiếu.\n`;
+  msg += `Ở mốc này ~${flipRisk.toFixed(0)}% mã đang xanh sẽ đóng cửa đỏ — khi đó signal không thành.\n`;
+  msg += `⚠️ Đây KHÔNG phải lệnh mua. Backtest realistic exit của pattern Climax đang âm.`;
+
+  for (const chatId of chats) await tgSendMessage(env.BOT_TOKEN, chatId, msg);
+  await sbUpdate(sb, "presignal_watch", {
+    eq: { watch_date: today },
+    in: { symbol: hits.map((h) => h.symbol) },
+    data: { alerted_at: new Date().toISOString() },
+  });
+  console.log(`[presignal] alert ${hits.map((h) => h.symbol).join(",")}`);
 }
 
 // ── Auto-exit alert: discipline enforcer ──────────────────────────────
@@ -4225,6 +4774,12 @@ async function sbUpdate(sb, table, opts) {
   if (opts.eq) {
     for (const [k, v] of Object.entries(opts.eq)) {
       params.append(k, `eq.${v}`);
+    }
+  }
+  // Gộp nhiều row vào 1 PATCH — tiết kiệm ngân sách subrequest của Worker.
+  if (opts.in) {
+    for (const [k, v] of Object.entries(opts.in)) {
+      params.append(k, `in.(${v.join(",")})`);
     }
   }
   const url = `${sb.url}/rest/v1/${table}?${params.toString()}`;
