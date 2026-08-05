@@ -1391,7 +1391,9 @@ async function buildSignalsMessage(env) {
   const headers = { apikey: sb.key, authorization: `Bearer ${sb.key}` };
   const today = vnDateString();
   const since = vnDateString(new Date(Date.now() - SIGNALS_WINDOW_DAYS * 24 * 3600 * 1000));
-  const cols = "symbol,signal_date,tier,pattern_type,entry_price,target_price,sl_price,max_hold_days,trail_pct,resolved_at,exit_price,exit_day,exit_reason,net_ret,is_win,is_premium,vni_regime";
+  // KHÔNG select cột của sql/011 ở đây — migration chạy sau code thì PostgREST
+  // trả 400 cho cả query và /signals chết hẳn, đổi lấy data không dùng tới.
+  const cols = "symbol,signal_date,tier,pattern_type,entry_price,target_price,sl_price,max_hold_days,trail_pct,resolved_at,exit_price,exit_day,exit_reason,net_ret,is_win,is_premium";
 
   const [recentRes, staleRes, climaxPicks, midtermPicks] = await Promise.all([
     fetch(`${sb.url}/rest/v1/trade_log?select=${cols}&signal_date=gte.${since}&order=signal_date.desc&limit=100`, { headers }),
