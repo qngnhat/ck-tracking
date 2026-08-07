@@ -1175,6 +1175,27 @@ async function handleTelegramWebhook(request, env, ctx) {
     return new Response("ok");
   }
 
+  // /morning, /eod — chạy tay đúng 2 job cron gửi hàng ngày, kết quả chỉ về
+  // chat của người gõ để không spam user khác.
+  if (text === "/morning" || text === "/mn") {
+    await tgSendMessage(env.BOT_TOKEN, chatId, "☀️ Đang dựng briefing sáng...");
+    await sendMorningBriefing(env, chatId);
+    return new Response("ok");
+  }
+  if (text === "/eod" || text === "/ed") {
+    // Chỉ ghi vào trade_log/active_picks khi phiên đã chốt — gõ giữa phiên thì
+    // giá còn chạy, ghi vào là bẩn lịch sử forward-test.
+    const vn = vnNow();
+    const closed = isVnTradingDay() && vn.getHours() * 60 + vn.getMinutes() > 885;
+    await tgSendMessage(env.BOT_TOKEN, chatId,
+      closed
+        ? "🔔 Đang dựng digest cuối phiên (35 mã)..."
+        : "🔔 Đang dựng digest (35 mã) — _phiên chưa chốt nên chỉ xem, không ghi lịch sử_.");
+    await sendMarketDigest(env, null, { onlyChatId: chatId, persist: closed });
+    await sendEodDigest(env, chatId);
+    return new Response("ok");
+  }
+
   // /regime — show current VNI volatility regime
   if (text === "/regime" || text === "/r") {
     await tgSendMessage(env.BOT_TOKEN, chatId, await buildRegimeMessage(env));
@@ -1212,6 +1233,9 @@ function buildHelpMessage() {
     `/status — Trạng thái kết nối + watches\n` +
     `/start <token> — Kết nối account (lấy token từ app)\n` +
     `/help (/?) — Show menu này\n` +
+    `\n*Chạy tay 2 bản tin hàng ngày:*\n` +
+    `/morning (/mn) — Briefing sáng, bất cứ lúc nào\n` +
+    `/eod (/ed) — Digest cuối phiên (chưa chốt phiên thì chỉ xem)\n` +
     `\n*Bot tự bắn (không cần gõ):*\n` +
     `08:30 — Briefing sáng: tuần qua + active picks\n` +
     `13:30-14:45 — Cảnh báo sớm mã đang hình thành Climax\n` +
@@ -3934,7 +3958,14 @@ async function buildHoroscope(env) {
   return `${day.fullLabel}${day.isTradingDay ? "" : ` — ${day.closedReason}`}.\n\n${body}`;
 }
 
-async function sendMorningBriefing(env) {
+// Cron gửi cho mọi user; lệnh gõ tay chỉ gửi cho đúng người gõ.
+async function resolveBroadcastChats(env, onlyChatId) {
+  if (onlyChatId) return [onlyChatId];
+  const users = await sbQuery(sbClient(env), "user_telegram", { select: "chat_id" });
+  return (users || []).map((u) => u.chat_id).filter(Boolean);
+}
+
+async function sendMorningBriefing(env, onlyChatId = null) {
   const sb = sbClient(env);
 
   // 1. Fetch last 30 days resolved trades
@@ -3960,8 +3991,7 @@ async function sendMorningBriefing(env) {
   }
 
   // 4. Fetch users
-  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
-  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  const chats = await resolveBroadcastChats(env, onlyChatId);
   if (chats.length === 0) {
     console.log("[morning] no connected users");
     return;
@@ -4055,7 +4085,8 @@ const ELITE_FWD_STATS = { trades: 18, winPct: 56, avgPct: 0.8, baseWinPct: 24, b
 const ELITE_VNI_SPLIT = { greenWin: 67, greenAvg: 3.7, redWin: 44, redAvg: -2.1 };
 const ELITE_RULE = "━━━━━━━━━━━━━━━━━━";
 
-async function sendMarketDigest(env, precomputedResult = null) {
+async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
+  const { onlyChatId = null, persist = true } = opts;
   let result;
   const freshScan = !precomputedResult;
   if (precomputedResult) {
@@ -4096,7 +4127,8 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   // Quét fresh (chunked scan đã persist trong finalizeScan) — persist ở đây để
   // trade_log kèm được context regime/VNI/breadth vừa tính xong.
-  if (freshScan) {
+  // persist=false khi gõ tay giữa phiên: giá chưa chốt, ghi vào là bẩn trade_log.
+  if (freshScan && persist) {
     const signalCtx = buildSignalContext(result, vniInfo, health);
     await persistClimaxMatches(env, result.matches, signalCtx);
     await persistMomentumMatches(env, result.momentumMatches || [], signalCtx);
@@ -4104,8 +4136,7 @@ async function sendMarketDigest(env, precomputedResult = null) {
 
   // Fetch all connected users
   const sb = sbClient(env);
-  const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
-  const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  const chats = await resolveBroadcastChats(env, onlyChatId);
   if (chats.length === 0) {
     console.log("[digest] no connected users");
     return;
@@ -4630,7 +4661,7 @@ async function handleCallbackQuery(cq, env) {
 // Cuối phiên gửi summary tất cả active watches per user qua Telegram + inline
 // buttons. Skip user nếu watch không có gì notable (0 met + chưa near-miss).
 
-async function sendEodDigest(env) {
+async function sendEodDigest(env, onlyChatId = null) {
   const sb = sbClient(env);
 
   // 1. Fetch all active watches (not dismissed)
@@ -4679,6 +4710,7 @@ async function sendEodDigest(env) {
     // Telegram-connected users mới nhận digest qua bot. In-app digest sẽ
     // handled bằng cách store summary trong Supabase + frontend đọc lên.
     if (!chatId) continue;
+    if (onlyChatId && String(chatId) !== String(onlyChatId)) continue;
 
     // Compose digest content
     const met = [];   // {symbol, metCount, reasons}
