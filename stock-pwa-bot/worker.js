@@ -511,9 +511,7 @@ export default {
         scan_date: new Date().toISOString().slice(0, 10),
         current_offset: 0,
         total_universe: FULL_UNIVERSE.length,
-        climax_partial: "[]",
-        momentum_partial: "[]",
-        base_breakout_partial: "[]",
+        ...emptyScanPartials(),
         market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
         vni_regime: vniRegime,
         vni_ret20: vniRet20,
@@ -1069,10 +1067,7 @@ async function handleTelegramWebhook(request, env, ctx) {
       scan_date: new Date().toISOString().slice(0, 10),
       current_offset: 0,
       total_universe: FULL_UNIVERSE.length,
-      climax_partial: "[]",
-      momentum_partial: "[]",
-      base_breakout_partial: "[]",
-      fbo_partial: "[]",
+      ...emptyScanPartials(),
       market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
       started_at: new Date().toISOString(),
       completed_at: null,
@@ -2603,6 +2598,18 @@ async function scanVolClimaxMatches() {
 // Budget per /scan-full-step: history (25) + foreign cap (10) + state/heartbeat (~5) = ~40.
 const CHUNK_SIZE = 25;
 
+// Mọi cột *_partial phải reset ở MỌI chỗ init. Thêm detector mới mà quên reset
+// thì match phiên cũ sống sang phiên sau và bị persist lại với signal_date mới
+// (pick tự gia hạn vô hạn — bug PNJ 08/2026, fbo_partial thiếu ở initScan).
+function emptyScanPartials() {
+  return {
+    climax_partial: "[]",
+    momentum_partial: "[]",
+    base_breakout_partial: "[]",
+    fbo_partial: "[]",
+  };
+}
+
 async function getScanState(env) {
   const sb = sbClient(env);
   const rows = await sbQuery(sb, "scan_state", { select: "*", eq: { id: "main" } });
@@ -2635,8 +2642,7 @@ async function initScan(env) {
     scan_date: new Date().toISOString().slice(0, 10),
     current_offset: 0,
     total_universe: FULL_UNIVERSE.length,
-    climax_partial: "[]",
-    momentum_partial: "[]",
+    ...emptyScanPartials(),
     market_stats: JSON.stringify({ upCount: 0, downCount: 0, totalTurnover: 0, totalChange: 0, totalScanned: 0 }),
     vni_regime: vniRegime,
     vni_ret20: vniRet20,
@@ -2802,10 +2808,16 @@ async function finalizeScan(env, state) {
     if (!s || s === "" || s === "null") return fallback;
     try { return JSON.parse(s); } catch { return fallback; }
   };
-  const climaxRaw = safeParse(state.climax_partial, []);
-  const momentumRaw = safeParse(state.momentum_partial, []);
-  const baseBreakoutRaw = safeParse(state.base_breakout_partial, []);
-  const fboRaw = safeParse(state.fbo_partial, []);
+  // Partial chỉ hợp lệ trong đúng ngày scan. State sót từ phiên trước mà lọt tới
+  // đây thì persist sẽ stamp signal_date = hôm nay cho match cũ → signal ma.
+  const stale = state.scan_date && state.scan_date !== new Date().toISOString().slice(0, 10);
+  if (stale) {
+    console.warn(`[finalize] state cũ (scan_date=${state.scan_date}) — bỏ toàn bộ partial, không persist`);
+  }
+  const climaxRaw = stale ? [] : safeParse(state.climax_partial, []);
+  const momentumRaw = stale ? [] : safeParse(state.momentum_partial, []);
+  const baseBreakoutRaw = stale ? [] : safeParse(state.base_breakout_partial, []);
+  const fboRaw = stale ? [] : safeParse(state.fbo_partial, []);
   const marketStats = safeParse(state.market_stats, {});
   const isEliteRegime = state.vni_regime === "correction";
   const isMomentumRegime = state.vni_regime === "bull" || state.vni_regime === "neutral";
