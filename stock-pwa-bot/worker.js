@@ -1243,16 +1243,17 @@ function buildHelpMessage() {
 async function buildPicksMessage(env) {
   const sb = sbClient(env);
   const climax = await sbQuery(sb, "climax_active_picks", {
-    select: "symbol,signal_date,entry_price,tier,nn_net_5d_bn,peak_price",
+    select: "symbol,signal_date,entry_price,tier,nn_net_5d_bn,peak_price,expires_at",
   }) || [];
   const midterm = await sbQuery(sb, "mid_term_active_picks", {
-    select: "symbol,signal_date,entry_price,peak_price",
+    select: "symbol,signal_date,entry_price,peak_price,expires_at",
   }) || [];
 
-  // Filter active (expires_at > now)
+  // Filter active (expires_at > now) — sbQuery không có gte nên lọc phía client
   const now = new Date();
-  const activeClimax = climax.filter((p) => true);  // sbQuery không support gte trên timestamp
-  const activeMidterm = midterm.filter((p) => true);
+  const isActive = (p) => !p.expires_at || new Date(p.expires_at) > now;
+  const activeClimax = climax.filter(isActive);
+  const activeMidterm = midterm.filter(isActive);
 
   if (activeClimax.length === 0 && activeMidterm.length === 0) {
     return `📭 *Không có active picks*\n\nBot quét EOD 14:50 VN (T2-T6). Hoặc gõ /scan để quét ngay.`;
@@ -3413,6 +3414,72 @@ async function fetchVndIntraday(symbol) {
   };
 }
 
+// Vị thế thật của user, để alert biết đang nói với người cầm hàng hay người ngoài.
+// paper_trades gắn chat_id (sổ tay gõ /b). transactions là danh mục trong app,
+// KHÔNG có chat_id — coi như của chủ app, đúng cách /watch/symbols đang đọc nó.
+async function loadHoldingsIndex(sb) {
+  const [lots, txs] = await Promise.all([
+    sbQuery(sb, "paper_trades", {
+      select: "chat_id,symbol,entry_price,quantity",
+      eq: { status: "open" },
+    }),
+    sbQuery(sb, "transactions", { select: "symbol,side,quantity,price,fee,trade_date" }),
+  ]);
+
+  const agg = new Map();
+  for (const l of lots || []) {
+    const key = `${l.chat_id}|${l.symbol}`;
+    const cur = agg.get(key) || { qty: 0, cost: 0, priceSum: 0, lots: 0 };
+    const qty = Number(l.quantity) || 0;
+    const price = Number(l.entry_price) || 0;
+    cur.qty += qty;
+    cur.cost += qty * price;
+    cur.priceSum += price;
+    cur.lots += 1;
+    agg.set(key, cur);
+  }
+  const paper = new Map();
+  for (const [key, v] of agg) {
+    // quantity nullable (lot chỉ theo dõi %) → không có qty thì lấy trung bình giá vào
+    paper.set(key, {
+      qty: v.qty,
+      avgCost: v.qty > 0 ? v.cost / v.qty : v.priceSum / v.lots,
+      source: "sổ /b",
+    });
+  }
+
+  // Holdings từ transactions: duyệt theo thời gian, avg cost gồm phí — khớp
+  // computeHoldings() bên PWA để hai nơi không ra hai con số giá vốn khác nhau.
+  const acc = new Map();
+  const sorted = (txs || []).slice().sort(
+    (a, b) => new Date(a.trade_date) - new Date(b.trade_date)
+  );
+  for (const t of sorted) {
+    const h = acc.get(t.symbol) || { qty: 0, avgCost: 0 };
+    const qty = Number(t.quantity) || 0;
+    const price = Number(t.price) || 0;
+    const fee = Number(t.fee) || 0;
+    if (t.side === "buy") {
+      const newQty = h.qty + qty;
+      h.avgCost = newQty > 0 ? (h.qty * h.avgCost + qty * price + fee) / newQty : 0;
+      h.qty = newQty;
+    } else {
+      h.qty = Math.max(0, h.qty - qty);
+    }
+    acc.set(t.symbol, h);
+  }
+  const portfolio = new Map();
+  for (const [sym, h] of acc) {
+    if (h.qty > 1e-9) portfolio.set(sym, { qty: h.qty, avgCost: h.avgCost, source: "danh mục app" });
+  }
+
+  return {
+    positionFor(chatId, symbol) {
+      return paper.get(`${chatId}|${symbol}`) || portfolio.get(symbol) || null;
+    },
+  };
+}
+
 async function checkSpikeAlerts(env) {
   const sb = sbClient(env);
   const nowIso = new Date().toISOString();
@@ -3451,6 +3518,7 @@ async function checkSpikeAlerts(env) {
   // State machine + fire alerts
   const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
   const chats = (users || []).map((u) => u.chat_id).filter(Boolean);
+  const holdings = await loadHoldingsIndex(sb);
 
   for (const r of results) {
     if (!r) continue;
@@ -3466,24 +3534,45 @@ async function checkSpikeAlerts(env) {
     }
 
     if (isAbove && !wasAbove && canFire) {
-      // Transition false→true: FIRE alert
-      const msg =
-        `🚀 *${p.symbol}* spike intraday\n\n` +
-        `Entry signal: ${p.entry_price} (${p.signal_date}, Tier ${p.tier})\n` +
+      // Transition false→true: FIRE alert.
+      // Tiêu đề nói rõ đây là mã BOT track, không phải cơ hội vào lệnh — 🚀 +
+      // "spike" cũ dễ đọc thành gợi ý mua đuổi, ngược hẳn ý đồ bắt đáy.
+      const clock = new Date().toLocaleTimeString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
+      });
+      const head =
+        `📈 *${p.symbol}* +${r.intradayRet.toFixed(2)}% trong phiên\n` +
+        `_Mã bot đang track — Tier ${p.tier}, signal ${p.signal_date} @ ${p.entry_price}_\n\n` +
         `Open hôm nay: ${r.openToday.toFixed(2)}\n` +
         `High intraday: *${r.currentHigh.toFixed(2)}* (+${r.intradayRet.toFixed(2)}% từ open)\n` +
-        `Giá hiện tại: ${r.currentLast.toFixed(2)} (+${r.lastRet.toFixed(2)}%)\n\n` +
-        `💡 *Cân nhắc bán nốt* (manual decision) — SSI iBoard:\n` +
-        `① Nếu giá vẫn quanh đỉnh → menu *Lệnh thường*, loại *LO* bán giá ${r.currentHigh.toFixed(2)}\n` +
-        `② Nếu đã rớt xa khỏi đỉnh → loại *MP* bán (khớp ngay) nếu vẫn lãi\n` +
-        `③ Hoặc giữ tiếp — vẫn còn lãi an toàn, đợi target +3% tự khớp\n\n` +
-        `⏰ ${new Date().toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })} VN\n` +
-        `─────\n` +
-        `_LO = lệnh giới hạn (giá cụ thể, không khớp nếu giá thị trường xấu hơn)._\n` +
-        `_MP = market price (khớp ngay theo giá hiện hành, có thể trượt)._\n` +
-        `_Lệnh thường = menu đầu SSI iBoard, chứa LO/MP/ATC/ATO theo giờ phiên._`;
+        `Giá hiện tại: ${r.currentLast.toFixed(2)} (+${r.lastRet.toFixed(2)}%)\n\n`;
+      const tail = `⏰ ${clock} VN`;
+
       for (const chatId of chats) {
-        await tgSendMessage(env.BOT_TOKEN, chatId, msg);
+        const pos = holdings.positionFor(chatId, p.symbol);
+        let body;
+        if (pos) {
+          const posRet = ((r.currentLast - pos.avgCost) / pos.avgCost) * 100;
+          const qtyStr = pos.qty > 0 ? `${pos.qty.toLocaleString("vi-VN")} CP · ` : "";
+          body =
+            `💼 *Mày đang giữ*: ${qtyStr}vốn ${pos.avgCost.toFixed(2)} → ` +
+            `${posRet >= 0 ? "+" : ""}${posRet.toFixed(2)}% _(${pos.source})_\n\n` +
+            `💡 *Cân nhắc bán nốt* (manual decision) — SSI iBoard:\n` +
+            `① Nếu giá vẫn quanh đỉnh → menu *Lệnh thường*, loại *LO* bán giá ${r.currentHigh.toFixed(2)}\n` +
+            `② Nếu đã rớt xa khỏi đỉnh → loại *MP* bán (khớp ngay) nếu vẫn lãi\n` +
+            `③ Hoặc giữ tiếp — đợi target ${parseFloat(p.target_price).toFixed(2)} của bot tự khớp\n\n` +
+            `${tail}\n` +
+            `─────\n` +
+            `_LO = lệnh giới hạn (giá cụ thể, không khớp nếu giá thị trường xấu hơn)._\n` +
+            `_MP = market price (khớp ngay theo giá hiện hành, có thể trượt)._\n` +
+            `_Lệnh thường = menu đầu SSI iBoard, chứa LO/MP/ATC/ATO theo giờ phiên._`;
+        } else {
+          body =
+            `💼 Mày *không cầm* mã này — tin để biết, không cần làm gì.\n` +
+            `_Bot track nó vì signal EOD, không phải vì danh mục của mày. Giá đã chạy +${r.intradayRet.toFixed(2)}% rồi, đây không phải điểm vào._\n\n` +
+            `${tail}`;
+        }
+        await tgSendMessage(env.BOT_TOKEN, chatId, head + body);
       }
       await sbUpdate(sb, "climax_active_picks", {
         eq: { symbol: p.symbol },
@@ -3730,12 +3819,16 @@ async function checkExitAlerts(env) {
 
 async function checkExitAlertsForTable(env, sb, cfg, chats) {
   const selectCols = cfg.table === "mid_term_active_picks"
-    ? "id,symbol,entry_price,signal_date,peak_price,pattern_type,exit_alerted_at"
-    : "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at";
+    ? "id,symbol,entry_price,signal_date,peak_price,pattern_type,exit_alerted_at,expires_at"
+    : "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at,expires_at";
   const picks = await sbQuery(sb, cfg.table, { select: selectCols });
   if (!picks?.length) return;
 
-  const candidates = picks.filter((p) => !p.exit_alerted_at);
+  // Pick hết hạn nằm lại tới lần EOD cleanup kế tiếp — không lọc thì nó vẫn kịp
+  // nhả 1 tin exit (exit_alerted_at chỉ chặn lần thứ hai).
+  const candidates = picks.filter(
+    (p) => !p.exit_alerted_at && (!p.expires_at || new Date(p.expires_at) > new Date())
+  );
   if (!candidates.length) {
     console.log(`[exit-alert ${cfg.label}] all alerted, skip`);
     return;
