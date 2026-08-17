@@ -2888,6 +2888,7 @@ async function finalizeScan(env, state) {
     matches,
     momentumMatches,
     baseBreakoutMatches,
+    fboMatches,
     market: {
       avgChange,
       upCount: marketStats.upCount || 0,
@@ -3417,13 +3418,14 @@ async function checkSpikeAlerts(env) {
   const nowIso = new Date().toISOString();
   // Read active picks (not expired)
   const picks = await sbQuery(sb, "climax_active_picks", {
-    select: "symbol,entry_price,target_price,tier,above_threshold,last_alert_at,signal_date",
+    select: "symbol,entry_price,target_price,tier,above_threshold,last_alert_at,signal_date,expires_at",
   });
   if (!picks || picks.length === 0) {
     return;
   }
-  const active = picks.filter((p) => true); // already filtered by expires_at >= now? sbQuery doesn't filter, do manual
-  // Note: sbQuery không support .gte → cleanup chạy ở EOD persist nên active = current rows
+  // Không dựa vào cleanup của EOD persist được: nó chạy ~15:30, sớm hơn expires_at
+  // của pick hết hạn cùng ngày → row chết vẫn nằm lại tới EOD hôm sau và bắn tin.
+  const active = picks.filter((p) => !p.expires_at || new Date(p.expires_at) > new Date());
   if (active.length === 0) return;
 
   console.log(`[spike] checking ${active.length} active picks`);
@@ -4340,6 +4342,24 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       }
     }
     text += `💰 Size: 15% NAV Tier A · 10% NAV Tier B. Max 2-3 lệnh.\n`;
+  }
+
+  // ── FBO (Foreign-Backed Oversold) section ──
+  // FBO ghi thẳng vào climax_active_picks nên đẻ spike/exit alert y như Climax.
+  // Không announce ở đây thì mã lạ tự nhiên nhảy ra trong alert vài phiên sau,
+  // user không biết nó vào danh sách track từ lúc nào.
+  const fboMatches = result.fboMatches || [];
+  if (fboMatches.length > 0) {
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `🌊 *Bắt đáy FBO (oversold + NN mua)*\n`;
+    text += `${fboMatches.length} mã rơi >5%/3 phiên + nến xanh + RSI<50 + NN mua ròng 5 phiên\n`;
+    text += `_Test 2026: n=14, Win 71%, Sharpe +1.42, PF 1.61._\n\n`;
+    for (const m of fboMatches.slice(0, 5)) {
+      const cur = m.currentPrice;
+      text += `🌊 *${m.symbol}* @ ${cur.toFixed(2)} · rơi ${Math.abs(m.ret3d).toFixed(1)}%/3 phiên · RSI ${m.rsi.toFixed(0)} · NN +${m.nn_net_5d_bn}B\n`;
+      text += `  Target ${(cur * 1.03).toFixed(2)} (+3%) · SL ${(cur * 0.92).toFixed(2)} (-8%) · hold T+5\n\n`;
+    }
+    text += `⚠️ Sample nhỏ (n=14) — size nhỏ hơn Climax, coi như forward-test.\n`;
   }
 
   // Momentum Swing section (chỉ khi bull/neutral regime + có matches)
