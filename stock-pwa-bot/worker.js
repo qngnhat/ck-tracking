@@ -682,8 +682,15 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       const sb = sbClient(env);
-      // Last 50 fires, newest first
-      const r = await fetch(`${sb.url}/rest/v1/cron_heartbeat?select=*&order=fired_at.desc&limit=50`, {
+      // 50 fire gần nhất, mới nhất trước. ?limit= & ?since= để soi ngược lại trong
+      // ngày — mặc định 50 chỉ trải ~19 phút vì chunk cron đập mỗi phút.
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 1000);
+      const since = url.searchParams.get("since");
+      const nameFilter = url.searchParams.get("cron_name");
+      let q = `${sb.url}/rest/v1/cron_heartbeat?select=*&order=fired_at.desc&limit=${limit}`;
+      if (since) q += `&fired_at=gte.${encodeURIComponent(since)}`;
+      if (nameFilter) q += `&cron_name=eq.${encodeURIComponent(nameFilter)}`;
+      const r = await fetch(q, {
         headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` },
       });
       const data = r.ok ? await r.json() : [];
@@ -865,9 +872,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     // Multi-cron dispatch:
-    // - "*/3 2-7 * * 1-5" → intraday watch + spike alerts (mỗi 3 min trong phiên)
-    // - "50 7 * * 1-5"   → EOD digest (14:50 VN) + init multi-stage scan
-    // - "* 8 * * 1-5"    → process scan chunks (mỗi 1 min, 15:00-15:59 VN)
+    // - "*/3 2-7 * * 1-5"    → intraday watch + spike alerts (mỗi 3 min trong phiên)
+    // - "50 7 * * 1-5"       → init multi-stage scan (14:50 VN)
+    // - "* 8-9 * * 1-5"      → chunk mỗi 1 min, 15:00-16:59 VN
     const cron = event.cron || "";
     if (cron === "50 7 * * 1-5") {
       // EOD digest — VN holiday vẫn skip
@@ -878,20 +885,24 @@ export default {
       }
       console.log("[cron-eod] EOD fired at", new Date().toISOString());
       ctx.waitUntil(logHeartbeat(env, "eod", { event_cron: cron }));
-      // Per-user watchlist digest (cho user có watches active)
+      // Cloudflare free tier = 50 subrequest/invocation, dùng CHUNG cho mọi
+      // waitUntil ở đây. sendMarketDigest (quét lại 35 mã, ~40 subrequest) từng
+      // nằm ở đây và ngày nào cũng chết trước khi kịp gửi — cùng lúc kéo chết
+      // updatePeakPrices. Bỏ hẳn: nó chỉ là bản rút gọn của digest full-coverage
+      // mà finalizeScan gửi sau khi quét đủ 1411 mã.
       ctx.waitUntil(sendEodDigest(env));
-      // Quick 35-mã digest (sent immediately, ~30s after market close)
-      ctx.waitUntil(sendMarketDigest(env));
-      // Init multi-stage full-universe scan (sẽ finalize ~15:30 VN)
-      ctx.waitUntil(initScan(env));
+      // processFirstChunk=false: chunk đầu tốn ~40 subrequest, bật lên là nhánh
+      // này lại vượt trần và kéo chết updatePeakPrices. Cron "*/2 0-7" nhặt chunk
+      // đầu lúc 14:52 — chậm 2 phút, đổi lại cả 4 job dưới đây chạy đủ.
+      ctx.waitUntil(initScan(env, { processFirstChunk: false }));
       // Update peak prices for active picks (trailing stop helper)
       ctx.waitUntil(updatePeakPrices(env));
       // Resolve expired trade_log entries (forward-test tracker)
       ctx.waitUntil(resolveExpiredPicks(env));
       return;
     }
-    if (cron === "* 8 * * 1-5") {
-      // Chunked scan processing during 15:00-15:59 VN
+    if (cron === "* 8-9 * * 1-5") {
+      // Chunked scan processing 15:00-16:59 VN
       if (isVnHoliday()) return;
       ctx.waitUntil(logHeartbeat(env, "chunk", { event_cron: cron }));
       ctx.waitUntil(processScanChunk(env));
@@ -908,7 +919,7 @@ export default {
       ctx.waitUntil(sendMorningBriefing(env));
       return;
     }
-    if (cron === "*/2 * * * 1-5") {
+    if (cron === "*/2 0-7,10-23 * * 1-5") {
       // Bot-triggered /scan continuation: process chunk only if scan in_progress.
       // No-op khi state idle/completed (cheap query check).
       ctx.waitUntil((async () => {
@@ -2622,7 +2633,8 @@ async function setScanState(env, data) {
   return sbUpdate(sb, "scan_state", { eq: { id: "main" }, data });
 }
 
-async function initScan(env) {
+async function initScan(env, opts = {}) {
+  const { processFirstChunk = true } = opts;
   // Fetch VNI regime trước để store
   let vniRegime = "neutral";
   let vniRet20 = null;
@@ -2654,7 +2666,7 @@ async function initScan(env) {
   console.log(`[init-scan] started, ${FULL_UNIVERSE.length} mã, VNI regime=${vniRegime} (ret20=${vniRet20?.toFixed?.(1)}%)`);
 
   // Immediately process first chunk to make progress (free tier 30s budget)
-  await processScanChunk(env);
+  if (processFirstChunk) await processScanChunk(env);
 }
 
 async function processScanChunk(env) {

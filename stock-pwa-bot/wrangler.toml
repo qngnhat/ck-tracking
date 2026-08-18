@@ -10,17 +10,21 @@ crons = [
   # Mỗi 3 phút từ 02:00 → 07:57 UTC, weekdays (~ 9:00-14:57 VN time)
   # Worker scheduled() tự skip nếu ngoài phiên (lunch break, weekend, holiday)
   "*/3 2-7 * * 1-5",
-  # EOD digest 14:50 VN (7:50 UTC) — gửi summary cuối phiên + init multi-stage scan
+  # EOD 14:50 VN (7:50 UTC) — init multi-stage scan (KHÔNG gửi digest ở đây,
+  # xem comment nhánh EOD trong scheduled()).
   "50 7 * * 1-5",
-  # Multi-stage scan chunks mỗi 1 phút từ 08:00 → 08:59 UTC (~ 15:00-15:59 VN)
-  # 25 mã/chunk × 57 chunks = full universe (1411 mã) sau ~57 min
-  "* 8 * * 1-5",
+  # Multi-stage scan chunks mỗi 1 phút, 08:00 → 09:59 UTC (~ 15:00-16:59 VN).
+  # 25 mã/chunk × 57 chunks cho 1411 mã → xong ~15:52. Giờ 9 là lưới đỡ: scan
+  # vấp vài nhịp vẫn finalize được, chỉ về muộn hơn chứ không mất hẳn tin.
+  # (Free tier chặn 5 cron trigger/account — không thêm được cron nào nữa.)
+  "* 8-9 * * 1-5",
   # Daily morning briefing 8:30 VN (1:30 UTC) — Telegram summary tuần qua + active picks
   "30 1 * * 1-5",
-  # Manual /scan continuation: every 2 min UTC 0-23 weekdays. No-op nếu state
-  # !== in_progress (cheap check). Khi user /scan ngoài giờ EOD → chunks vẫn
-  # process steadily, ~57 chunks × 2 min = ~2 giờ total cho full 1411.
-  "*/2 * * * 1-5"
+  # Manual /scan continuation. Né giờ 8-9 UTC: ở đó đã có cron chunk mỗi phút,
+  # chạy chồng thì hai lượt cùng đọc current_offset rồi ghi đè nhau (lost update)
+  # — tốn invocation mà offset vẫn chỉ nhích 1 chunk. Giữ giờ 7 để 14:52-14:58
+  # vẫn chạy chunk trước khi cửa sổ chính mở lúc 15:00.
+  "*/2 0-7,10-23 * * 1-5"
 ]
 
 # Notes:
