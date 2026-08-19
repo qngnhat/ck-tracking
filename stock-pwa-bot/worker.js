@@ -323,7 +323,7 @@ export default {
         const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
         const results = await Promise.all(batch.map(async (sym) => {
           try {
-            const data = await fetchVndHistory(sym, 220);
+            const data = await fetchVndHistory(sym, 365);
             const r = detectBaseBreakout(data);
             return r ? { symbol: sym, ...r } : null;
           } catch { return null; }
@@ -347,7 +347,7 @@ export default {
         const batch = MID_TERM_QUICK_UNIVERSE.slice(i, i + batchSize);
         const results = await Promise.all(batch.map(async (sym) => {
           try {
-            const data = await fetchVndHistory(sym, 220);
+            const data = await fetchVndHistory(sym, 365);
             const baseBreakout = detectBaseBreakout(data);
             const fboBase = detectForeignBackedOversoldBase(data);
             let fbo = null;
@@ -1336,7 +1336,7 @@ async function runQuickScan(env) {
     const batch = MID_TERM_QUICK_UNIVERSE.slice(i, i + batchSize);
     const results = await Promise.all(batch.map(async (sym) => {
       try {
-        const data = await fetchVndHistory(sym, 220);
+        const data = await fetchVndHistory(sym, 365);
         const baseBreakout = detectBaseBreakout(data);
         const fboBase = detectForeignBackedOversoldBase(data);
         let fbo = null;
@@ -1927,7 +1927,7 @@ async function buildSignalsMessage(env) {
 
 async function buildCheckSymbolMessage(env, symbol) {
   try {
-    const data = await fetchVndHistory(symbol, 220);
+    const data = await fetchVndHistory(symbol, 365);
     if (!data || !data.closes?.length) return `❌ Không fetch được data ${symbol}`;
 
     const climax = detectVolClimaxBounce(data);
@@ -2517,8 +2517,8 @@ async function scanAllSymbols() {
     const batch = VOL_CLIMAX_UNIVERSE.slice(i, i + batchSize);
     const results = await Promise.all(batch.map(async (sym) => {
       try {
-        // Need 220 days cho strength continuation (MA200)
-        const data = await fetchVndHistory(sym, 220);
+        // Need 365 ngày lịch (~250 nến) cho strength continuation (MA200)
+        const data = await fetchVndHistory(sym, 365);
         const climax = detectVolClimaxBounce(data);
         const momentum = detectStrengthContinuation(data);
         const stats = computeStockStats(data);
@@ -2693,7 +2693,7 @@ async function processScanChunk(env) {
   // candidates) để tránh exceed Cloudflare 50 subrequest/request limit.
   const phase1 = await Promise.all(chunk.map(async (sym) => {
     try {
-      const data = await fetchVndHistory(sym, 220);
+      const data = await fetchVndHistory(sym, 365);
       const climax = detectVolClimaxBounce(data);
       const momentum = detectStrengthContinuation(data);
       const baseBreakout = detectBaseBreakout(data);
@@ -4698,6 +4698,10 @@ async function sendClimaxAlerts(env) {
 
 async function fetchVndHistory(symbol, days = 5) {
   const to = Math.floor(Date.now() / 1000);
+  // days = ngày LỊCH chứ không phải số nến. 220 chỉ trả ~150 nến (trừ cuối tuần
+  // + lễ Tết) — dưới ngưỡng 200 mà detectStrengthContinuation và
+  // detectBaseBreakout đòi, nên hai detector đó null vĩnh viễn. Cần N nến thì
+  // xin ~N × 1.45.
   const from = to - days * 24 * 3600;
   const url = `${VND_HISTORY_URL}?resolution=D&symbol=${symbol}&from=${from}&to=${to}`;
   // VND blocks Cloudflare Worker default fetch (no UA, custom origin) → 403.
