@@ -101,6 +101,20 @@ function isVnTradingDay(d = new Date()) {
   return dow !== 0 && dow !== 6;
 }
 
+// signal_date phải là một PHIÊN, không phải "hôm nay". Scan chạy tay vào T7/CN
+// (recovery) hoặc finalize sau 0h giờ VN sẽ đóng dấu ngày không có nến →
+// resolveClassicalPicks không tìm được bar, lệnh kẹt unresolved đủ 30 ngày.
+function lastVnTradingDay(d = new Date()) {
+  let s = vnDateString(d);
+  // Tết nghỉ tới ~9 phiên liên tiếp, cộng 2 cuối tuần kẹp hai đầu.
+  for (let i = 0; i < 15 && !isVnTradingDay(s); i++) {
+    const prev = new Date(`${s}T00:00:00Z`);
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    s = prev.toISOString().slice(0, 10);
+  }
+  return s;
+}
+
 // Cộng n phiên giao dịch (bỏ T7/CN + lễ). In/out đều "YYYY-MM-DD".
 function addVnTradingDays(dateStr, n) {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -1384,15 +1398,22 @@ function buildScanResultMessage(summary) {
 
 async function buildStatsMessage(env) {
   const sb = sbClient(env);
+  const headers = { apikey: sb.key, authorization: `Bearer ${sb.key}` };
   const sinceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const r = await fetch(
-    `${sb.url}/rest/v1/trade_log?select=*&signal_date=gte.${sinceDate}&order=signal_date.desc&limit=200`,
-    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
-  );
-  if (!r.ok) return "❌ Lỗi fetch stats";
-  const trades = await r.json();
+  // Cửa sổ tính theo resolved_at, KHÔNG theo signal_date: lệnh vào từ tháng
+  // trước mà vừa chốt tuần này vẫn phải hiện, nếu không window tự giấu lỗ cũ.
+  // Lệnh đang mở lấy hết, bất kể vào từ bao giờ.
+  const [rWindow, rAll] = await Promise.all([
+    fetch(`${sb.url}/rest/v1/trade_log?select=*&or=(resolved_at.gte.${sinceDate},resolved_at.is.null)&order=signal_date.desc&limit=200`, { headers }),
+    fetch(`${sb.url}/rest/v1/trade_log?select=net_ret,is_win,exit_reason&resolved_at=not.is.null&limit=1000`, { headers }),
+  ]);
+  if (!rWindow.ok) return "❌ Lỗi fetch stats";
+  const trades = await rWindow.json();
+  const lifetime = rAll.ok
+    ? (await rAll.json()).filter((t) => t.exit_reason !== "unresolved")
+    : [];
   if (trades.length === 0) {
-    return `📊 *Stats 30 ngày*\n\nChưa có trade nào được resolve trong window. Bot scan EOD T2-T6 — đợi sau khi có signal + T+5 hoặc T+30 resolve.`;
+    return `📊 *Stats*\n\nKhông có lệnh nào chốt trong 30 ngày qua và cũng không có lệnh đang mở. Bot scan EOD T2-T6 — đợi signal rồi T+5 hoặc T+30 mới resolve.`;
   }
   // exit_reason='unresolved' = bỏ cuộc vì thiếu data, không có net_ret → loại
   // khỏi thống kê kẻo kéo tụt win rate bằng số 0 giả.
@@ -1407,10 +1428,23 @@ async function buildStatsMessage(env) {
   const px = (v) => (v == null ? "?" : parseFloat(v).toFixed(2));
   const tierTag = (t) => `${TIER_ICONS[t.tier] || "•"} ${t.tier || "?"}`;
 
-  let text = `📊 *Stats 30 ngày qua*\n`;
-  text += `Đã chốt ${resolved.length}/${trades.length} · Win ${winRate.toFixed(0)}% · `;
-  text += `${sign(avgRet)}${avgRet.toFixed(2)}%/lệnh · Cộng dồn ${sign(totalRet)}${(totalRet * 100).toFixed(1)}%\n`;
+  let text = `📊 *Stats* — chốt trong 30 ngày\n`;
+  if (resolved.length > 0) {
+    text += `${resolved.length} lệnh chốt · Win ${winRate.toFixed(0)}% · `;
+    text += `${sign(avgRet)}${avgRet.toFixed(2)}%/lệnh · Cộng dồn ${sign(totalRet)}${(totalRet * 100).toFixed(1)}%\n`;
+  } else {
+    text += `Chưa chốt lệnh nào trong 30 ngày.\n`;
+  }
+  if (active.length > 0) text += `Đang mở ${active.length} lệnh.\n`;
   if (giveUp.length > 0) text += `_(${giveUp.length} lệnh bỏ qua — thiếu data)_\n`;
+  // Không có dòng này thì lệnh chốt lỗ ngoài 30 ngày biến mất khỏi mọi con số.
+  if (lifetime.length > resolved.length) {
+    const lWins = lifetime.filter((t) => t.is_win).length;
+    const lSum = lifetime.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
+    const lAvg = (lSum / lifetime.length) * 100;
+    text += `_Toàn bộ lịch sử ${lifetime.length} lệnh: Win ${((lWins / lifetime.length) * 100).toFixed(0)}% · `;
+    text += `${sign(lAvg)}${lAvg.toFixed(2)}%/lệnh · cộng dồn ${sign(lSum)}${(lSum * 100).toFixed(1)}%_\n`;
+  }
 
   if (resolved.length > 0) {
     const rows = [...resolved].sort(
@@ -2262,17 +2296,29 @@ const MID_TERM_QUICK_UNIVERSE = [
   "REE", "SAB", "SSB", "BCM", "VCS",
 ];
 
-// ── Foreign-Backed Oversold (FBO) — V1 verified Sharpe +1.42 Test 2026 ──
-// Backtest run_foreign_flow_deep.py:
-//   Train 2024-25: n=38, Win 63%, avg +1.61%, Sharpe +1.62, PF 1.81
-//   Test  2026   : n=14, Win 71%, avg +1.28%, Sharpe +1.42, PF 1.61
+// ── Foreign-Backed Oversold (FBO) — TẮT 28/08/2026 ──
 // Pattern: drop 3d <-5% + day green + RSI<50 + NN net buy 5d > 0.
 // Hold T+5, target +3%, SL -8% (same Climax flow).
-// Smaller sample → flag experimental, monitor forward perf.
 //
+// Con số cũ ghi ở đây (Test 2026 n=14, Sharpe +1.42) là do chọn 2024-26 làm
+// test set — đúng đoạn thị trường hồi phục. Chạy lại toàn bộ 2018-2026 với
+// filter đúng như production (turnover point-in-time ≥3 tỷ):
+//   n=427  Win 52.9%  avg -0.60%/lệnh  PF 0.83  cộng dồn -257%
+// Âm ở CẢ BA regime (correction -0.92%, neutral -0.13%, bull -0.84%) nên gate
+// không cứu được. Bỏ luôn rổ crash ret20<-10% thì 287 lệnh còn lại ra
+// -0.02%/lệnh — hết chảy máu chứ không có edge.
+// Forward test khớp: 1 thắng / 4 thua, -2.56%/lệnh.
+//
+// Momentum + Base Breakout chạy qua đúng bài test này thì vẫn dương
+// (+0.95% và +1.83%/lệnh, n=1269 / n=511) — chỉ mình FBO hỏng.
+//
+// Bật lại = đổi cờ này, nhưng phải có backtest full-period dương trước đã.
+const FBO_ENABLED = false;
+
 // Note: Worker phải call AFTER fetching foreign flow data. Detector return
 // signal flags WITHOUT NN check — caller must add nn_5d > 0 filter.
 function detectForeignBackedOversoldBase(data) {
+  if (!FBO_ENABLED) return null;
   const closes = data.closes;
   const opens = data.opens;
   const volumes = data.volumes;
@@ -2997,7 +3043,7 @@ async function persistMomentumMatches(env, matches, ctx = null) {
   if (!matches || matches.length === 0) return;
   const sb = sbClient(env);
   const expiresAt = new Date(Date.now() + MOMENTUM_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = lastVnTradingDay();
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3025,7 +3071,7 @@ async function persistFBOMatches(env, matches, ctx = null) {
   }
   const sb = sbClient(env);
   const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = lastVnTradingDay();
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3079,7 +3125,7 @@ async function persistMidTermMatches(env, matches) {
   const expiresAt = new Date(
     Date.now() + BASE_BREAKOUT_HOLD_CAL_DAYS * 24 * 3600 * 1000
   ).toISOString();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = lastVnTradingDay();
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3114,7 +3160,7 @@ async function persistClimaxMatches(env, matches, ctx = null) {
   }
 
   const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = lastVnTradingDay();
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3145,7 +3191,34 @@ const TRADE_LOG_CONTEXT_COLS = [
   "breadth_up", "breadth_down", "ret3d", "vol_ratio", "rsi",
 ];
 
+// Cùng một mã signal lại khi lệnh cũ chưa chốt vẫn là MỘT vị thế. Conflict key
+// là (symbol, signal_date) nên ngày mới đẻ row mới → /stats đếm đôi một lệnh.
+// Chặn ở đây vì mọi detector đều đi qua upsertTradeLog.
+async function dropSymbolsAlreadyOpen(sb, rows, label) {
+  const symbols = [...new Set(rows.map((r) => r.symbol))];
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=symbol,signal_date&resolved_at=is.null&symbol=in.(${symbols.join(",")})`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  // Fail-open: query hỏng thì thà ghi trùng còn hơn mất signal.
+  if (!r.ok) return rows;
+  const openBySymbol = new Map((await r.json()).map((o) => [o.symbol, o.signal_date]));
+  const kept = rows.filter((row) => {
+    const prev = openBySymbol.get(row.symbol);
+    // Trùng signal_date = scan chạy lại trong ngày, vẫn để upsert ghi đè.
+    return prev == null || prev === row.signal_date;
+  });
+  const skipped = rows.length - kept.length;
+  if (skipped > 0) {
+    const names = rows.filter((x) => !kept.includes(x)).map((x) => x.symbol).join(",");
+    console.log(`[trade-log ${label}] bỏ ${skipped} mã đang có lệnh mở: ${names}`);
+  }
+  return kept;
+}
+
 async function upsertTradeLog(sb, rows, label) {
+  rows = await dropSymbolsAlreadyOpen(sb, rows, label);
+  if (rows.length === 0) return true;
   if (await sbUpsert(sb, "trade_log", rows, "symbol,signal_date")) return true;
   const stripped = rows.map((r) => {
     const copy = { ...r };
