@@ -1403,6 +1403,64 @@ async function buildStatsMessage(env) {
   const winRate = resolved.length > 0 ? (wins / resolved.length) * 100 : 0;
   const totalRet = resolved.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0);
   const avgRet = resolved.length > 0 ? (totalRet / resolved.length) * 100 : 0;
+  const sign = (v) => (v >= 0 ? "+" : "");
+  const px = (v) => (v == null ? "?" : parseFloat(v).toFixed(2));
+  const tierTag = (t) => `${TIER_ICONS[t.tier] || "•"} ${t.tier || "?"}`;
+
+  let text = `📊 *Stats 30 ngày qua*\n`;
+  text += `Đã chốt ${resolved.length}/${trades.length} · Win ${winRate.toFixed(0)}% · `;
+  text += `${sign(avgRet)}${avgRet.toFixed(2)}%/lệnh · Cộng dồn ${sign(totalRet)}${(totalRet * 100).toFixed(1)}%\n`;
+  if (giveUp.length > 0) text += `_(${giveUp.length} lệnh bỏ qua — thiếu data)_\n`;
+
+  if (resolved.length > 0) {
+    const rows = [...resolved].sort(
+      (a, b) => parseFloat(b.net_ret || 0) - parseFloat(a.net_ret || 0)
+    );
+    text += `\n*✅ ĐÃ CHỐT*\n`;
+    for (const t of rows.slice(0, STATS_LIST_LIMIT)) {
+      const ret = parseFloat(t.net_ret || 0) * 100;
+      const reason = EXIT_REASON_LABELS[t.exit_reason] || t.exit_reason || "?";
+      text += `${ret >= 0 ? "🟢" : "🔴"} *${t.symbol}* ${tierTag(t)} · ${px(t.entry_price)}→${px(t.exit_price)} · `;
+      text += `*${sign(ret)}${ret.toFixed(2)}%* · ${reason}${t.exit_day ? `, T+${t.exit_day}` : ""} _(${fmtVnDM(t.signal_date)})_\n`;
+    }
+    if (rows.length > STATS_LIST_LIMIT) {
+      text += `_… và ${rows.length - STATS_LIST_LIMIT} lệnh khác_\n`;
+    }
+  }
+
+  if (active.length > 0) {
+    const open = [...active].sort((a, b) => b.signal_date.localeCompare(a.signal_date));
+    // Cùng cách tính P&L với /signals: raw (cur-entry)/entry, chưa trừ phí —
+    // hai lệnh mà lệch nhau thì user không biết tin cái nào.
+    const quotes = new Map();
+    await Promise.all(
+      open.slice(0, SIGNALS_QUOTE_LIMIT).map(async (t) => {
+        try {
+          const h = await fetchVndHistory(t.symbol, 10);
+          const last = h.closes[h.closes.length - 1];
+          if (last > 0) quotes.set(t.symbol, last);
+        } catch (e) {
+          console.warn(`[stats] quote ${t.symbol}: ${e.message}`);
+        }
+      })
+    );
+    const today = vnDateString();
+    text += `\n*⏳ ĐANG MỞ* _(tạm tính, chưa trừ phí)_\n`;
+    for (const t of open) {
+      const held = vnTradingDaysBetween(t.signal_date, today);
+      const hold = t.max_hold_days || 5;
+      const entry = t.entry_price != null ? parseFloat(t.entry_price) : null;
+      const cur = quotes.get(t.symbol);
+      let pnl = "—";
+      let icon = "⏳";
+      if (cur != null && entry != null) {
+        const ret = ((cur - entry) / entry) * 100;
+        pnl = `${px(cur)} · *${sign(ret)}${ret.toFixed(2)}%*`;
+        icon = ret >= 0 ? "🟢" : "🔴";
+      }
+      text += `${icon} *${t.symbol}* ${tierTag(t)} · ${px(entry)}→${pnl} · T+${held}/${hold} _(${fmtVnDM(t.signal_date)})_\n`;
+    }
+  }
 
   // Per-tier breakdown
   const tiers = {};
@@ -1412,21 +1470,12 @@ async function buildStatsMessage(env) {
     if (t.is_win) tiers[t.tier].wins++;
     tiers[t.tier].sumRet += parseFloat(t.net_ret || 0);
   }
-
-  let text = `📊 *Stats 30 ngày qua*\n\n`;
-  text += `*Resolved:* ${resolved.length}/${trades.length} (${active.length} đang chờ)\n`;
-  text += `*Win rate:* ${winRate.toFixed(1)}% (${wins}/${resolved.length})\n`;
-  text += `*Avg return:* ${avgRet >= 0 ? "+" : ""}${avgRet.toFixed(2)}%/trade\n`;
-  text += `*Cumulative:* ${totalRet >= 0 ? "+" : ""}${(totalRet * 100).toFixed(1)}%\n`;
-
-  if (giveUp.length > 0) text += `_(${giveUp.length} trade bỏ qua — thiếu data)_\n`;
-
   if (Object.keys(tiers).length > 0) {
-    text += `\n*Per tier:*\n`;
+    text += `\n*Theo tier:*\n`;
     for (const [tier, s] of Object.entries(tiers)) {
       const tWin = (s.wins / s.n) * 100;
       const tAvg = (s.sumRet / s.n) * 100;
-      text += `• ${tier}: ${s.n} trade · ${tWin.toFixed(0)}% win · ${tAvg >= 0 ? "+" : ""}${tAvg.toFixed(2)}%/trade\n`;
+      text += `• ${tier}: ${s.n} lệnh · ${tWin.toFixed(0)}% win · ${sign(tAvg)}${tAvg.toFixed(2)}%/lệnh\n`;
     }
   }
 
@@ -1438,7 +1487,7 @@ async function buildStatsMessage(env) {
       if (n === 0) return null;
       const w = rows.filter((t) => t.is_win).length;
       const avg = rows.reduce((s, t) => s + parseFloat(t.net_ret || 0), 0) / n * 100;
-      return `${n} trade · ${((w / n) * 100).toFixed(0)}% win · ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%/trade`;
+      return `${n} lệnh · ${((w / n) * 100).toFixed(0)}% win · ${sign(avg)}${avg.toFixed(2)}%/lệnh`;
     };
     text += `\n*Theo regime:*\n`;
     for (const rg of ["correction", "neutral", "bull"]) {
@@ -1462,6 +1511,8 @@ async function buildStatsMessage(env) {
 const SIGNALS_WINDOW_DAYS = 7;
 // Mỗi mã = 1 subrequest VND; chặn trần để /signals không đụng limit của Worker
 const SIGNALS_QUOTE_LIMIT = 12;
+// /stats liệt kê từng lệnh; cắt bớt kẻo Telegram cụt tin khi trade_log phình.
+const STATS_LIST_LIMIT = 15;
 
 const TIER_ICONS = {
   Premium: "💎", Elite: "⚡", A: "🟢", B: "🔵",
