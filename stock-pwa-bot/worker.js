@@ -206,19 +206,20 @@ export default {
       }
       const sb = sbClient(env);
       const wlRows = (await sbQuery(sb, "watchlist", { select: "symbol" })) || [];
-      const txRows = (await sbQuery(sb, "transactions", { select: "symbol,side,quantity" })) || [];
-      // Holdings = net qty per symbol (buy +, sell -), keep qty > 0.
-      const net = {};
-      for (const t of txRows) {
-        const q = Number(t.quantity) || 0;
-        net[t.symbol] = (net[t.symbol] || 0) + (t.side === "buy" ? q : -q);
-      }
-      const portfolio = Object.keys(net).filter((s) => net[s] > 1e-9).sort();
+      // Dùng chung loadHoldingsIndex để endpoint này và /pos không lệch nguồn.
+      const { portfolio: held } = await loadHoldingsIndex(sb);
+      const portfolio = [...held.keys()].sort();
       const watchlist = [...new Set(wlRows.map((r) => r.symbol))].sort();
       return new Response(JSON.stringify({ portfolio, watchlist }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
+    }
+    if (url.pathname === "/portfolio/sync" && request.method === "POST") {
+      if (url.searchParams.get("key") !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return handlePortfolioSync(request, env);
     }
     if (url.pathname === "/cron-test" && request.method === "POST") {
       // Manual trigger cron logic (testing only — protect by secret)
@@ -1185,9 +1186,9 @@ async function handleTelegramWebhook(request, env, ctx) {
     return new Response("ok");
   }
 
-  // /pos — lệnh paper đang mở, /pnl — tổng kết đã đóng + so với bot
+  // /pos — danh mục thật trong app, /pnl — tổng kết sổ /b đã đóng + so với bot
   if (text === "/pos" || text === "/positions") {
-    await tgSendMessage(env.BOT_TOKEN, chatId, await buildPaperPositionsMessage(env, chatId));
+    await tgSendMessage(env.BOT_TOKEN, chatId, await buildPortfolioMessage(env, chatId));
     return new Response("ok");
   }
   if (text === "/pnl") {
@@ -1241,10 +1242,11 @@ function buildHelpMessage() {
     `/picks (/p) — Show active picks (Base Breakout + FBO + Climax)\n` +
     `/signals (/sg) — Mã đã & đang signal 7 ngày qua (T+, lãi/lỗ)\n` +
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
+    `\n*Danh mục:*\n` +
+    `/pos — Danh mục trong app: giá vốn, T+, lãi/lỗ hiện tại\n` +
     `\n*Sổ lệnh tay:*\n` +
     `/b SHS 17.88 1000 — Ghi MUA (giá, số lượng)\n` +
     `/s SHS 18.5 400 — Ghi BÁN (bỏ SL = đóng cả lot cũ nhất)\n` +
-    `/pos — Lệnh đang mở + lãi/lỗ tạm tính\n` +
     `/pnl — Tổng kết đã đóng + so với bot\n` +
     `\n*Stats + Regime:*\n` +
     `/stats (/st) — Forward-test stats (Win, P&L) 30 ngày\n` +
@@ -1799,6 +1801,73 @@ async function buildPaperPositionsMessage(env, chatId) {
     head += `\nVốn ${fmtVndAbs(capital)} · ${pnlVnd >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnlVnd)}* (${((pnlVnd / capital) * 100).toFixed(2)}%)`;
   }
   return `${head}\n\n${body}\n_Đã trừ phí ${PAPER_FEE_PCT}%._ \`/s <MÃ> <giá>\` _để đóng._`;
+}
+
+// /pos — danh mục thật trong app (bảng transactions).
+// KHÔNG trừ phí ở đây: avgCost đã gồm phí mua vì loadHoldingsIndex dựng theo
+// đúng computeHoldings() bên PWA. Trừ thêm là hai màn hình ra hai con số.
+async function buildPortfolioMessage(env, chatId) {
+  const sb = sbClient(env);
+  const { portfolio, paperCountFor } = await loadHoldingsIndex(sb);
+  // Sổ /b vẫn ghi được nhưng không còn màn nào hiện — nói ra kẻo /b thành lệnh
+  // ghi rồi mất.
+  const paperOpen = paperCountFor(chatId);
+  const paperNote = paperOpen > 0
+    ? `\n_Sổ \`/b\` còn ${paperOpen} lot mở, không hiện ở đây._`
+    : "";
+  if (portfolio.size === 0) {
+    return `📭 Danh mục trống — chưa có giao dịch nào trong app.${paperNote}`;
+  }
+
+  const syms = [...portfolio.keys()];
+  const quotes = new Map();
+  await Promise.all(syms.slice(0, PAPER_QUOTE_LIMIT).map(async (s) => {
+    try {
+      const h = await fetchVndHistory(s, 10);
+      const last = h.closes[h.closes.length - 1];
+      if (last > 0) quotes.set(s, last);
+    } catch (e) {
+      console.warn(`[portfolio] quote ${s}: ${e.message}`);
+    }
+  }));
+
+  const today = vnDateString();
+  const rows = syms
+    .map((s) => {
+      const h = portfolio.get(s);
+      const cost = paperCost(h.avgCost, h.qty);
+      const cur = quotes.get(s) ?? null;
+      return { sym: s, ...h, cost, cur, value: cur != null ? paperCost(cur, h.qty) : null };
+    })
+    .sort((a, b) => (b.value ?? b.cost) - (a.value ?? a.cost));
+
+  let totalCost = 0, pricedCost = 0, pricedValue = 0, body = "";
+  for (const r of rows) {
+    totalCost += r.cost;
+    const held = r.firstBuyDate ? vnTradingDaysBetween(r.firstBuyDate, today) : null;
+    body += `• *${r.sym}* @${r.avgCost.toFixed(2)} ×${fmtQty(r.qty)} = ${fmtVndAbs(r.cost)}`;
+    body += held != null ? ` · T+${held}\n` : `\n`;
+    if (r.value == null) {
+      body += `   _chưa lấy được giá_\n`;
+      continue;
+    }
+    pricedCost += r.cost;
+    pricedValue += r.value;
+    const ret = (r.cur / r.avgCost - 1) * 100;
+    body += `   Nay ${r.cur.toFixed(2)} · ${ret >= 0 ? "🟢 +" : "🔴 "}${ret.toFixed(2)}% (${fmtVnd(r.value - r.cost)})\n`;
+  }
+
+  const priced = rows.filter((r) => r.value != null).length;
+  let head = `📁 *Danh mục* (${rows.length} mã)\nVốn ${fmtVndAbs(totalCost)}`;
+  if (pricedCost > 0) {
+    const pnl = pricedValue - pricedCost;
+    const pct = ((pnl / pricedCost) * 100).toFixed(2);
+    // Mã thiếu quote không được trộn vào tổng, nếu không lãi/lỗ ra số sai.
+    head += priced === rows.length
+      ? ` · Nay ${fmtVndAbs(pricedValue)} · ${pnl >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnl)}* (${pct}%)`
+      : `\n${priced}/${rows.length} mã có giá: vốn ${fmtVndAbs(pricedCost)} · nay ${fmtVndAbs(pricedValue)} · ${pnl >= 0 ? "🟢" : "🔴"} *${fmtVnd(pnl)}* (${pct}%)`;
+  }
+  return `${head}\n\n${body}\n_Giá vốn gồm phí mua, chưa trừ phí bán._${paperNote}`;
 }
 
 async function buildPaperPnlMessage(env, chatId) {
@@ -3550,16 +3619,74 @@ async function fetchVndIntraday(symbol) {
   };
 }
 
+// Snapshot danh mục từ app menubar (vnstock-menubar). Body:
+// {holdings: [{symbol, avg_cost, qty, first_buy_date?}]}
+//
+// Upsert TRƯỚC rồi mới xoá mã không còn trong payload — làm ngược lại thì một
+// lỗi giữa chừng sẽ để danh mục rỗng, và bot mất luôn khái niệm "đang cầm hàng".
+async function handlePortfolioSync(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "body không phải JSON" }, 400);
+  }
+  if (!Array.isArray(body?.holdings)) {
+    return jsonResponse({ error: "thiếu mảng holdings" }, 400);
+  }
+
+  const now = new Date().toISOString();
+  const rows = [];
+  for (const h of body.holdings) {
+    const symbol = String(h?.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const avgCost = Number(h?.avg_cost);
+    const qty = Number(h?.qty);
+    if (symbol.length < 3 || !(avgCost > 0) || !(qty > 0)) {
+      return jsonResponse({ error: `holding không hợp lệ: ${JSON.stringify(h)}` }, 400);
+    }
+    rows.push({
+      symbol,
+      avg_cost: avgCost,
+      qty,
+      first_buy_date: /^\d{4}-\d{2}-\d{2}$/.test(h?.first_buy_date || "")
+        ? h.first_buy_date
+        : null,
+      source: "menubar",
+      updated_at: now,
+    });
+  }
+
+  const sb = sbClient(env);
+  if (rows.length > 0 && !(await sbUpsert(sb, "holdings", rows, "symbol"))) {
+    return jsonResponse({ error: "upsert holdings lỗi — chạy sql/015 chưa?" }, 500);
+  }
+  // PostgREST chặn DELETE không filter, và `not.in.()` là cú pháp sai → luôn
+  // kèm sentinel để payload rỗng vẫn xoá sạch được.
+  const keep = [...rows.map((r) => r.symbol), "__NONE__"];
+  if (!(await sbDelete(sb, "holdings", { notIn: { symbol: keep } }))) {
+    return jsonResponse({ error: "xoá mã cũ lỗi" }, 500);
+  }
+  return jsonResponse({ ok: true, synced: rows.map((r) => r.symbol) });
+}
+
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 // Vị thế thật của user, để alert biết đang nói với người cầm hàng hay người ngoài.
 // paper_trades gắn chat_id (sổ tay gõ /b). transactions là danh mục trong app,
 // KHÔNG có chat_id — coi như của chủ app, đúng cách /watch/symbols đang đọc nó.
 async function loadHoldingsIndex(sb) {
-  const [lots, txs] = await Promise.all([
+  const [lots, txs, snap] = await Promise.all([
     sbQuery(sb, "paper_trades", {
       select: "chat_id,symbol,entry_price,quantity",
       eq: { status: "open" },
     }),
     sbQuery(sb, "transactions", { select: "symbol,side,quantity,price,fee,trade_date" }),
+    sbQuery(sb, "holdings", { select: "symbol,avg_cost,qty,first_buy_date" }),
   ]);
 
   const agg = new Map();
@@ -3591,7 +3718,7 @@ async function loadHoldingsIndex(sb) {
     (a, b) => new Date(a.trade_date) - new Date(b.trade_date)
   );
   for (const t of sorted) {
-    const h = acc.get(t.symbol) || { qty: 0, avgCost: 0 };
+    const h = acc.get(t.symbol) || { qty: 0, avgCost: 0, firstBuyDate: null };
     const qty = Number(t.quantity) || 0;
     const price = Number(t.price) || 0;
     const fee = Number(t.fee) || 0;
@@ -3599,6 +3726,9 @@ async function loadHoldingsIndex(sb) {
       const newQty = h.qty + qty;
       h.avgCost = newQty > 0 ? (h.qty * h.avgCost + qty * price + fee) / newQty : 0;
       h.qty = newQty;
+      // trade_date lưu ISO timestamp đầy đủ (PWA ghi new Date().toISOString()),
+      // vnTradingDaysBetween chỉ parse được "YYYY-MM-DD".
+      if (!h.firstBuyDate) h.firstBuyDate = String(t.trade_date).slice(0, 10);
     } else {
       h.qty = Math.max(0, h.qty - qty);
     }
@@ -3606,12 +3736,38 @@ async function loadHoldingsIndex(sb) {
   }
   const portfolio = new Map();
   for (const [sym, h] of acc) {
-    if (h.qty > 1e-9) portfolio.set(sym, { qty: h.qty, avgCost: h.avgCost, source: "danh mục app" });
+    if (h.qty > 1e-9) {
+      portfolio.set(sym, {
+        qty: h.qty, avgCost: h.avgCost, firstBuyDate: h.firstBuyDate, source: "danh mục app",
+      });
+    }
+  }
+
+  // `holdings` do menubar đẩy nguyên snapshot mỗi lần sửa, và nó là writer duy
+  // nhất → có row nghĩa là danh mục thật nằm ở đó, transactions chỉ còn là
+  // lịch sử cũ của PWA. Thay hẳn chứ không trộn: trộn là hồi sinh mã đã bán.
+  if (snap && snap.length > 0) {
+    portfolio.clear();
+    for (const h of snap) {
+      const qty = Number(h.qty) || 0;
+      const avgCost = Number(h.avg_cost) || 0;
+      if (qty > 1e-9 && avgCost > 0) {
+        portfolio.set(h.symbol, {
+          qty, avgCost, firstBuyDate: h.first_buy_date, source: "danh mục menubar",
+        });
+      }
+    }
   }
 
   return {
     positionFor(chatId, symbol) {
       return paper.get(`${chatId}|${symbol}`) || portfolio.get(symbol) || null;
+    },
+    portfolio,
+    paperCountFor(chatId) {
+      let n = 0;
+      for (const key of paper.keys()) if (key.startsWith(`${chatId}|`)) n++;
+      return n;
     },
   };
 }
@@ -5148,6 +5304,11 @@ async function sbDelete(sb, table, opts) {
   }
   if (opts.eq) {
     for (const [k, v] of Object.entries(opts.eq)) params.append(k, `eq.${v}`);
+  }
+  if (opts.notIn) {
+    for (const [k, v] of Object.entries(opts.notIn)) {
+      params.append(k, `not.in.(${v.join(",")})`);
+    }
   }
   const url = `${sb.url}/rest/v1/${table}?${params.toString()}`;
   const res = await fetch(url, {
