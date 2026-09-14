@@ -34,18 +34,20 @@ const VND_CHART_HEADERS = {
 // nghỉ chính thức.
 const VN_HOLIDAYS = new Map([
   ["2025-01-01", "Tết Dương lịch"],
+  ["2025-01-27", "Tết Nguyên đán"],
   ["2025-01-28", "Tết Nguyên đán"], ["2025-01-29", "Tết Nguyên đán"],
   ["2025-01-30", "Tết Nguyên đán"], ["2025-01-31", "Tết Nguyên đán"],
-  ["2025-02-03", "Tết Nguyên đán"],
   ["2025-04-07", "Giỗ Tổ Hùng Vương"],
   ["2025-04-30", "Giải phóng miền Nam"], ["2025-05-01", "Quốc tế Lao động"],
-  ["2025-09-02", "Quốc khánh"],
-  ["2026-01-01", "Tết Dương lịch"],
+  ["2025-05-02", "Quốc tế Lao động"],
+  ["2025-09-01", "Quốc khánh"], ["2025-09-02", "Quốc khánh"],
+  ["2026-01-01", "Tết Dương lịch"], ["2026-01-02", "Tết Dương lịch"],
   ["2026-02-16", "Tết Nguyên đán"], ["2026-02-17", "Tết Nguyên đán"],
   ["2026-02-18", "Tết Nguyên đán"], ["2026-02-19", "Tết Nguyên đán"],
   ["2026-02-20", "Tết Nguyên đán"],
   ["2026-04-27", "Giỗ Tổ Hùng Vương"],
   ["2026-04-30", "Giải phóng miền Nam"], ["2026-05-01", "Quốc tế Lao động"],
+  ["2026-08-31", "Quốc khánh"], ["2026-09-01", "Quốc khánh"],
   ["2026-09-02", "Quốc khánh"],
   ["2027-01-01", "Tết Dương lịch"],
   ["2027-02-08", "Tết Nguyên đán"], ["2027-02-09", "Tết Nguyên đán"],
@@ -887,11 +889,11 @@ export default {
 
   async scheduled(event, env, ctx) {
     // Multi-cron dispatch:
-    // - "*/3 2-7 * * 1-5"    → intraday watch + spike alerts (mỗi 3 min trong phiên)
-    // - "50 7 * * 1-5"       → init multi-stage scan (14:50 VN)
-    // - "* 8-9 * * 1-5"      → chunk mỗi 1 min, 15:00-16:59 VN
+    // - "*/3 2-7 * * mon-fri"    → intraday watch + spike alerts (mỗi 3 min trong phiên)
+    // - "50 7 * * mon-fri"       → init multi-stage scan (14:50 VN)
+    // - "* 8-9 * * mon-fri"      → chunk mỗi 1 min, 15:00-16:59 VN
     const cron = event.cron || "";
-    if (cron === "50 7 * * 1-5") {
+    if (cron === "50 7 * * mon-fri") {
       // EOD digest — VN holiday vẫn skip
       if (isVnHoliday()) {
         console.log("[cron-eod] skip — VN holiday");
@@ -916,14 +918,14 @@ export default {
       ctx.waitUntil(resolveExpiredPicks(env));
       return;
     }
-    if (cron === "* 8-9 * * 1-5") {
+    if (cron === "* 8-9 * * mon-fri") {
       // Chunked scan processing 15:00-16:59 VN
       if (isVnHoliday()) return;
       ctx.waitUntil(logHeartbeat(env, "chunk", { event_cron: cron }));
       ctx.waitUntil(processScanChunk(env));
       return;
     }
-    if (cron === "30 1 * * 1-5") {
+    if (cron === "30 1 * * mon-fri") {
       // Morning briefing 8:30 VN (1:30 UTC) — Telegram summary
       if (isVnHoliday()) {
         ctx.waitUntil(logHeartbeat(env, "morning-skip", { reason: "vn-holiday" }));
@@ -934,7 +936,7 @@ export default {
       ctx.waitUntil(sendMorningBriefing(env));
       return;
     }
-    if (cron === "*/2 0-7,10-23 * * 1-5") {
+    if (cron === "*/2 0-7,10-23 * * mon-fri") {
       // Bot-triggered /scan continuation: process chunk only if scan in_progress.
       // No-op khi state idle/completed (cheap query check).
       ctx.waitUntil((async () => {
@@ -1085,8 +1087,8 @@ async function handleTelegramWebhook(request, env, ctx) {
 
   // /scan — trigger FULL 1411 mã chunked scan (background via cron)
   // Cloudflare Worker không cho phép self-spawn unlimited → chunks process qua
-  // cron `*/2 * * * 1-5` (every 2 min weekdays). 57 chunks × 2 min ≈ 2 giờ total.
-  // EOD slot `* 8 * * 1-5` (15:00-15:59 VN) chạy mỗi 1 phút → faster (~57 min).
+  // cron `*/2 * * * mon-fri` (every 2 min weekdays). 57 chunks × 2 min ≈ 2 giờ total.
+  // EOD slot `* 8 * * mon-fri` (15:00-15:59 VN) chạy mỗi 1 phút → faster (~57 min).
   if (text === "/scan") {
     await setScanState(env, {
       status: "in_progress",
@@ -2594,7 +2596,6 @@ function detectVolClimaxBounce(data) {
 //   3. Trigger: today close > max(high prev 30 days) — breakout above base
 //   4. Vol confirm: vol_ratio (today / avg20) > 1.5
 const BASE_BREAKOUT_TURNOVER_MIN = 5e9;      // 5 tỷ/ngày median 60d
-const BASE_BREAKOUT_HOLD_CAL_DAYS = 42;       // ~30 trading days
 const BASE_BREAKOUT_TRAIL_PCT = 10;
 const BASE_BREAKOUT_INIT_SL_PCT = 10;
 const BASE_BREAKOUT_MAX_HOLD_TRADING = 30;
@@ -3094,14 +3095,19 @@ async function finalizeScan(env, state) {
 
 // ── Spike-alert state: persist climax matches to climax_active_picks ──
 
-const SPIKE_HOLD_DAYS = 7;          // calendar days ~ 5 trading days
 const SPIKE_THRESHOLD_PCT = 3.0;    // alert khi intraday return ≥ +3% từ open
 const SPIKE_COOLDOWN_MIN = 10;      // tối thiểu 10 min giữa 2 alerts cùng mã
+
+// Pick row phải sống qua phiên resolver chốt sổ (signal + maxHold + 1 phiên):
+// exit alert ghi dấu đã báo vào row này, hết hạn sớm là mất alert timeout. Hạn
+// 15:00 VN của phiên đó để finalize tối hôm ấy dọn luôn.
+function positionExpiresAt(signalDate, maxHold) {
+  return `${addVnTradingDays(signalDate, maxHold + 1)}T08:00:00.000Z`;
+}
 
 // Momentum picks hold ~20-30 phiên với trailing stop. Khác Climax (T+3-5).
 // Dùng cùng table climax_active_picks với tier='Momentum' để portfolio coach
 // detect đúng kế hoạch (target = entry × 1.035, init SL = entry × 0.92).
-const MOMENTUM_HOLD_DAYS = 45;  // 30 phiên ~ 45 calendar days
 const MOMENTUM_AVG_RETURN_PCT = 3.5;  // backtest avg
 // Exit params dùng cho trade_log — khớp với con số digest nói với user (T+20, trail 7%)
 const MOMENTUM_MAX_HOLD_TRADING = 20;
@@ -3111,8 +3117,8 @@ const MOMENTUM_INIT_SL_PCT = 8;
 async function persistMomentumMatches(env, matches, ctx = null) {
   if (!matches || matches.length === 0) return;
   const sb = sbClient(env);
-  const expiresAt = new Date(Date.now() + MOMENTUM_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
   const today = lastVnTradingDay();
+  const expiresAt = positionExpiresAt(today, MOMENTUM_MAX_HOLD_TRADING);
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3139,8 +3145,8 @@ async function persistFBOMatches(env, matches, ctx = null) {
     return;
   }
   const sb = sbClient(env);
-  const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
   const today = lastVnTradingDay();
+  const expiresAt = positionExpiresAt(today, CLASSICAL_EXIT.maxHold);
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3178,7 +3184,7 @@ async function persistFBOMatches(env, matches, ctx = null) {
 
 // ── Mid-term (Base Breakout) persist ──────────────────────────
 // Bảng riêng mid_term_active_picks (sql/007). Khác Climax (hold T+5) — mid-term
-// hold T+30 trading (~42 calendar), trail 10%, init SL -10%.
+// hold T+30 trading, trail 10%, init SL -10%.
 // Backtest Phase 1: Test 2025-26 Sharpe +1.13, PF 2.82, avg +6.95%.
 async function persistMidTermMatches(env, matches) {
   const sb = sbClient(env);
@@ -3191,10 +3197,8 @@ async function persistMidTermMatches(env, matches) {
     return;
   }
 
-  const expiresAt = new Date(
-    Date.now() + BASE_BREAKOUT_HOLD_CAL_DAYS * 24 * 3600 * 1000
-  ).toISOString();
   const today = lastVnTradingDay();
+  const expiresAt = positionExpiresAt(today, BASE_BREAKOUT_MAX_HOLD_TRADING);
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3228,8 +3232,8 @@ async function persistClimaxMatches(env, matches, ctx = null) {
     return;
   }
 
-  const expiresAt = new Date(Date.now() + SPIKE_HOLD_DAYS * 24 * 3600 * 1000).toISOString();
   const today = lastVnTradingDay();
+  const expiresAt = positionExpiresAt(today, CLASSICAL_EXIT.maxHold);
   const rows = matches.map((m) => ({
     symbol: m.symbol,
     signal_date: today,
@@ -3389,10 +3393,23 @@ async function logMidTermInitialTrades(env, matches, signalDate) {
   console.log(`[trade-log midterm] ${ok ? "✓" : "✗"} ${rows.length} logged`);
 }
 
+// Luật thoát dùng chung cho resolver (chấm sổ) và exit alert (báo trong phiên) —
+// lệch nhau là alert hô bán ở chỗ sổ không chốt.
+const CLASSICAL_EXIT = { slPct: 8, tpPct: 3, tpFromDay: 3, maxHold: 5 };
+
+function isTrailingTier(tier) {
+  return tier === "MidTerm" || tier === "Momentum";
+}
+
+function trailingExitParams(t) {
+  return { initSlPct: t.init_sl_pct || 10, trailPct: t.trail_pct || 10, maxHold: t.max_hold_days || 30 };
+}
+
+function exitMaxHold(t) {
+  return isTrailingTier(t.tier) ? trailingExitParams(t).maxHold : CLASSICAL_EXIT.maxHold;
+}
+
 async function resolveExpiredPicks(env) {
-  // 2 tier groups:
-  //   Climax/Trend/Momentum: T+5 hold, target +3% / SL -8% / force exit T+5
-  //   MidTerm: T+30 trading hold, trail 10% từ peak / init SL -10% / force exit T+30
   await resolveClassicalPicks(env);
   await resolveMidTermPicksResolver(env);
 }
@@ -3426,7 +3443,7 @@ async function markUnresolvable(sb, trade, why) {
   console.warn(`[resolve] give up ${trade.symbol} ${trade.signal_date} (${ageDays.toFixed(0)}d): ${why}`);
 }
 
-// Classical picks (Climax/Trend/Momentum) — T+5 hold, target/SL fix
+// Classical picks (Climax/FBO) — T+5 hold, target/SL fix
 async function resolveClassicalPicks(env) {
   const sb = sbClient(env);
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
@@ -3451,21 +3468,22 @@ async function resolveClassicalPicks(env) {
       const times = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
       const sigIdx = times.indexOf(t.signal_date);
       if (sigIdx < 0) { await markUnresolvable(sb, t, "signal_date không có bar"); continue; }
-      if (sigIdx + 6 >= times.length) { await markUnresolvable(sb, t, "thiếu bar sau signal"); continue; }
+      const { slPct, tpPct, tpFromDay, maxHold } = CLASSICAL_EXIT;
+      if (sigIdx + maxHold + 1 >= times.length) { await markUnresolvable(sb, t, "thiếu bar sau signal"); continue; }
 
       const entryPrice = data.o[sigIdx + 1];
       if (!entryPrice || entryPrice <= 0) { await markUnresolvable(sb, t, "entry price rỗng"); continue; }
-      const slPrice = entryPrice * 0.92;
-      const targetPrice = entryPrice * 1.03;
+      const slPrice = entryPrice * (1 - slPct / 100);
+      const targetPrice = entryPrice * (1 + tpPct / 100);
 
       let exitPrice = null, exitDay = null, exitReason = null;
-      for (let h = 1; h <= 5; h++) {
+      for (let h = 1; h <= maxHold; h++) {
         const idx = sigIdx + 1 + h;
         if (idx >= data.c.length) break;
         const cl = data.c[idx];
         if (cl <= slPrice) { exitPrice = cl; exitDay = h; exitReason = "sl"; break; }
-        if (h >= 3 && cl >= targetPrice) { exitPrice = cl; exitDay = h; exitReason = "target"; break; }
-        if (h === 5) { exitPrice = cl; exitDay = h; exitReason = "force"; }
+        if (h >= tpFromDay && cl >= targetPrice) { exitPrice = cl; exitDay = h; exitReason = "target"; break; }
+        if (h === maxHold) { exitPrice = cl; exitDay = h; exitReason = "force"; }
       }
       if (exitPrice === null) { await markUnresolvable(sb, t, "không tìm được exit"); continue; }
       const netRet = (exitPrice - entryPrice) / entryPrice - 0.004;
@@ -3518,12 +3536,10 @@ async function resolveMidTermPicksResolver(env) {
 
       const entryPrice = data.o[sigIdx + 1];
       if (!entryPrice || entryPrice <= 0) { await markUnresolvable(sb, t, "entry price rỗng"); continue; }
-      const initSlPct = (t.init_sl_pct || 10) / 100;
-      const trailPct = (t.trail_pct || 10) / 100;
-      const maxHold = t.max_hold_days || 30;
+      const { initSlPct, trailPct, maxHold } = trailingExitParams(t);
       // Cần đủ bar tới hết hold window (Momentum 20 phiên, MidTerm 30)
       if (sigIdx + maxHold + 1 >= times.length) { await markUnresolvable(sb, t, "thiếu bar sau signal"); continue; }
-      const initSl = entryPrice * (1 - initSlPct);
+      const initSl = entryPrice * (1 - initSlPct / 100);
 
       let peak = entryPrice;
       let exitPrice = null, exitDay = null, exitReason = null;
@@ -3533,7 +3549,7 @@ async function resolveMidTermPicksResolver(env) {
         const cl = data.c[idx];
         const hi = data.h[idx];
         if (hi && hi > peak) peak = hi;
-        const trailSl = peak * (1 - trailPct);
+        const trailSl = peak * (1 - trailPct / 100);
         const effSl = Math.max(initSl, trailSl);
         if (cl <= effSl) {
           exitPrice = cl; exitDay = h;
@@ -3562,39 +3578,47 @@ async function resolveMidTermPicksResolver(env) {
   console.log(`[resolve midterm] ${resolved}/${pending.length}`);
 }
 
+// Peak tính lại trọn cửa sổ mỗi lần chạy thay vì cộng dồn: pick row bị upsert đè
+// khi mã bắn lại, còn job lỡ chết vài hôm thì lần chạy sau tự bù. Cửa sổ bắt đầu
+// từ phiên sau phiên mua, giống peak của resolver.
 async function updatePeakPrices(env) {
-  // Update peak_price cho cả climax + mid_term active picks. Used by trailing
-  // stop check trong checkExitAlerts (peak từ entry day → now).
   const sb = sbClient(env);
-  for (const table of ["climax_active_picks", "mid_term_active_picks"]) {
-    await updatePeakForTable(env, sb, table);
-  }
-}
-
-async function updatePeakForTable(env, sb, table) {
-  const picks = await sbQuery(sb, table, {
-    select: "id,symbol,entry_price,peak_price,signal_date",
-  });
-  if (!picks || picks.length === 0) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = vnDateString();
+  const [positions, climaxPicks, midTermPicks] = await Promise.all([
+    loadOpenPositions(sb),
+    sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price,peak_date" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price,peak_date" }),
+  ]);
+  const picksByTable = {
+    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p])),
+    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p])),
+  };
   let updated = 0;
-  for (const p of picks) {
-    if (p.signal_date >= today) continue;  // chưa entry, không có peak
+  for (const t of positions) {
+    const table = pickTableFor(t.tier);
+    const pick = picksByTable[table].get(t.symbol);
+    const firstSession = addVnTradingDays(t.signal_date, 2);
+    if (!pick || firstSession > today) continue;
     try {
-      const data = await fetchVndHistory(p.symbol, 3);
-      const curHigh = Math.max(...(data.highs || []));
-      if (!curHigh) continue;
-      const newPeak = Math.max(p.peak_price || 0, curHigh);
-      if (newPeak > (p.peak_price || 0)) {
-        await sbUpdate(sb, table, {
-          eq: { id: p.id },
-          data: { peak_price: newPeak, peak_date: today },
-        });
-        updated++;
-      }
-    } catch {}
+      const calDays = Math.ceil((Date.now() - Date.parse(`${t.signal_date}T00:00:00Z`)) / 86400000) + 3;
+      const bars = await fetchVndHistory(t.symbol, calDays);
+      let peak = 0, peakDate = null;
+      bars.times.forEach((s, i) => {
+        const d = new Date(s * 1000).toISOString().slice(0, 10);
+        if (d >= firstSession && bars.highs[i] > peak) { peak = bars.highs[i]; peakDate = d; }
+      });
+      if (!peakDate) continue;
+      if (parseFloat(pick.peak_price) === peak && pick.peak_date === peakDate) continue;
+      await sbUpdate(sb, table, {
+        eq: { symbol: t.symbol },
+        data: { peak_price: peak, peak_date: peakDate },
+      });
+      updated++;
+    } catch (e) {
+      console.warn(`[peak] ${t.symbol} fail:`, e.message);
+    }
   }
-  console.log(`[peak ${table}] updated ${updated}/${picks.length}`);
+  console.log(`[peak] updated ${updated}/${positions.length}`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
@@ -4073,28 +4097,9 @@ async function checkPreSignalAlerts(env) {
 }
 
 // ── Auto-exit alert: discipline enforcer ──────────────────────────────
-// Per-tier config:
-//   Climax (climax_active_picks):   SL -8%,  Trail -6%,  Timeout T+10 calendar
-//   Mid-term (mid_term_active_picks): SL -10%, Trail -10%, Timeout T+42 calendar
-//                                     (~30 trading days, backtest verified)
-// Mỗi pick chỉ alert 1 lần (dedupe qua exit_alerted_at).
-const EXIT_CONFIG = {
-  climax: {
-    table: "climax_active_picks",
-    label: "Climax",
-    sl_pct: -8,
-    trail_pct: -6,
-    timeout_days: 10,
-  },
-  mid_term: {
-    table: "mid_term_active_picks",
-    label: "Mid-term",
-    sl_pct: -10,
-    trail_pct: -10,
-    timeout_days: 42,
-  },
-};
-
+// Vị thế lấy từ trade_log (đúng row resolver sẽ chấm), không lấy từ bảng pick:
+// pick bị upsert đè signal_date/tier mỗi lần mã bắn lại, còn trade_log giữ vị
+// thế gốc. Bảng pick chỉ còn vai trò chứa peak_price + dấu đã báo.
 async function checkExitAlerts(env) {
   const sb = sbClient(env);
   const users = await sbQuery(sb, "user_telegram", { select: "chat_id" });
@@ -4103,60 +4108,47 @@ async function checkExitAlerts(env) {
     console.log("[exit-alert] no Telegram users linked");
     return;
   }
-  // Check each tier table với config riêng
-  for (const cfg of Object.values(EXIT_CONFIG)) {
-    await checkExitAlertsForTable(env, sb, cfg, chats);
+
+  const today = vnDateString();
+  // held = số phiên sau phiên mua, cùng nghĩa exit_day của resolver. Phiên mua
+  // resolver chưa xét thoát nên alert bỏ qua. Quá maxHold là sổ đã chốt theo luật,
+  // row chỉ còn chờ cron resolver ghi — báo lúc đó là báo trễ.
+  const positions = (await loadOpenPositions(sb))
+    .map((t) => ({ ...t, held: vnTradingDaysBetween(t.signal_date, today) - 1 }))
+    .filter((t) => t.held >= 1 && t.held <= exitMaxHold(t));
+  if (!positions.length) return;
+
+  const [climaxPicks, midTermPicks] = await Promise.all([
+    sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price,exit_alerted_at" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price,exit_alerted_at" }),
+  ]);
+  const picksByTable = {
+    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p])),
+    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p])),
+  };
+
+  const candidates = [];
+  for (const t of positions) {
+    const pick = picksByTable[pickTableFor(t.tier)].get(t.symbol);
+    // Không có row thì không có chỗ ghi dấu đã báo → sẽ bắn lại mỗi 3 phút.
+    if (!pick) continue;
+    // Upsert pick không đụng exit_alerted_at, nên dấu của vị thế cũ cùng mã còn
+    // nằm lại — dấu trước signal_date không phải của vị thế này.
+    if (pick.exit_alerted_at && pick.exit_alerted_at.slice(0, 10) >= t.signal_date) continue;
+    candidates.push({ t, pick });
   }
-}
+  if (!candidates.length) return;
+  console.log(`[exit-alert] checking ${candidates.length}/${positions.length} positions`);
 
-async function checkExitAlertsForTable(env, sb, cfg, chats) {
-  const selectCols = cfg.table === "mid_term_active_picks"
-    ? "id,symbol,entry_price,signal_date,peak_price,pattern_type,exit_alerted_at,expires_at"
-    : "id,symbol,entry_price,signal_date,peak_price,tier,exit_alerted_at,expires_at";
-  const picks = await sbQuery(sb, cfg.table, { select: selectCols });
-  if (!picks?.length) return;
-
-  // Pick hết hạn nằm lại tới lần EOD cleanup kế tiếp — không lọc thì nó vẫn kịp
-  // nhả 1 tin exit (exit_alerted_at chỉ chặn lần thứ hai).
-  const candidates = picks.filter(
-    (p) => !p.exit_alerted_at && (!p.expires_at || new Date(p.expires_at) > new Date())
-  );
-  if (!candidates.length) {
-    console.log(`[exit-alert ${cfg.label}] all alerted, skip`);
-    return;
-  }
-  console.log(`[exit-alert ${cfg.label}] checking ${candidates.length} candidates`);
-
-  const todayDt = new Date();
-
-  const results = await Promise.all(candidates.map(async (p) => {
+  const results = await Promise.all(candidates.map(async ({ t, pick }) => {
     try {
-      const bars = await fetchVndIntraday(p.symbol);
-      const n = bars.closes.length;
-      if (n === 0) return null;
-      const cur = bars.closes[n - 1];
-      const signalDt = new Date(p.signal_date);
-      const daysHeld = Math.floor((todayDt - signalDt) / (24 * 3600 * 1000));
-      const entryPrice = parseFloat(p.entry_price);
-      const peakPrice = parseFloat(p.peak_price || 0);
-      const entryRet = ((cur - entryPrice) / entryPrice) * 100;
-
-      // Priority: SL > trail > timeout
-      if (entryRet <= cfg.sl_pct) {
-        return { pick: p, reason: "sl_hit", cur, daysHeld, entryRet, trailRet: null };
-      }
-      if (peakPrice > entryPrice) {
-        const trailRet = ((cur - peakPrice) / peakPrice) * 100;
-        if (trailRet <= cfg.trail_pct) {
-          return { pick: p, reason: "trail_hit", cur, daysHeld, entryRet, trailRet };
-        }
-      }
-      if (daysHeld >= cfg.timeout_days) {
-        return { pick: p, reason: "timeout", cur, daysHeld, entryRet, trailRet: null };
-      }
-      return null;
+      const bars = await fetchVndIntraday(t.symbol);
+      const cur = bars.closes[bars.closes.length - 1];
+      const peak = Math.max(parseFloat(pick.peak_price) || 0, ...bars.highs);
+      const hit = evaluateExit(t, cur, peak);
+      return hit ? { t, cur, ...hit } : null;
     } catch (e) {
-      console.warn(`[exit-alert ${cfg.label}] ${p.symbol} fail:`, e.message);
+      console.warn(`[exit-alert] ${t.symbol} fail:`, e.message);
       return null;
     }
   }));
@@ -4164,16 +4156,16 @@ async function checkExitAlertsForTable(env, sb, cfg, chats) {
   let alerted = 0;
   for (const r of results) {
     if (!r) continue;
-    const msg = buildExitAlertMessage(r.pick, r, cfg);
+    const msg = buildExitAlertMessage(r);
     for (const chatId of chats) {
       try {
         await tgSendMessage(env.BOT_TOKEN, chatId, msg);
       } catch (e) {
-        console.warn(`[exit-alert ${cfg.label}] tg send fail chat=${chatId}:`, e.message);
+        console.warn(`[exit-alert] tg send fail chat=${chatId}:`, e.message);
       }
     }
-    await sbUpdate(sb, cfg.table, {
-      eq: { id: r.pick.id },
+    await sbUpdate(sb, pickTableFor(r.t.tier), {
+      eq: { symbol: r.t.symbol },
       data: {
         exit_alerted_at: new Date().toISOString(),
         exit_alert_reason: r.reason,
@@ -4181,52 +4173,96 @@ async function checkExitAlertsForTable(env, sb, cfg, chats) {
     });
     alerted++;
   }
-  console.log(`[exit-alert ${cfg.label}] sent ${alerted} alerts`);
+  console.log(`[exit-alert] sent ${alerted} alerts`);
 }
 
-function buildExitAlertMessage(pick, r, cfg) {
-  const sym = pick.symbol;
-  const tierLabel = cfg ? cfg.label : (pick.tier || "?");
-  const entryFmt = parseFloat(pick.entry_price).toFixed(2);
-  const curFmt = r.cur.toFixed(2);
-  const entryRetSign = r.entryRet >= 0 ? "+" : "";
-  const entryRetFmt = `${entryRetSign}${r.entryRet.toFixed(1)}`;
-  const slRule = cfg ? cfg.sl_pct : -8;
-  const trailRule = cfg ? cfg.trail_pct : -6;
-  const timeoutRule = cfg ? cfg.timeout_days : 10;
+async function loadOpenPositions(sb) {
+  const r = await fetch(
+    `${sb.url}/rest/v1/trade_log?select=symbol,signal_date,tier,entry_price,max_hold_days,trail_pct,init_sl_pct&resolved_at=is.null`,
+    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
+  );
+  if (!r.ok) {
+    console.warn("[open-positions] fetch fail", r.status);
+    return [];
+  }
+  return r.json();
+}
+
+function pickTableFor(tier) {
+  return tier === "MidTerm" ? "mid_term_active_picks" : "climax_active_picks";
+}
+
+// Luật của resolver áp lên giá trong phiên. Resolver chấm theo giá đóng cửa nên
+// alert chỉ là cảnh báo sớm. Entry là close ngày signal chứ không phải open phiên
+// mua như resolver: lấy open cần thêm 1 subrequest/mã ở mỗi lượt cron 3 phút.
+function evaluateExit(t, cur, peak) {
+  const entry = parseFloat(t.entry_price);
+  if (!(entry > 0) || !(cur > 0)) return null;
+  const ret = ((cur - entry) / entry) * 100;
+
+  if (isTrailingTier(t.tier)) {
+    const { initSlPct, trailPct, maxHold } = trailingExitParams(t);
+    const top = Math.max(entry, peak || 0);
+    const initSl = entry * (1 - initSlPct / 100);
+    const trailSl = top * (1 - trailPct / 100);
+    const stop = Math.max(initSl, trailSl);
+    if (cur <= stop) {
+      return stop === initSl
+        ? { reason: "sl_hit", ret, stop, rulePct: initSlPct, held: t.held, maxHold }
+        : { reason: "trail_hit", ret, stop, top, rulePct: trailPct, held: t.held, maxHold };
+    }
+    if (t.held >= maxHold) return { reason: "timeout", ret, held: t.held, maxHold };
+    return null;
+  }
+
+  const { slPct, tpPct, tpFromDay, maxHold } = CLASSICAL_EXIT;
+  const slPrice = entry * (1 - slPct / 100);
+  const targetPrice = entry * (1 + tpPct / 100);
+  if (cur <= slPrice) {
+    return { reason: "sl_hit", ret, stop: slPrice, rulePct: slPct, held: t.held, maxHold };
+  }
+  if (t.held >= tpFromDay && cur >= targetPrice) {
+    return { reason: "target_hit", ret, target: targetPrice, held: t.held, maxHold };
+  }
+  if (t.held >= maxHold) return { reason: "timeout", ret, held: t.held, maxHold };
+  return null;
+}
+
+function buildExitAlertMessage(r) {
+  const { t } = r;
+  const px = (v) => v.toFixed(2);
+  const retFmt = `${r.ret >= 0 ? "+" : ""}${r.ret.toFixed(1)}%`;
   const timeStr = new Date().toLocaleTimeString("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
   });
+  const head = (icon) => `${icon} *EXIT ALERT — ${t.symbol}* (${t.tier})\n\n`;
+  const position =
+    `• Signal ${fmtVnDM(t.signal_date)} @${px(parseFloat(t.entry_price))} → hiện *${px(r.cur)}* (${retFmt})\n` +
+    `• Đã giữ ${r.held}/${r.maxHold} phiên\n\n`;
+  const tail = `_Sổ theo dõi chốt theo giá đóng cửa — giá trong phiên còn chạy._\n⏰ ${timeStr} VN`;
 
   if (r.reason === "sl_hit") {
-    return `⛔ *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
-           `📉 Hit Stop Loss *${entryRetFmt}%* (rule: ≤ ${slRule}%)\n` +
-           `• Entry: ${entryFmt} → Hiện: *${curFmt}*\n` +
-           `• Đã hold: ${r.daysHeld} ngày\n\n` +
-           `*👉 Cân nhắc BÁN ngay để cắt lỗ.*\n` +
-           `_Rule SL ${slRule}%: chấp nhận lỗ nhỏ, tránh hold mã thua quá lâu._\n` +
-           `⏰ ${timeStr} VN`;
+    return head("⛔") +
+      `📉 Thủng stop lỗ *${px(r.stop)}* (−${r.rulePct}% so giá signal)\n` + position +
+      `*👉 Cân nhắc BÁN để cắt lỗ.*\n` + tail;
   }
   if (r.reason === "trail_hit") {
-    const trailFmt = r.trailRet.toFixed(1);
-    const peakFmt = parseFloat(pick.peak_price).toFixed(2);
-    return `📉 *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
-           `📊 Trailing stop: rớt *${trailFmt}%* từ peak (rule: ≤ ${trailRule}%)\n` +
-           `• Peak: ${peakFmt} → Hiện: *${curFmt}* (${entryRetFmt}% so entry)\n` +
-           `• Entry: ${entryFmt} · Đã hold: ${r.daysHeld} ngày\n\n` +
-           `*👉 Cân nhắc CHỐT lời — đã giảm hơn ${Math.abs(trailRule)}% từ đỉnh.*\n` +
-           `_Rule trailing ${Math.abs(trailRule)}%: khoá lãi, không để lãi thành lỗ._\n` +
-           `⏰ ${timeStr} VN`;
+    const dropPct = ((r.top - r.cur) / r.top) * 100;
+    return head("📉") +
+      `📊 Rớt *${dropPct.toFixed(1)}%* từ đỉnh ${px(r.top)} — thủng trailing stop *${px(r.stop)}* (−${r.rulePct}% từ đỉnh)\n` + position +
+      `*👉 Cân nhắc BÁN — kế hoạch thoát ở đây.*\n` + tail;
+  }
+  if (r.reason === "target_hit") {
+    return head("🎯") +
+      `✅ Chạm mục tiêu *${px(r.target)}* (+${CLASSICAL_EXIT.tpPct}%)\n` + position +
+      `*👉 Cân nhắc CHỐT lời theo plan.*\n` + tail;
   }
   if (r.reason === "timeout") {
-    return `⏰ *EXIT ALERT — ${sym}* (${tierLabel})\n\n` +
-           `📅 Đã hold *T+${r.daysHeld}* (rule timeout: T+${timeoutRule})\n` +
-           `• Entry: ${entryFmt} → Hiện: *${curFmt}* (${entryRetFmt}%)\n\n` +
-           `*👉 Cân nhắc BÁN theo plan — pattern hết shelf-life.*\n` +
-           `_Rule T+${timeoutRule}: pattern không nên hold quá ngưỡng đã verify._\n` +
-           `⏰ ${timeStr} VN`;
+    return head("⏰") +
+      `📅 Hết ${r.maxHold} phiên giữ theo plan\n` + position +
+      `*👉 Cân nhắc BÁN trong phiên hôm nay.*\n` + tail;
   }
-  return `⚠️ *${sym}* — Exit reason không xác định: ${r.reason}`;
+  return `⚠️ *${t.symbol}* — Exit reason không xác định: ${r.reason}`;
 }
 
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
