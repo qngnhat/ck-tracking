@@ -117,6 +117,17 @@ function lastVnTradingDay(d = new Date()) {
   return s;
 }
 
+// Phiên giao dịch liền trước `dateStr` (không tính chính nó).
+function prevVnTradingDay(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  for (let i = 0; i < 15; i++) {
+    d.setUTCDate(d.getUTCDate() - 1);
+    const s = d.toISOString().slice(0, 10);
+    if (isVnTradingDay(s)) return s;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 // Cộng n phiên giao dịch (bỏ T7/CN + lễ). In/out đều "YYYY-MM-DD".
 function addVnTradingDays(dateStr, n) {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -933,6 +944,7 @@ export default {
       }
       console.log("[cron-morning] fired at", new Date().toISOString());
       ctx.waitUntil(logHeartbeat(env, "morning", { event_cron: cron }));
+      ctx.waitUntil(sendEntryReminder(env));
       ctx.waitUntil(sendMorningBriefing(env));
       return;
     }
@@ -1202,6 +1214,7 @@ async function handleTelegramWebhook(request, env, ctx) {
   // chat của người gõ để không spam user khác.
   if (text === "/morning" || text === "/mn") {
     await tgSendMessage(env.BOT_TOKEN, chatId, "☀️ Đang dựng briefing sáng...");
+    await sendEntryReminder(env, chatId);
     await sendMorningBriefing(env, chatId);
     return new Response("ok");
   }
@@ -1972,7 +1985,7 @@ async function buildSignalsMessage(env) {
   const inLog = new Set(openFromLog.map((t) => `${t.symbol}|${t.signal_date}`));
   const extraPicks = [
     ...(climaxPicks || []).filter(stillActive).map((p) => ({
-      ...p, max_hold_days: p.tier === "Momentum" ? 30 : 5,
+      ...p, max_hold_days: pickMaxHold(p),
     })),
     ...(midtermPicks || []).filter(stillActive).map((p) => ({
       ...p, tier: "MidTerm", max_hold_days: p.max_hold_days || 30,
@@ -3090,6 +3103,12 @@ async function finalizeScan(env, state) {
   } catch (e) {
     console.warn("[finalize] sendDigest fail:", e.message);
   }
+  // Tách khỏi digest: digest kể bối cảnh, tin này chỉ có việc phải làm phiên tới.
+  try {
+    await sendEntryPlan(env);
+  } catch (e) {
+    console.warn("[finalize] sendEntryPlan fail:", e.message);
+  }
   console.log(`[finalize] done — ${matches.length} climax, ${momentumMatches.length} momentum, ${baseBreakoutMatches.length} base_breakout, ${fboMatches.length} fbo`);
 }
 
@@ -3409,6 +3428,14 @@ function exitMaxHold(t) {
   return isTrailingTier(t.tier) ? trailingExitParams(t).maxHold : CLASSICAL_EXIT.maxHold;
 }
 
+// Pick row khác trade_log row: climax_active_picks không có cột max_hold_days
+// nên Momentum ở đó phải tra hằng số, không lấy default của trailingExitParams.
+function pickMaxHold(p) {
+  if (p.tier === "MidTerm") return p.max_hold_days || BASE_BREAKOUT_MAX_HOLD_TRADING;
+  if (p.tier === "Momentum") return MOMENTUM_MAX_HOLD_TRADING;
+  return CLASSICAL_EXIT.maxHold;
+}
+
 async function resolveExpiredPicks(env) {
   await resolveClassicalPicks(env);
   await resolveMidTermPicksResolver(env);
@@ -3710,7 +3737,7 @@ async function loadHoldingsIndex(sb) {
       eq: { status: "open" },
     }),
     sbQuery(sb, "transactions", { select: "symbol,side,quantity,price,fee,trade_date" }),
-    sbQuery(sb, "holdings", { select: "symbol,avg_cost,qty,first_buy_date" }),
+    sbQuery(sb, "holdings", { select: "symbol,avg_cost,qty,first_buy_date,updated_at" }),
   ]);
 
   const agg = new Map();
@@ -3770,9 +3797,13 @@ async function loadHoldingsIndex(sb) {
   // `holdings` do menubar đẩy nguyên snapshot mỗi lần sửa, và nó là writer duy
   // nhất → có row nghĩa là danh mục thật nằm ở đó, transactions chỉ còn là
   // lịch sử cũ của PWA. Thay hẳn chứ không trộn: trộn là hồi sinh mã đã bán.
+  let portfolioUpdatedAt = null;
   if (snap && snap.length > 0) {
     portfolio.clear();
     for (const h of snap) {
+      if (h.updated_at && (!portfolioUpdatedAt || h.updated_at > portfolioUpdatedAt)) {
+        portfolioUpdatedAt = h.updated_at;
+      }
       const qty = Number(h.qty) || 0;
       const avgCost = Number(h.avg_cost) || 0;
       if (qty > 1e-9 && avgCost > 0) {
@@ -3788,6 +3819,7 @@ async function loadHoldingsIndex(sb) {
       return paper.get(`${chatId}|${symbol}`) || portfolio.get(symbol) || null;
     },
     portfolio,
+    portfolioUpdatedAt,
     paperCountFor(chatId) {
       let n = 0;
       for (const key of paper.keys()) if (key.startsWith(`${chatId}|`)) n++;
@@ -4178,7 +4210,7 @@ async function checkExitAlerts(env) {
 
 async function loadOpenPositions(sb) {
   const r = await fetch(
-    `${sb.url}/rest/v1/trade_log?select=symbol,signal_date,tier,entry_price,max_hold_days,trail_pct,init_sl_pct&resolved_at=is.null`,
+    `${sb.url}/rest/v1/trade_log?select=symbol,signal_date,tier,entry_price,sl_price,target_price,max_hold_days,trail_pct,init_sl_pct&resolved_at=is.null`,
     { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
   );
   if (!r.ok) {
@@ -4263,6 +4295,158 @@ function buildExitAlertMessage(r) {
       `*👉 Cân nhắc BÁN trong phiên hôm nay.*\n` + tail;
   }
   return `⚠️ *${t.symbol}* — Exit reason không xác định: ${r.reason}`;
+}
+
+// ── Entry alert: nhắc vào lệnh đúng phiên sổ bot tính giá vào ─────────
+// Sổ bot vào bằng giá MỞ CỬA phiên kế tiếp phiên signal, nên tin phải tới
+// trước 9:00 mới đặt được ATO. Hai nhịp: ngay sau scan (biết trước để chuẩn bị)
+// và 8:30 hôm sau (chỉ mã chưa thấy trong danh mục thật). Hết phiên vào lệnh là
+// thôi nhắc — mua trễ thì kết quả thật lệch hẳn con số bot báo trong /stats.
+
+// Lấy đúng mức size digest đang nói, không tự chế con số mới.
+const TIER_SIZE_HINT = {
+  Premium: "size 20% NAV", Elite: "size 18% NAV", A: "size 15% NAV", B: "size 10% NAV",
+  Momentum: "size 12% NAV", MidTerm: "size 10M/lệnh", FBO: "size nhỏ hơn Climax",
+};
+const ENTRY_MAX_PREMIUM_PCT = 2;    // digest vẫn nói MUA ≤ giá signal +2%
+const ENTRY_ALERT_MAX_SYMBOLS = 8;  // mỗi tin 1 subrequest/chat — chặn trần cho chắc
+
+// trade_log mới là thứ quyết định bot có vào lệnh hay không: mã đang mở bị
+// dropSymbolsAlreadyOpen loại nên có pick row mà không có vị thế mới.
+async function loadEntryPlan(sb, signalDate) {
+  const positions = (await loadOpenPositions(sb)).filter((t) => t.signal_date === signalDate);
+  if (!positions.length) return [];
+
+  const [climaxPicks, midTermPicks] = await Promise.all([
+    sbQuery(sb, "climax_active_picks", { select: "symbol,entry_alerted_at" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,entry_alerted_at" }),
+  ]);
+  const picksByTable = {
+    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p])),
+    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p])),
+  };
+
+  return positions.map((t) => ({
+    t,
+    pick: picksByTable[pickTableFor(t.tier)].get(t.symbol) || null,
+    entry: parseFloat(t.entry_price),
+    sl: parseFloat(t.sl_price),
+    target: parseFloat(t.target_price),
+    maxHold: exitMaxHold(t),
+  }));
+}
+
+function entryPlanLine(item) {
+  const { t } = item;
+  const px = (v) => v.toFixed(2);
+  const icon = TIER_ICONS[t.tier] || "•";
+  const entryMax = item.entry * (1 + ENTRY_MAX_PREMIUM_PCT / 100);
+  const size = TIER_SIZE_HINT[t.tier] ? ` · ${TIER_SIZE_HINT[t.tier]}` : "";
+  const plan = isTrailingTier(t.tier)
+    ? `giữ tối đa ${item.maxHold} phiên · trail ${trailingExitParams(t).trailPct}% từ đỉnh`
+    : `CHỐT ≥ ${px(item.target)} (T+${CLASSICAL_EXIT.tpFromDay}→T+${item.maxHold})`;
+  return `${icon} *${t.symbol}* (${t.tier}) @ ${px(item.entry)}\n` +
+    `   MUA ≤ ${px(entryMax)} · CẮT < ${px(item.sl)} · ${plan}${size}\n`;
+}
+
+function entryPlanBody(items) {
+  let text = "";
+  for (const item of items.slice(0, ENTRY_ALERT_MAX_SYMBOLS)) text += entryPlanLine(item);
+  if (items.length > ENTRY_ALERT_MAX_SYMBOLS) {
+    text += `\n_+${items.length - ENTRY_ALERT_MAX_SYMBOLS} mã nữa — xem digest EOD._\n`;
+  }
+  return text;
+}
+
+function fmtVnDateTime(iso) {
+  const vn = vnNow(new Date(iso));
+  const hh = String(vn.getHours()).padStart(2, "0");
+  const mm = String(vn.getMinutes()).padStart(2, "0");
+  return `${fmtVnDM(vnDateString(new Date(iso)))} ${hh}:${mm}`;
+}
+
+function holdingsFreshnessNote(holdings) {
+  if (!holdings.portfolioUpdatedAt) {
+    return `📒 Chưa có danh mục menubar nào đẩy lên — bot đang coi như mày chưa cầm mã nào.`;
+  }
+  return `📒 Danh mục menubar cập nhật ${fmtVnDateTime(holdings.portfolioUpdatedAt)} — mua rồi thì sync lại cho bot khỏi nhắc thừa.`;
+}
+
+// Nhịp 1 — ngay sau scan EOD, tách khỏi digest dài để không phải cuộn tìm giá mua.
+async function sendEntryPlan(env) {
+  const sb = sbClient(env);
+  const signalDate = lastVnTradingDay();
+  const items = await loadEntryPlan(sb, signalDate);
+  if (!items.length) return;
+
+  const chats = await resolveBroadcastChats(env, null);
+  if (!chats.length) return;
+
+  const entrySession = addVnTradingDays(signalDate, 1);
+  let text = `🟢 *VÀO LỆNH PHIÊN ${fmtVnDM(entrySession)}* — ${items.length} mã\n\n`;
+  text += `_Sổ bot tính giá vào bằng giá mở cửa phiên đó: đặt ATO hoặc mua đầu phiên, đừng đuổi giá._\n\n`;
+  text += entryPlanBody(items);
+  text += `\n⏰ 8:30 mai bot nhắc lại mã nào chưa thấy trong danh mục.`;
+
+  let sent = 0;
+  for (const chatId of chats) {
+    try {
+      const resp = await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      if (resp?.ok) sent++;
+    } catch (e) {
+      console.warn(`[entry-plan] send fail ${chatId}:`, e.message);
+    }
+  }
+  console.log(`[entry-plan] ${items.length} symbols → ${sent}/${chats.length} chats`);
+}
+
+// Nhịp 2 — 8:30 phiên vào lệnh, chỉ những mã sổ thật chưa có. Im khi đã mua đủ.
+async function sendEntryReminder(env, onlyChatId = null) {
+  const sb = sbClient(env);
+  const today = vnDateString();
+  if (!isVnTradingDay(today)) return;
+
+  const signalDate = prevVnTradingDay(today);
+  const items = await loadEntryPlan(sb, signalDate);
+  if (!items.length) return;
+
+  const chats = await resolveBroadcastChats(env, onlyChatId);
+  if (!chats.length) return;
+  const holdings = await loadHoldingsIndex(sb);
+
+  const alerted = new Set();
+  for (const chatId of chats) {
+    // Dấu đã nhắc nằm trên pick row (khoá theo mã) nên nó chung cho mọi chat.
+    // Gọi tay từ /briefing thì bỏ qua dấu — user hỏi lại thì phải trả lời.
+    const pending = items.filter((item) => {
+      if (holdings.positionFor(chatId, item.t.symbol)) return false;
+      if (onlyChatId) return true;
+      const at = item.pick?.entry_alerted_at;
+      return !(at && at.slice(0, 10) >= signalDate);
+    });
+    if (!pending.length) continue;
+
+    let text = `⏰ *CHƯA VÀO LỆNH — phiên hôm nay ${fmtVnDM(today)}*\n\n`;
+    text += `_Signal ${fmtVnDM(signalDate)}. Sổ bot vào bằng giá mở cửa hôm nay, hết phiên này bot thôi nhắc._\n\n`;
+    text += entryPlanBody(pending);
+    text += `\n${holdingsFreshnessNote(holdings)}`;
+    try {
+      await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      for (const item of pending) alerted.add(item);
+    } catch (e) {
+      console.warn(`[entry-remind] send fail ${chatId}:`, e.message);
+    }
+  }
+
+  if (onlyChatId) return;
+  for (const item of alerted) {
+    if (!item.pick) continue;
+    await sbUpdate(sb, pickTableFor(item.t.tier), {
+      eq: { symbol: item.t.symbol },
+      data: { entry_alerted_at: new Date().toISOString() },
+    });
+  }
+  console.log(`[entry-remind] ${alerted.size}/${items.length} symbols nhắc lại`);
 }
 
 // ── Market Digest: VN-Index + top gainers/losers/vol + Bắt đáy ──
@@ -4411,13 +4595,19 @@ async function sendMorningBriefing(env, onlyChatId = null) {
   );
   const recentTrades = r.ok ? await r.json() : [];
 
-  // 2. Active picks not yet expired
+  // 2. Active picks not yet expired — đọc cả 2 bảng: Trung hạn cũng là lệnh đang
+  // mở, trước đây briefing chỉ đọc bảng T+ nên mã MidTerm không bao giờ hiện ra.
   const todayStr = new Date().toISOString().slice(0, 10);
-  const activePicksRes = await fetch(
-    `${sb.url}/rest/v1/climax_active_picks?select=*&expires_at=gte.${new Date().toISOString()}&order=signal_date.desc&limit=20`,
-    { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } }
-  );
-  const activePicks = activePicksRes.ok ? await activePicksRes.json() : [];
+  const nowIso = new Date().toISOString();
+  const pickHeaders = { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } };
+  const [activePicksRes, midTermPicksRes] = await Promise.all([
+    fetch(`${sb.url}/rest/v1/climax_active_picks?select=*&expires_at=gte.${nowIso}&order=signal_date.desc&limit=20`, pickHeaders),
+    fetch(`${sb.url}/rest/v1/mid_term_active_picks?select=*&expires_at=gte.${nowIso}&order=signal_date.desc&limit=20`, pickHeaders),
+  ]);
+  const activePicks = [
+    ...(activePicksRes.ok ? await activePicksRes.json() : []),
+    ...(midTermPicksRes.ok ? (await midTermPicksRes.json()).map((p) => ({ ...p, tier: "MidTerm" })) : []),
+  ].sort((a, b) => b.signal_date.localeCompare(a.signal_date));
 
   // 3. Drawdown status
   const drawdown = {};
@@ -4464,16 +4654,34 @@ async function sendMorningBriefing(env, onlyChatId = null) {
 
   // Active picks countdown
   if (activePicks.length > 0) {
-    text += `💼 *Active T+ picks* (${activePicks.length} mã):\n`;
-    for (const p of activePicks.slice(0, 5)) {
+    text += `💼 *Lệnh đang mở* (${activePicks.length} mã):\n`;
+    for (const p of activePicks.slice(0, 8)) {
       // Đếm phiên thật (bỏ T7/CN + lễ) thay vì áng chừng daysHeld × 5/7
       const tradingDays = vnTradingDaysBetween(p.signal_date, day.dateStr);
-      const remainingDays = Math.max(0, 5 - tradingDays);
-      const premiumTag = p.is_premium ? "💎 " : "";
+      const maxHold = pickMaxHold(p);
+      const remainingDays = Math.max(0, maxHold - tradingDays);
+      const icon = p.is_premium ? "💎 " : TIER_ICONS[p.tier] ? `${TIER_ICONS[p.tier]} ` : "";
       const peakTag = p.peak_price ? ` · peak ${parseFloat(p.peak_price).toFixed(2)}` : "";
-      text += `  · ${premiumTag}*${p.symbol}* (${p.tier}) — T+${tradingDays}, còn ${remainingDays} phiên${peakTag}\n`;
+      text += `  · ${icon}*${p.symbol}* (${p.tier}) — T+${tradingDays}/${maxHold}, còn ${remainingDays} phiên${peakTag}\n`;
     }
     text += `\n`;
+  }
+
+  // Đối soát sổ bot với danh mục thật. Sổ bot chấm mọi signal, mày chỉ mua một
+  // phần — chỗ lệch này chính là phần hiệu suất thật khác hiệu suất /stats.
+  try {
+    const holdings = await loadHoldingsIndex(sb);
+    const botSyms = [...new Set((await loadOpenPositions(sb)).map((t) => t.symbol))];
+    const mySyms = [...holdings.portfolio.keys()];
+    const missing = botSyms.filter((sym) => !holdings.portfolio.has(sym));
+    const extra = mySyms.filter((sym) => !botSyms.includes(sym));
+    text += `📒 *Đối soát sổ*: bot mở ${botSyms.length} · mày cầm ${mySyms.length}\n`;
+    if (missing.length > 0) text += `  · Bot có, danh mục chưa có: ${missing.join(", ")}\n`;
+    if (extra.length > 0) text += `  · Mày cầm, không phải signal đang mở: ${extra.join(", ")}\n`;
+    if (missing.length === 0 && extra.length === 0) text += `  · Khớp hết.\n`;
+    text += `\n`;
+  } catch (e) {
+    console.warn("[morning] reconcile fail:", e.message);
   }
 
   // Today expectation — ngày nghỉ thì không hứa hẹn scan/alert
@@ -4819,7 +5027,7 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const initSL = m.initSL;
       const breakStr = m.breakStrength ? `${m.breakStrength.toFixed(1)}%` : "?";
       text += `🔍 *${m.symbol}* @ ${cur.toFixed(2)} · break +${breakStr} above prev high · vol ${m.volRatio.toFixed(1)}×\n`;
-      text += `  Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
+      text += `  MUA ${tLabel(1)} ≤ ${(cur * 1.02).toFixed(2)} · Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
     }
     text += `💰 Backtest sizing 10M VND/signal → +29.8%/năm trên 200M vốn.\n`;
     text += `⏰ Hold ~1 tháng calendar. Edge từ asymmetric R:R (Win 52% nhưng PF 2.82).\n`;
