@@ -977,7 +977,59 @@ export default {
 
 // ── Telegram Bot API helpers ──────────────────────────
 
+// Telegram từ chối cả tin nếu quá 4096 ký tự. Để hụt vì .length đếm UTF-16
+// (emoji = 2) còn markup Markdown chưa bị trừ như phía Telegram đếm.
+const TG_MAX_LEN = 4000;
+// Cắt ở ranh giới mục trước, không vừa mới lùi xuống đoạn rồi dòng — một mục
+// bị xé đôi giữa 2 tin khó đọc hơn tin ngắn.
+const TG_SPLIT_LEVELS = [
+  { re: /\n+(?=━{5,})/, join: "\n\n" },
+  { re: /\n{2,}/, join: "\n\n" },
+  { re: /\n/, join: "\n" },
+];
+
+function splitTgText(text, max = TG_MAX_LEN, level = 0) {
+  if (text.length <= max) return [text];
+  if (level >= TG_SPLIT_LEVELS.length) {
+    const out = [];
+    for (let i = 0; i < text.length; i += max) out.push(text.slice(i, i + max));
+    return out;
+  }
+  const { re, join } = TG_SPLIT_LEVELS[level];
+  const out = [];
+  let cur = "";
+  for (const part of text.split(re)) {
+    const joined = cur ? `${cur}${join}${part}` : part;
+    if (joined.length <= max) {
+      cur = joined;
+      continue;
+    }
+    if (cur) out.push(cur);
+    if (part.length <= max) {
+      cur = part;
+    } else {
+      const sub = splitTgText(part, max, level + 1);
+      out.push(...sub.slice(0, -1));
+      cur = sub[sub.length - 1];
+    }
+  }
+  if (cur) out.push(cur);
+  return out.filter((c) => c.trim());
+}
+
+// Tin dài được tách thành nhiều tin gửi tuần tự. Trả về response lỗi đầu tiên
+// (caller chỉ xét .ok), keyboard gắn vào tin cuối.
 async function tgSendMessage(token, chatId, text, parseMode = "Markdown", replyMarkup = null) {
+  const parts = typeof text === "string" ? splitTgText(text) : [text];
+  let resp;
+  for (let i = 0; i < parts.length; i++) {
+    resp = await tgSendOne(token, chatId, parts[i], parseMode, i === parts.length - 1 ? replyMarkup : null);
+    if (!resp?.ok) return resp;
+  }
+  return resp;
+}
+
+function tgSendOne(token, chatId, text, parseMode, replyMarkup) {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const body = {
     chat_id: chatId,
@@ -4595,19 +4647,19 @@ async function sendMorningBriefing(env, onlyChatId = null) {
   );
   const recentTrades = r.ok ? await r.json() : [];
 
-  // 2. Active picks not yet expired — đọc cả 2 bảng: Trung hạn cũng là lệnh đang
-  // mở, trước đây briefing chỉ đọc bảng T+ nên mã MidTerm không bao giờ hiện ra.
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const nowIso = new Date().toISOString();
-  const pickHeaders = { headers: { apikey: sb.key, authorization: `Bearer ${sb.key}` } };
-  const [activePicksRes, midTermPicksRes] = await Promise.all([
-    fetch(`${sb.url}/rest/v1/climax_active_picks?select=*&expires_at=gte.${nowIso}&order=signal_date.desc&limit=20`, pickHeaders),
-    fetch(`${sb.url}/rest/v1/mid_term_active_picks?select=*&expires_at=gte.${nowIso}&order=signal_date.desc&limit=20`, pickHeaders),
+  // 2. Lệnh đang mở lấy từ trade_log như /stats và exit alert. Bảng pick bị
+  // upsert đè signal_date mỗi lần mã bắn lại, còn 2 bảng chồng nhau khi một mã
+  // bắn ở cả 2 nhóm → đọc từ đó là đếm đôi và đếm ngược sai.
+  const [openPositions, climaxPicks, midTermPicks] = await Promise.all([
+    loadOpenPositions(sb),
+    sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price" }),
   ]);
-  const activePicks = [
-    ...(activePicksRes.ok ? await activePicksRes.json() : []),
-    ...(midTermPicksRes.ok ? (await midTermPicksRes.json()).map((p) => ({ ...p, tier: "MidTerm" })) : []),
-  ].sort((a, b) => b.signal_date.localeCompare(a.signal_date));
+  const activePicks = [...openPositions].sort((a, b) => b.signal_date.localeCompare(a.signal_date));
+  const peakByTable = {
+    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p.peak_price])),
+    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p.peak_price])),
+  };
 
   // 3. Drawdown status
   const drawdown = {};
@@ -4655,13 +4707,14 @@ async function sendMorningBriefing(env, onlyChatId = null) {
   // Active picks countdown
   if (activePicks.length > 0) {
     text += `💼 *Lệnh đang mở* (${activePicks.length} mã):\n`;
-    for (const p of activePicks.slice(0, 8)) {
+    for (const p of activePicks) {
       // Đếm phiên thật (bỏ T7/CN + lễ) thay vì áng chừng daysHeld × 5/7
       const tradingDays = vnTradingDaysBetween(p.signal_date, day.dateStr);
-      const maxHold = pickMaxHold(p);
+      const maxHold = exitMaxHold(p);
       const remainingDays = Math.max(0, maxHold - tradingDays);
-      const icon = p.is_premium ? "💎 " : TIER_ICONS[p.tier] ? `${TIER_ICONS[p.tier]} ` : "";
-      const peakTag = p.peak_price ? ` · peak ${parseFloat(p.peak_price).toFixed(2)}` : "";
+      const icon = TIER_ICONS[p.tier] ? `${TIER_ICONS[p.tier]} ` : "";
+      const peak = peakByTable[pickTableFor(p.tier)].get(p.symbol);
+      const peakTag = peak ? ` · peak ${parseFloat(peak).toFixed(2)}` : "";
       text += `  · ${icon}*${p.symbol}* (${p.tier}) — T+${tradingDays}/${maxHold}, còn ${remainingDays} phiên${peakTag}\n`;
     }
     text += `\n`;
@@ -4671,7 +4724,7 @@ async function sendMorningBriefing(env, onlyChatId = null) {
   // phần — chỗ lệch này chính là phần hiệu suất thật khác hiệu suất /stats.
   try {
     const holdings = await loadHoldingsIndex(sb);
-    const botSyms = [...new Set((await loadOpenPositions(sb)).map((t) => t.symbol))];
+    const botSyms = [...new Set(openPositions.map((t) => t.symbol))];
     const mySyms = [...holdings.portfolio.keys()];
     const missing = botSyms.filter((sym) => !holdings.portfolio.has(sym));
     const extra = mySyms.filter((sym) => !botSyms.includes(sym));
@@ -4785,6 +4838,21 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
     return;
   }
 
+  // Mã bắn lại khi lệnh cũ chưa chốt không được dropSymbolsAlreadyOpen mở vị thế
+  // mới → in dòng MUA là dắt user vào một lệnh sổ bot không chấm.
+  const signalDate = lastVnTradingDay();
+  const openBefore = new Map(
+    (await loadOpenPositions(sb))
+      .filter((t) => t.signal_date !== signalDate)
+      .map((t) => [t.symbol, t])
+  );
+  const alreadyOpenLine = (sym, indent) => {
+    const t = openBefore.get(sym);
+    return t
+      ? `${indent}⏸ Đang mở từ ${fmtVnDM(t.signal_date)} (${t.tier}) — sổ bot không mở lệnh mới, không mua thêm\n`
+      : null;
+  };
+
   // ── Compose comprehensive market digest ──
   function fmtBn(n) {
     return (n / 1e9).toFixed(0);
@@ -4851,7 +4919,10 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
         const nnTag = m.is_premium && m.nn_net_5d_bn != null ? ` · NN +${m.nn_net_5d_bn}B/5d` : "";
         text += `\n${icon} *${m.symbol}* @ ${cur.toFixed(2)}${weakFlag}\n`;
         text += `   3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}${nnTag}\n`;
-        if (health.level === "weak") {
+        const openLine = alreadyOpenLine(m.symbol, "   ");
+        if (openLine) {
+          text += openLine;
+        } else if (health.level === "weak") {
           text += `   ⏸ WATCHLIST — chờ VNI xanh + đóng gần high + breadth>1\n`;
           text += `   🟢 rồi MUA ≤ ${entryMax.toFixed(2)} · 🔴 CẮT < ${sl.toFixed(2)}\n`;
         } else {
@@ -4924,7 +4995,10 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const sl = cur * 0.92;
       const nnTag = m.nn_net_5d_bn != null ? `NN +${m.nn_net_5d_bn}B/5d` : "";
       text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag} · _hist Win 61%_\n`;
-      if (health.level === "weak") {
+      const openLine = alreadyOpenLine(m.symbol, "  ");
+      if (openLine) {
+        text += `${openLine}\n`;
+      } else if (health.level === "weak") {
         text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (SL < ${sl.toFixed(2)})\n\n`;
       } else {
         text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
@@ -4964,7 +5038,10 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const tierTag = (m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
       const hist = m.tier === "A" ? "hist Win 59%" : "edge vừa";
       text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · _${hist}_\n`;
-      if (health.level === "weak") {
+      const openLine = alreadyOpenLine(m.symbol, "  ");
+      if (openLine) {
+        text += `${openLine}\n`;
+      } else if (health.level === "weak") {
         text += `  ⏸ WATCHLIST — chờ: VNI xanh + đóng gần high + breadth>1, rồi MUA ≤ ${entryMax.toFixed(2)} (CẮT < ${sl.toFixed(2)})\n\n`;
       } else {
         text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · CẮT < ${sl.toFixed(2)} · BÁN T+3→T+5 target ${target.toFixed(2)} (+3%)\n\n`;
@@ -5005,8 +5082,11 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const initSL = cur * 0.92;
       const expectedExit = cur * 1.035;
       text += `⚡ *${m.symbol}* @ ${cur.toFixed(2)} · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)}\n`;
-      text += `  MUA ≤ ${entryMax.toFixed(2)} · init SL ${initSL.toFixed(2)} · trail 7% từ đỉnh\n`;
-      text += `  Hold ~20 phiên · expected ~${expectedExit.toFixed(2)} (+3.5%)\n\n`;
+      const openLine = alreadyOpenLine(m.symbol, "  ");
+      text += openLine
+        ? `${openLine}\n`
+        : `  MUA ≤ ${entryMax.toFixed(2)} · init SL ${initSL.toFixed(2)} · trail 7% từ đỉnh\n` +
+          `  Hold ~20 phiên · expected ~${expectedExit.toFixed(2)} (+3.5%)\n\n`;
     }
     text += `💰 Size: 12% NAV/Momentum (hold ~20 phiên trailing). Max 1-2 lệnh.\n`;
     text += `⚠️ Khi VNI chuyển correction → cắt sớm Momentum, switch sang Climax Elite.\n`;
@@ -5027,7 +5107,10 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const initSL = m.initSL;
       const breakStr = m.breakStrength ? `${m.breakStrength.toFixed(1)}%` : "?";
       text += `🔍 *${m.symbol}* @ ${cur.toFixed(2)} · break +${breakStr} above prev high · vol ${m.volRatio.toFixed(1)}×\n`;
-      text += `  MUA ${tLabel(1)} ≤ ${(cur * 1.02).toFixed(2)} · Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
+      const openLine = alreadyOpenLine(m.symbol, "  ");
+      text += openLine
+        ? `${openLine}\n`
+        : `  MUA ${tLabel(1)} ≤ ${(cur * 1.02).toFixed(2)} · Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
     }
     text += `💰 Backtest sizing 10M VND/signal → +29.8%/năm trên 200M vốn.\n`;
     text += `⏰ Hold ~1 tháng calendar. Edge từ asymmetric R:R (Win 52% nhưng PF 2.82).\n`;
