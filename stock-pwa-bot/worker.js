@@ -946,6 +946,7 @@ export default {
       ctx.waitUntil(logHeartbeat(env, "morning", { event_cron: cron }));
       ctx.waitUntil(sendEntryReminder(env));
       ctx.waitUntil(sendMorningBriefing(env));
+      ctx.waitUntil(sendPositionReview(env));
       return;
     }
     if (cron === "*/2 0-7,10-23 * * mon-fri") {
@@ -1268,6 +1269,11 @@ async function handleTelegramWebhook(request, env, ctx) {
     await tgSendMessage(env.BOT_TOKEN, chatId, "☀️ Đang dựng briefing sáng...");
     await sendEntryReminder(env, chatId);
     await sendMorningBriefing(env, chatId);
+    await sendPositionReview(env, chatId);
+    return new Response("ok");
+  }
+  if (text === "/review" || text === "/rv") {
+    await sendPositionReview(env, chatId);
     return new Response("ok");
   }
   if (text === "/eod" || text === "/ed") {
@@ -1311,6 +1317,7 @@ function buildHelpMessage() {
     `/check VHM (/c VHM) — Check pattern + tier 1 mã\n` +
     `\n*Danh mục:*\n` +
     `/pos — Danh mục trong app: giá vốn, T+, lãi/lỗ hiện tại\n` +
+    `/review (/rv) — Soi từng lệnh bot đang mở: stop, hạn giữ, nên xử lý sao\n` +
     `\n*Sổ lệnh tay:*\n` +
     `/b SHS 17.88 1000 — Ghi MUA (giá, số lượng)\n` +
     `/s SHS 18.5 400 — Ghi BÁN (bỏ SL = đóng cả lot cũ nhất)\n` +
@@ -1326,7 +1333,7 @@ function buildHelpMessage() {
     `/morning (/mn) — Briefing sáng, bất cứ lúc nào\n` +
     `/eod (/ed) — Digest cuối phiên (chưa chốt phiên thì chỉ xem)\n` +
     `\n*Bot tự bắn (không cần gõ):*\n` +
-    `08:30 — Briefing sáng: tuần qua + active picks\n` +
+    `08:30 — Briefing sáng + review từng lệnh đang mở\n` +
     `13:30-14:45 — Cảnh báo sớm mã đang hình thành Climax\n` +
     `14:50 — Digest cuối phiên: signal mới + level mua\n` +
     `15:00-16:00 — Full scan 1411 mã, có gì bắn tiếp\n` +
@@ -4279,36 +4286,47 @@ function pickTableFor(tier) {
 // Luật của resolver áp lên giá trong phiên. Resolver chấm theo giá đóng cửa nên
 // alert chỉ là cảnh báo sớm. Entry là close ngày signal chứ không phải open phiên
 // mua như resolver: lấy open cần thêm 1 subrequest/mã ở mỗi lượt cron 3 phút.
+// Ngưỡng thoát theo luật của tier. Tách khỏi evaluateExit vì review cần in ra
+// ngưỡng cả khi chưa chạm, còn công thức thì chỉ được có một bản.
+function exitLevels(t, entry, peak) {
+  const top = Math.max(entry, peak || 0);
+  if (isTrailingTier(t.tier)) {
+    const { initSlPct, trailPct, maxHold } = trailingExitParams(t);
+    const initSl = entry * (1 - initSlPct / 100);
+    const trailSl = top * (1 - trailPct / 100);
+    return { top, maxHold, initSl, trailSl, stop: Math.max(initSl, trailSl), initSlPct, trailPct };
+  }
+  const { slPct, tpPct, tpFromDay, maxHold } = CLASSICAL_EXIT;
+  return {
+    top, maxHold, tpFromDay, slPct, tpPct,
+    stop: entry * (1 - slPct / 100),
+    target: entry * (1 + tpPct / 100),
+  };
+}
+
 function evaluateExit(t, cur, peak) {
   const entry = parseFloat(t.entry_price);
   if (!(entry > 0) || !(cur > 0)) return null;
   const ret = ((cur - entry) / entry) * 100;
+  const L = exitLevels(t, entry, peak);
 
   if (isTrailingTier(t.tier)) {
-    const { initSlPct, trailPct, maxHold } = trailingExitParams(t);
-    const top = Math.max(entry, peak || 0);
-    const initSl = entry * (1 - initSlPct / 100);
-    const trailSl = top * (1 - trailPct / 100);
-    const stop = Math.max(initSl, trailSl);
-    if (cur <= stop) {
-      return stop === initSl
-        ? { reason: "sl_hit", ret, stop, rulePct: initSlPct, held: t.held, maxHold }
-        : { reason: "trail_hit", ret, stop, top, rulePct: trailPct, held: t.held, maxHold };
+    if (cur <= L.stop) {
+      return L.stop === L.initSl
+        ? { reason: "sl_hit", ret, stop: L.initSl, rulePct: L.initSlPct, held: t.held, maxHold: L.maxHold }
+        : { reason: "trail_hit", ret, stop: L.trailSl, top: L.top, rulePct: L.trailPct, held: t.held, maxHold: L.maxHold };
     }
-    if (t.held >= maxHold) return { reason: "timeout", ret, held: t.held, maxHold };
+    if (t.held >= L.maxHold) return { reason: "timeout", ret, held: t.held, maxHold: L.maxHold };
     return null;
   }
 
-  const { slPct, tpPct, tpFromDay, maxHold } = CLASSICAL_EXIT;
-  const slPrice = entry * (1 - slPct / 100);
-  const targetPrice = entry * (1 + tpPct / 100);
-  if (cur <= slPrice) {
-    return { reason: "sl_hit", ret, stop: slPrice, rulePct: slPct, held: t.held, maxHold };
+  if (cur <= L.stop) {
+    return { reason: "sl_hit", ret, stop: L.stop, rulePct: L.slPct, held: t.held, maxHold: L.maxHold };
   }
-  if (t.held >= tpFromDay && cur >= targetPrice) {
-    return { reason: "target_hit", ret, target: targetPrice, held: t.held, maxHold };
+  if (t.held >= L.tpFromDay && cur >= L.target) {
+    return { reason: "target_hit", ret, target: L.target, held: t.held, maxHold: L.maxHold };
   }
-  if (t.held >= maxHold) return { reason: "timeout", ret, held: t.held, maxHold };
+  if (t.held >= L.maxHold) return { reason: "timeout", ret, held: t.held, maxHold: L.maxHold };
   return null;
 }
 
@@ -4347,6 +4365,165 @@ function buildExitAlertMessage(r) {
       `*👉 Cân nhắc BÁN trong phiên hôm nay.*\n` + tail;
   }
   return `⚠️ *${t.symbol}* — Exit reason không xác định: ${r.reason}`;
+}
+
+// ── Review lệnh mở hàng ngày ──────────────────────────
+// Exit alert trong phiên chỉ lên tiếng đúng lúc luật chạm. Review nói về MỌI mã
+// đang mở mỗi sáng: còn bao xa tới stop, còn mấy phiên, nên xử lý thế nào.
+// Chạy lại đúng vòng của resolver (entry = giá mở phiên mua, xét thoát theo giá
+// đóng từng phiên) nên kết luận ở đây chính là cái /stats sẽ ghi lúc tới hạn chấm.
+const REVIEW_NEAR_STOP_PCT = 3;   // còn ≤3% tới stop là sát ngưỡng
+const REVIEW_SOON_DAYS = 2;       // còn ≤2 phiên giữ là sắp hết hạn
+
+function replayPosition(t, data) {
+  const dates = data.t.map((s) => new Date(s * 1000).toISOString().slice(0, 10));
+  // Phiên mua = bar đầu tiên sau phiên signal. Dò theo ngày chứ không phải
+  // sigIdx+1: signal_date có thể không có bar (mã nghỉ giao dịch hôm đó).
+  const entryIdx = dates.findIndex((d) => d > t.signal_date);
+  if (entryIdx < 0) return { state: "pending_entry" };
+  const entry = data.o[entryIdx];
+  if (!(entry > 0)) return { state: "no_data" };
+
+  const maxHold = exitMaxHold(t);
+  let peak = entry;
+  for (let h = 1; h <= maxHold; h++) {
+    const idx = entryIdx + h;
+    if (idx >= data.c.length) break;
+    if (data.h[idx] > peak) peak = data.h[idx];
+    const hit = evaluateExit({ ...t, entry_price: entry, held: h }, data.c[idx], peak);
+    if (hit) return { state: "exited", entry, peak, maxHold, held: h, date: dates[idx], cur: data.c[idx], hit };
+  }
+  const last = Math.min(data.c.length - 1, entryIdx + maxHold);
+  return {
+    state: "open", entry, peak, maxHold,
+    held: last - entryIdx, date: dates[last], cur: data.c[last],
+    levels: exitLevels(t, entry, peak),
+  };
+}
+
+function reviewBucket(r) {
+  if (r.state !== "open") return r.state === "exited" ? "exit" : r.state;
+  if (((r.cur - r.levels.stop) / r.cur) * 100 <= REVIEW_NEAR_STOP_PCT) return "near";
+  if (r.maxHold - r.held <= REVIEW_SOON_DAYS) return "soon";
+  return "hold";
+}
+
+function reviewExitWhy(hit) {
+  const px = (v) => v.toFixed(2);
+  if (hit.reason === "trail_hit") return `Thủng trail ${px(hit.stop)} (−${hit.rulePct}% từ đỉnh ${px(hit.top)})`;
+  if (hit.reason === "sl_hit") return `Thủng stop lỗ ${px(hit.stop)} (−${hit.rulePct}% so giá vào)`;
+  if (hit.reason === "target_hit") return `Chạm target ${px(hit.target)}`;
+  return `Hết ${hit.maxHold} phiên giữ`;
+}
+
+async function buildPositionReview(env) {
+  const sb = sbClient(env);
+  const positions = (await loadOpenPositions(sb)).sort((a, b) => a.signal_date.localeCompare(b.signal_date));
+  if (!positions.length) return null;
+
+  // 1 subrequest/mã. Nhánh cron 8:30 còn dư ~35 trong trần 50 nên chịu được ~30
+  // lệnh mở cùng lúc — đông hơn thì phải chia lượt chứ không phải cắt bớt dòng.
+  const rows = [];
+  for (const t of positions) {
+    const sigTs = Date.parse(`${t.signal_date}T00:00:00Z`);
+    const calDays = Math.ceil((Date.now() - sigTs) / 86400000) + 3;
+    let data = null;
+    try {
+      data = await fetchOhlcvForResolve(t.symbol, sigTs, calDays);
+    } catch (e) {
+      console.warn(`[review] ${t.symbol} fetch fail:`, e.message);
+    }
+    rows.push({ t, r: data ? replayPosition(t, data) : { state: "no_data" } });
+  }
+
+  const px = (v) => v.toFixed(2);
+  const pctStr = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const retOf = (r) => ((r.cur - r.entry) / r.entry) * 100;
+  const gapOf = (r) => ((r.cur - r.levels.stop) / r.cur) * 100;
+  const label = (t) => `${TIER_ICONS[t.tier] ? `${TIER_ICONS[t.tier]} ` : ""}*${t.symbol}* (${t.tier})`;
+
+  const groups = { exit: [], near: [], soon: [], hold: [], pending_entry: [], no_data: [] };
+  for (const row of rows) groups[reviewBucket(row.r)].push(row);
+  const priced = rows.filter(({ r }) => r.state === "exited" || r.state === "open");
+  const asOf = priced.map(({ r }) => r.date).sort().pop() || vnDateString();
+  const totalRet = priced.reduce((sum, { r }) => sum + retOf(r), 0);
+
+  let text = `🧭 *REVIEW LỆNH MỞ* — ${positions.length} mã\n`;
+  text += `_Giá đóng cửa ${fmtVnDM(asOf)} · tạm tính ${pctStr(totalRet)} cả sổ_\n\n`;
+
+  if (groups.exit.length) {
+    text += `⛔ *Luật đã chạm — BÁN* (${groups.exit.length})\n`;
+    for (const { t, r } of groups.exit) {
+      text += `• ${label(t)} · T+${r.held} · vào ${px(r.entry)} → ${px(r.cur)} *${pctStr(retOf(r))}*\n`;
+      text += `  ${reviewExitWhy(r.hit)} phiên ${fmtVnDM(r.date)} — sổ bot chốt ở đây, cầm tiếp là ngoài kế hoạch\n`;
+    }
+    text += `\n`;
+  }
+  if (groups.near.length) {
+    text += `⚠️ *Sát ngưỡng thoát* (${groups.near.length})\n`;
+    for (const { t, r } of groups.near) {
+      text += `• ${label(t)} · T+${r.held}/${r.maxHold} · ${px(r.cur)} ${pctStr(retOf(r))}\n`;
+      text += `  Stop ${px(r.levels.stop)} — cách ${gapOf(r).toFixed(1)}%, đóng cửa dưới mức đó là bán\n`;
+    }
+    text += `\n`;
+  }
+  if (groups.soon.length) {
+    text += `⏳ *Sắp hết hạn giữ* (${groups.soon.length})\n`;
+    for (const { t, r } of groups.soon) {
+      text += `• ${label(t)} · T+${r.held}/${r.maxHold} · ${px(r.cur)} ${pctStr(retOf(r))}\n`;
+      text += `  Còn ${r.maxHold - r.held} phiên — hết hạn là bán bất kể giá, canh thoát dần\n`;
+    }
+    text += `\n`;
+  }
+  if (groups.hold.length) {
+    text += `✅ *Cầm tiếp* (${groups.hold.length})\n`;
+    for (const { t, r } of groups.hold) {
+      const lock = r.levels.stop > r.entry ? " 🔒" : "";
+      text += `• ${label(t)} · T+${r.held}/${r.maxHold} · ${px(r.cur)} ${pctStr(retOf(r))} · stop ${px(r.levels.stop)} (cách ${gapOf(r).toFixed(1)}%)${lock}\n`;
+    }
+    if (groups.hold.some(({ r }) => r.levels.stop > r.entry)) text += `  🔒 = stop đã trên giá vốn, tệ nhất cũng hoà\n`;
+    text += `\n`;
+  }
+  if (groups.pending_entry.length) {
+    text += `🆕 *Chưa tới phiên vào lệnh*: ${groups.pending_entry.map(({ t }) => t.symbol).join(", ")}\n\n`;
+  }
+  if (groups.no_data.length) {
+    text += `❓ *Không lấy được giá*: ${groups.no_data.map(({ t }) => t.symbol).join(", ")}\n\n`;
+  }
+
+  text += `_Entry = giá mở cửa phiên mua, thoát xét theo giá đóng cửa — đúng luật sổ bot chấm. Số liệu chưa trừ phí ~0.5%._`;
+  return text;
+}
+
+async function sendPositionReview(env, onlyChatId = null) {
+  const chats = await resolveBroadcastChats(env, onlyChatId);
+  if (!chats.length) {
+    console.log("[review] no connected users");
+    return;
+  }
+  let text;
+  try {
+    text = await buildPositionReview(env);
+  } catch (e) {
+    console.warn("[review] build fail:", e.message);
+    return;
+  }
+  if (!text) {
+    console.log("[review] no open positions");
+    if (onlyChatId) await tgSendMessage(env.BOT_TOKEN, onlyChatId, "🧭 Sổ bot không có lệnh nào đang mở.");
+    return;
+  }
+  let sent = 0;
+  for (const chatId of chats) {
+    try {
+      const resp = await tgSendMessage(env.BOT_TOKEN, chatId, text);
+      if (resp?.ok) sent++;
+    } catch (e) {
+      console.warn(`[review] send fail ${chatId}:`, e.message);
+    }
+  }
+  console.log(`[review] sent to ${sent}/${chats.length}`);
+  await logHeartbeat(env, "review-sent", { sent, total: chats.length });
 }
 
 // ── Entry alert: nhắc vào lệnh đúng phiên sổ bot tính giá vào ─────────
@@ -4650,16 +4827,7 @@ async function sendMorningBriefing(env, onlyChatId = null) {
   // 2. Lệnh đang mở lấy từ trade_log như /stats và exit alert. Bảng pick bị
   // upsert đè signal_date mỗi lần mã bắn lại, còn 2 bảng chồng nhau khi một mã
   // bắn ở cả 2 nhóm → đọc từ đó là đếm đôi và đếm ngược sai.
-  const [openPositions, climaxPicks, midTermPicks] = await Promise.all([
-    loadOpenPositions(sb),
-    sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price" }),
-    sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price" }),
-  ]);
-  const activePicks = [...openPositions].sort((a, b) => b.signal_date.localeCompare(a.signal_date));
-  const peakByTable = {
-    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p.peak_price])),
-    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p.peak_price])),
-  };
+  const openPositions = await loadOpenPositions(sb);
 
   // 3. Drawdown status
   const drawdown = {};
@@ -4704,20 +4872,9 @@ async function sendMorningBriefing(env, onlyChatId = null) {
     text += warnTiers.map(([t, d]) => `${t} ${d.consecLosses}/3 losses`).join(", ") + "\n\n";
   }
 
-  // Active picks countdown
-  if (activePicks.length > 0) {
-    text += `💼 *Lệnh đang mở* (${activePicks.length} mã):\n`;
-    for (const p of activePicks) {
-      // Đếm phiên thật (bỏ T7/CN + lễ) thay vì áng chừng daysHeld × 5/7
-      const tradingDays = vnTradingDaysBetween(p.signal_date, day.dateStr);
-      const maxHold = exitMaxHold(p);
-      const remainingDays = Math.max(0, maxHold - tradingDays);
-      const icon = TIER_ICONS[p.tier] ? `${TIER_ICONS[p.tier]} ` : "";
-      const peak = peakByTable[pickTableFor(p.tier)].get(p.symbol);
-      const peakTag = peak ? ` · peak ${parseFloat(peak).toFixed(2)}` : "";
-      text += `  · ${icon}*${p.symbol}* (${p.tier}) — T+${tradingDays}/${maxHold}, còn ${remainingDays} phiên${peakTag}\n`;
-    }
-    text += `\n`;
+  // Chi tiết từng lệnh nằm ở tin review gửi ngay sau briefing, đừng in hai lần.
+  if (openPositions.length > 0) {
+    text += `💼 *Lệnh đang mở*: ${openPositions.length} mã — chi tiết ở tin review 🧭\n\n`;
   }
 
   // Đối soát sổ bot với danh mục thật. Sổ bot chấm mọi signal, mày chỉ mua một
