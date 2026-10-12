@@ -154,6 +154,16 @@ function vnTradingDaysBetween(fromDateStr, toDateStr) {
   return count;
 }
 
+function vnAddTradingDays(dateStr, n) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  let left = n;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (isVnTradingDay(d.toISOString().slice(0, 10))) left--;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 // Lễ gần nhất trong `withinDays` ngày tới (kể cả hôm nay) — để nhắc "mai nghỉ lễ".
 function nextVnHoliday(fromDateStr, withinDays = 5) {
   const d = new Date(`${fromDateStr}T00:00:00Z`);
@@ -233,6 +243,12 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       return handlePortfolioSync(request, env);
+    }
+    if (url.pathname === "/portfolio/status" && request.method === "GET") {
+      if (url.searchParams.get("key") !== env.WEBHOOK_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return handlePortfolioStatus(env);
     }
     if (url.pathname === "/cron-test" && request.method === "POST") {
       // Manual trigger cron logic (testing only — protect by secret)
@@ -3852,6 +3868,69 @@ async function handlePortfolioSync(request, env) {
     return jsonResponse({ error: "xoá mã cũ lỗi" }, 500);
   }
   return jsonResponse({ ok: true, synced: rows.map((r) => r.symbol) });
+}
+
+// Cổ phiếu về trước 13h ngày T+2 (quy chế VSD 29/08/2022) nên bán được ngay
+// phiên chiều hôm đó.
+const SETTLEMENT_DAYS = 2;
+
+// Stop + T+ cho menubar. Tính từ entry/peak đã nằm sẵn trong DB, KHÔNG fetch giá
+// từng mã: app poll 30 giây một lần, mỗi lần vài chục subrequest là hết ngân sách.
+async function handlePortfolioStatus(env) {
+  const sb = sbClient(env);
+  const [holdings, positions, climaxPicks, midTermPicks] = await Promise.all([
+    sbQuery(sb, "holdings", { select: "symbol,first_buy_date" }),
+    loadOpenPositions(sb),
+    sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price" }),
+    sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price" }),
+  ]);
+  const peaks = {
+    climax_active_picks: new Map((climaxPicks || []).map((p) => [p.symbol, p.peak_price])),
+    mid_term_active_picks: new Map((midTermPicks || []).map((p) => [p.symbol, p.peak_price])),
+  };
+  const today = vnDateString();
+  const bots = new Map();
+  for (const t of positions) {
+    const entry = parseFloat(t.entry_price);
+    if (!(entry > 0)) continue;
+    const peak = parseFloat(peaks[pickTableFor(t.tier)].get(t.symbol)) || 0;
+    const L = exitLevels(t, entry, peak);
+    bots.set(t.symbol, {
+      tier: t.tier,
+      signal_date: t.signal_date,
+      entry: +entry.toFixed(2),
+      peak: +L.top.toFixed(2),
+      stop: +L.stop.toFixed(2),
+      held: vnTradingDaysBetween(t.signal_date, today) - 1,
+      max_hold: L.maxHold,
+    });
+  }
+
+  const vnHour = vnNow().getHours();
+  const rows = [];
+  const seen = new Set();
+  for (const h of holdings || []) {
+    seen.add(h.symbol);
+    const sellableDate = h.first_buy_date ? vnAddTradingDays(h.first_buy_date, SETTLEMENT_DAYS) : null;
+    rows.push({
+      symbol: h.symbol,
+      first_buy_date: h.first_buy_date || null,
+      sellable_date: sellableDate,
+      sellable: !!sellableDate && (today > sellableDate || (today === sellableDate && vnHour >= 13)),
+      bot: bots.get(h.symbol) || null,
+    });
+  }
+  // Mã bot đang mở mà menubar chưa đánh dấu nắm giữ vẫn trả stop — watchlist
+  // nhìn được ngưỡng mà không phải ghi giá vốn.
+  for (const [symbol, bot] of bots) {
+    if (!seen.has(symbol)) rows.push({ symbol, first_buy_date: null, sellable_date: null, sellable: null, bot });
+  }
+  return jsonResponse({
+    as_of: new Date().toISOString(),
+    trading_day: isVnTradingDay(today),
+    near_pct: EXIT_NEAR_PCT,
+    positions: rows,
+  });
 }
 
 function jsonResponse(obj, status = 200) {
