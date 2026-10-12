@@ -1247,7 +1247,7 @@ async function handleTelegramWebhook(request, env, ctx) {
   }
 
   // /check <SYMBOL> — check pattern + tier 1 mã cụ thể
-  if (text.startsWith("/check ") || text.startsWith("/c ")) {
+  if (/^\/(check|c)(\s|$)/i.test(text)) {
     const sym = text.split(/\s+/)[1]?.toUpperCase();
     if (!sym) {
       await tgSendMessage(env.BOT_TOKEN, chatId, "Usage: `/check <SYMBOL>` — vd `/check VHM`");
@@ -1260,7 +1260,7 @@ async function handleTelegramWebhook(request, env, ctx) {
 
   // /b <SYM> <GIÁ> [SL] — ghi lệnh mua tay. Lưu ý `/s` trần vẫn là quick scan,
   // chỉ khi có tham số mới hiểu là lệnh bán.
-  if (/^\/(b|buy)\s/i.test(text)) {
+  if (/^\/(b|buy)(\s|$)/i.test(text)) {
     await tgSendMessage(env.BOT_TOKEN, chatId, await handlePaperBuy(env, chatId, text));
     return new Response("ok");
   }
@@ -1353,7 +1353,9 @@ function buildHelpMessage() {
     `13:30-14:45 — Cảnh báo sớm mã đang hình thành Climax\n` +
     `14:50 — Digest cuối phiên: signal mới + level mua\n` +
     `15:00-16:00 — Full scan 1411 mã, có gì bắn tiếp\n` +
-    `Trong phiên — Spike alert (tăng mạnh) + exit alert (chạm SL/target)\n` +
+    `Trong phiên — Spike alert (tăng mạnh)\n` +
+    `Trong phiên — ⚠️ Cảnh báo sớm khi còn 2% tới stop, rồi ⛔ exit alert lúc chạm SL/target\n` +
+    `Trong phiên — Canh stop cả mã mua tay trong danh mục menubar (giá vốn −8%, trailing −10% từ đỉnh)\n` +
     `\n_Tip: /scan chậm vì Cloudflare limit. Nếu cần nhanh → /quick (45 mã)._`;
 }
 
@@ -4420,7 +4422,11 @@ async function checkExitAlerts(env) {
   const positions = (await loadOpenPositions(sb))
     .map((t) => ({ ...t, held: vnTradingDaysBetween(t.signal_date, today) - 1 }))
     .filter((t) => t.held >= 1 && t.held <= exitMaxHold(t));
-  if (!positions.length) return;
+  const botSymbols = new Set(positions.map((t) => t.symbol));
+  if (!positions.length) {
+    await checkManualExitAlerts(env, sb, chats, today, botSymbols);
+    return;
+  }
 
   const [climaxPicks, midTermPicks] = await Promise.all([
     loadPickAlertMarks(sb, "climax_active_picks"),
@@ -4442,7 +4448,10 @@ async function checkExitAlerts(env) {
     if (pick.exit_alerted_at && pick.exit_alerted_at.slice(0, 10) >= t.signal_date) continue;
     candidates.push({ t, pick });
   }
-  if (!candidates.length) return;
+  if (!candidates.length) {
+    await checkManualExitAlerts(env, sb, chats, today, botSymbols);
+    return;
+  }
   console.log(`[exit-alert] checking ${candidates.length}/${positions.length} positions`);
 
   const results = await Promise.all(candidates.map(async ({ t, pick }) => {
@@ -4484,6 +4493,130 @@ async function checkExitAlerts(env) {
     if (isNear) warned++; else alerted++;
   }
   console.log(`[exit-alert] sent ${alerted} alerts, ${warned} near-stop warnings`);
+  await checkManualExitAlerts(env, sb, chats, today, botSymbols);
+}
+
+// Trần fetch nhánh mua tay: cron 3 phút chạy 4 job chung 50 subrequest.
+const MANUAL_EXIT_MAX_FETCH = 6;
+
+// Vị thế mua tay cũng được canh stop. Khác pick bot ở hai chỗ: không có hạn
+// giữ nên bỏ timeout, và dấu đã báo nằm ngay trên holdings vì mã không có row
+// ở bảng pick nào.
+async function checkManualExitAlerts(env, sb, chats, today, botSymbols) {
+  const rows = await loadHoldingsAlertMarks(sb);
+  if (!rows) return;
+  const candidates = rows.filter((h) => {
+    if (botSymbols.has(h.symbol) || !h.first_buy_date || !(parseFloat(h.avg_cost) > 0)) return false;
+    // Phiên mua chưa xét thoát, giống luật của sổ.
+    if (vnTradingDaysBetween(h.first_buy_date, today) - 1 < 1) return false;
+    return !(h.exit_alerted_at && h.exit_alerted_at.slice(0, 10) >= h.first_buy_date);
+  });
+  if (!candidates.length) return;
+  if (candidates.length > MANUAL_EXIT_MAX_FETCH) {
+    console.warn(`[exit-alert] mua tay ${candidates.length} mã, chỉ canh ${MANUAL_EXIT_MAX_FETCH} mã đầu`);
+  }
+
+  const results = await Promise.all(candidates.slice(0, MANUAL_EXIT_MAX_FETCH).map(async (h) => {
+    try {
+      const t = manualTrade(h);
+      const bars = await fetchVndIntraday(h.symbol);
+      const cur = bars.closes[bars.closes.length - 1];
+      const peak = Math.max(parseFloat(h.peak_price) || 0, ...bars.highs);
+      const hit = evaluateExit(t, cur, peak);
+      // Mua tay không có hạn giữ, cũng không có target: chỉ thủng stop mới báo.
+      if (hit && (hit.reason === "sl_hit" || hit.reason === "trail_hit")) {
+        return { kind: "exit", h, t, cur, ...hit };
+      }
+      if (hit) return null;
+      if ((h.near_alerted_at || "").slice(0, 10) === today) return null;
+      const near = evaluateNearExit(t, cur, peak);
+      return near ? { kind: "near", h, t, cur, ...near } : null;
+    } catch (e) {
+      console.warn(`[exit-alert] ${h.symbol} (mua tay) fail:`, e.message);
+      return null;
+    }
+  }));
+
+  let sent = 0;
+  for (const r of results) {
+    if (!r) continue;
+    const isNear = r.kind === "near";
+    const msg = isNear ? buildManualNearMessage(r) : buildManualExitMessage(r);
+    for (const chatId of chats) {
+      try {
+        await tgSendMessage(env.BOT_TOKEN, chatId, msg);
+      } catch (e) {
+        console.warn(`[exit-alert] tg send fail chat=${chatId}:`, e.message);
+      }
+    }
+    await sbUpdate(sb, "holdings", {
+      eq: { symbol: r.h.symbol },
+      data: isNear
+        ? { near_alerted_at: new Date().toISOString() }
+        : { exit_alerted_at: new Date().toISOString(), exit_alert_reason: r.reason },
+    });
+    sent++;
+  }
+  console.log(`[exit-alert] mua tay: sent ${sent}/${candidates.length}`);
+}
+
+// Dựng hình dạng "lệnh" để dùng lại evaluateExit/evaluateNearExit — giá vốn
+// thay giá signal, ngày đóng dấu thay signal_date.
+function manualTrade(h) {
+  return {
+    ...MANUAL_EXIT,
+    symbol: h.symbol,
+    entry_price: h.avg_cost,
+    signal_date: h.first_buy_date,
+    held: 1,
+  };
+}
+
+// Chưa chạy sql/019 thì tắt hẳn nhánh này: không có chỗ ghi dấu nghĩa là bắn
+// lại mỗi 3 phút cho tới hết phiên.
+async function loadHoldingsAlertMarks(sb) {
+  const base = "symbol,avg_cost,first_buy_date,peak_price";
+  const rows = await sbQuery(sb, "holdings", {
+    select: `${base},exit_alerted_at,near_alerted_at`,
+  });
+  if (rows) return rows;
+  console.warn("[exit-alert] holdings: chưa có cột exit_alerted_at (sql/019) — tắt alert mã mua tay");
+  return null;
+}
+
+function buildManualExitMessage(r) {
+  const px = (v) => v.toFixed(2);
+  const timeStr = new Date().toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
+  });
+  const retFmt = `${r.ret >= 0 ? "+" : ""}${r.ret.toFixed(1)}%`;
+  const line = r.reason === "trail_hit"
+    ? `📊 Rớt *${(((r.top - r.cur) / r.top) * 100).toFixed(1)}%* từ đỉnh ${px(r.top)} — thủng trailing stop *${px(r.stop)}* (−${r.rulePct}% từ đỉnh)`
+    : `📉 Thủng stop lỗ *${px(r.stop)}* (−${r.rulePct}% so giá vốn)`;
+  return `⛔ *CHẠM STOP — ${r.h.symbol}* (mua tay)
+
+${line}
+` +
+    `• Giá vốn ${fmtVnDM(r.h.first_buy_date)} @${px(parseFloat(r.h.avg_cost))} → hiện *${px(r.cur)}* (${retFmt})
+
+` +
+    `*👉 Cân nhắc BÁN theo mức đã đặt.*
+` +
+    `_Mức tham chiếu tự quản, không nằm trong sổ theo dõi của bot._
+⏰ ${timeStr} VN`;
+}
+
+function buildManualNearMessage(r) {
+  const px = (v) => v.toFixed(2);
+  const timeStr = new Date().toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit",
+  });
+  const retFmt = `${r.ret >= 0 ? "+" : ""}${r.ret.toFixed(1)}%`;
+  return `⚠️ *SẮP CHẠM STOP — ${r.h.symbol}* (mua tay)\n\n` +
+    `📉 Giá *${px(r.cur)}*, cách stop *${px(r.stop)}* chỉ ${r.gapPct.toFixed(1)}% — trailing từ đỉnh ${px(r.top)}\n` +
+    `• Giá vốn ${fmtVnDM(r.h.first_buy_date)} @${px(parseFloat(r.h.avg_cost))} → hiện ${retFmt}\n\n` +
+    `*👉 Theo sát — đóng cửa dưới ${px(r.stop)} là bán theo plan.*\n` +
+    `_Cảnh báo sớm, chưa phải lệnh thoát._\n⏰ ${timeStr} VN`;
 }
 
 // PostgREST 400 cả query chỉ vì một cột lạ, mà rụng query này là chết luôn alert
