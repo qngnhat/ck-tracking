@@ -3796,6 +3796,44 @@ async function updatePeakPrices(env) {
     }
   }
   console.log(`[peak] updated ${updated}/${positions.length}`);
+  await updateHoldingPeaks(sb, new Set(positions.map((t) => t.symbol)));
+}
+
+// Trần fetch cho nhánh mua tay: EOD còn 3 job khác xài chung 50 subrequest của
+// một invocation, vượt là cả lượt chết chứ không chỉ job này.
+const MANUAL_PEAK_MAX_FETCH = 10;
+
+// Đỉnh kể từ ngày mua cho mã KHÔNG phải pick bot. Pick bot đã có peak ở bảng
+// pick; mã nằm cả hai nơi thì bỏ qua để khỏi fetch hai lần.
+async function updateHoldingPeaks(sb, botSymbols) {
+  const holdings = await sbQuery(sb, "holdings", { select: "symbol,first_buy_date,peak_price,peak_date" });
+  if (!holdings) {
+    console.warn("[peak] holdings: chưa có cột peak_price (sql/018) — bỏ qua mã mua tay");
+    return;
+  }
+  const manual = holdings.filter((h) => h.first_buy_date && !botSymbols.has(h.symbol));
+  let updated = 0;
+  for (const h of manual.slice(0, MANUAL_PEAK_MAX_FETCH)) {
+    try {
+      const calDays = Math.ceil((Date.now() - Date.parse(`${h.first_buy_date}T00:00:00Z`)) / 86400000) + 3;
+      const bars = await fetchVndHistory(h.symbol, calDays);
+      let peak = 0, peakDate = null;
+      bars.times.forEach((s, i) => {
+        const d = new Date(s * 1000).toISOString().slice(0, 10);
+        if (d >= h.first_buy_date && bars.highs[i] > peak) { peak = bars.highs[i]; peakDate = d; }
+      });
+      if (!peakDate) continue;
+      if (parseFloat(h.peak_price) === peak && h.peak_date === peakDate) continue;
+      await sbUpdate(sb, "holdings", { eq: { symbol: h.symbol }, data: { peak_price: peak, peak_date: peakDate } });
+      updated++;
+    } catch (e) {
+      console.warn(`[peak] ${h.symbol} (mua tay) fail:`, e.message);
+    }
+  }
+  if (manual.length > MANUAL_PEAK_MAX_FETCH) {
+    console.warn(`[peak] mua tay ${manual.length} mã, chỉ theo ${MANUAL_PEAK_MAX_FETCH} mã đầu`);
+  }
+  console.log(`[peak] mua tay: updated ${updated}/${manual.length}`);
 }
 
 // Fetch intraday 5-min bars for current trading day (from 9:00 VN today)
@@ -3876,10 +3914,20 @@ const SETTLEMENT_DAYS = 2;
 
 // Stop + T+ cho menubar. Tính từ entry/peak đã nằm sẵn trong DB, KHÔNG fetch giá
 // từng mã: app poll 30 giây một lần, mỗi lần vài chục subrequest là hết ngân sách.
+// PostgREST 400 cả query chỉ vì một cột lạ. Rụng query này là mất luôn T+ của
+// mọi mã, nên chưa chạy sql/018 thì đọc lại không có peak và chỉ mất trailing.
+async function loadHoldingsWithPeak(sb) {
+  const base = "symbol,first_buy_date,avg_cost";
+  const rows = await sbQuery(sb, "holdings", { select: `${base},peak_price` });
+  if (rows) return rows;
+  console.warn("[status] holdings: chưa có cột peak_price (sql/018) — stop mua tay không trailing");
+  return (await sbQuery(sb, "holdings", { select: base })) || [];
+}
+
 async function handlePortfolioStatus(env) {
   const sb = sbClient(env);
   const [holdings, positions, climaxPicks, midTermPicks] = await Promise.all([
-    sbQuery(sb, "holdings", { select: "symbol,first_buy_date" }),
+    loadHoldingsWithPeak(sb),
     loadOpenPositions(sb),
     sbQuery(sb, "climax_active_picks", { select: "symbol,peak_price" }),
     sbQuery(sb, "mid_term_active_picks", { select: "symbol,peak_price" }),
@@ -3908,6 +3956,14 @@ async function handlePortfolioStatus(env) {
 
   const vnHour = vnNow().getHours();
   const rows = [];
+  // Bot chỉ bắn alert chạm luật cho lệnh trong sổ; stop dưới đây là mức tham
+  // chiếu hiện trên menubar, không ai canh hộ.
+  const manualRisk = (h) => {
+    const cost = parseFloat(h.avg_cost);
+    if (!(cost > 0)) return null;
+    const L = exitLevels(MANUAL_EXIT, cost, parseFloat(h.peak_price) || 0);
+    return { avg_cost: +cost.toFixed(2), peak: +L.top.toFixed(2), stop: +L.stop.toFixed(2) };
+  };
   const seen = new Set();
   for (const h of holdings || []) {
     seen.add(h.symbol);
@@ -3918,12 +3974,15 @@ async function handlePortfolioStatus(env) {
       sellable_date: sellableDate,
       sellable: !!sellableDate && (today > sellableDate || (today === sellableDate && vnHour >= 13)),
       bot: bots.get(h.symbol) || null,
+      manual: bots.has(h.symbol) ? null : manualRisk(h),
     });
   }
   // Mã bot đang mở mà menubar chưa đánh dấu nắm giữ vẫn trả stop — watchlist
   // nhìn được ngưỡng mà không phải ghi giá vốn.
   for (const [symbol, bot] of bots) {
-    if (!seen.has(symbol)) rows.push({ symbol, first_buy_date: null, sellable_date: null, sellable: null, bot });
+    if (!seen.has(symbol)) {
+      rows.push({ symbol, first_buy_date: null, sellable_date: null, sellable: null, bot, manual: null });
+    }
   }
   return jsonResponse({
     as_of: new Date().toISOString(),
@@ -4459,6 +4518,11 @@ function pickTableFor(tier) {
 // mua như resolver: lấy open cần thêm 1 subrequest/mã ở mỗi lượt cron 3 phút.
 // Ngưỡng thoát theo luật của tier. Tách khỏi evaluateExit vì review cần in ra
 // ngưỡng cả khi chưa chạm, còn công thức thì chỉ được có một bản.
+// Mua tay không có tier, cũng không có hạn giữ: lấy SL khởi điểm của luật
+// classical (8% từ giá vốn) ghép trailing 10% mặc định của tier trailing. Đi
+// qua exitLevels để ngưỡng luôn khớp luật bot, không đẻ công thức thứ hai.
+const MANUAL_EXIT = { tier: "MidTerm", init_sl_pct: CLASSICAL_EXIT.slPct };
+
 function exitLevels(t, entry, peak) {
   const top = Math.max(entry, peak || 0);
   if (isTrailingTier(t.tier)) {
