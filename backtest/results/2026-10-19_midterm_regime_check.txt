@@ -1,0 +1,31 @@
+Universe (median turnover 60d >= 5 tỷ): 164 mã, data tới 2026-10-16
+  336,862 rows, 634 lần signal nổ (toàn kỳ)
+
+████ PER-TRADE, đúng config live (hold 30, trail 10%, SL 10%) ████
+  cửa sổ                                n    Win%      avg       p   hold  Sharpe     PF
+  2018-2023 out-sample                355   47.0%   +1.59%   0.009   25.0   +0.44   1.49
+  2024-nay                            268   47.4%   +3.26%   0.000   25.6   +0.70   1.98
+  2025-nay (cửa sổ bot quảng cáo)     118   48.3%   +5.94%   0.001   23.8   +1.00   2.53
+  toàn kỳ                             633   47.7%   +2.43%   0.000   25.3   +0.59   1.75
+
+████ MỨC TÀI KHOẢN: 5 slot, T+2, cost 0.4% ████
+
+  ── 2018-2023 out-sample (2018-01-01 → 2023-12-31) ──
+
+Strategy                      Total      CAGR       Vol    Sharpe     MaxDD      %Pos
+-------------------------------------------------------------------------------------
+Base Breakout 5 slot       +100.39%   +12.40%   +18.84%     0.709   -22.13%   +34.76%
+VN-Index buy&hold           +13.47%    +2.15%   +20.35%     0.207   -45.26%   +56.48%
+  lệnh thực nhận 124, Win 51.6%, avg +3.02%, hold 25.9 phiên, signal bỏ lỡ vì hết slot 234
+  CAGR theo luật chọn khi thiếu slot:   vol_ratio↓        rsi↑     ret_3d↑
+                                           +12.40%     +11.72%     +11.52%
+
+  ── 2024-nay (2024-01-01 → 2026-10-16) ──
+
+Strategy                      Total      CAGR       Vol    Sharpe     MaxDD      %Pos
+-------------------------------------------------------------------------------------
+Base Breakout 5 slot        +24.59%    +8.34%   +13.21%     0.672   -18.35%   +46.53%
+VN-Index buy&hold           +50.74%   +16.09%   +18.29%     0.908   -18.11%   +54.40%
+  lệnh thực nhận 85, Win 34.1%, avg +1.81%, hold 24.0 phiên, signal bỏ lỡ vì hết slot 184
+  CAGR theo luật chọn khi thiếu slot:   vol_ratio↓        rsi↑     ret_3d↑
+                                            +8.34%      +6.78%     +13.21%
