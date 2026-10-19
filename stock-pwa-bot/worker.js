@@ -5653,14 +5653,16 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
   }
 
   // ── Mid-term (Base Breakout) section ──
-  // Phase 1 verified: Test 2025-26 Sharpe +1.13, PF 2.82, Win 52%, avg +6.95%/trade.
+  // Đo lại 2026-10-19 (backtest/results/2026-10-19_midterm_regime_check.md): pattern
+  // KHÔNG decay, dương ở mọi cửa sổ p<=0.009, 2024-nay (+3.26%) còn hơn 2018-23
+  // (+1.59%). Số cũ "+29.8%/năm" đo với unlimited slot; 5 slot thật ra 8-12%/năm.
   // App pivoted sang mid-term — focus pattern này, T+ swing dormant.
   const baseBreakoutMatches = result.baseBreakoutMatches || [];
   if (baseBreakoutMatches.length > 0) {
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `🔍 *Rà soát Trung hạn (Base Breakout)*\n`;
     text += `${baseBreakoutMatches.length} mã tích lũy ≥30 phiên + breakout + vol confirm\n`;
-    text += `_Backtest Test 2025-26: Win 52%, Sharpe +1.13, PF 2.82, avg +6.95%/trade._\n\n`;
+    text += `_Backtest 2018-2026 (n=633): Win 48%, avg +2.4%/lệnh, PF 1.75. Không suy giảm: 2024-nay avg +3.3%._\n\n`;
     const showMidTerm = baseBreakoutMatches.slice(0, 5);
     for (const m of showMidTerm) {
       const cur = m.currentPrice;
@@ -5672,8 +5674,8 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
         ? `${openLine}\n`
         : `  MUA ${tLabel(1)} ≤ ${(cur * 1.02).toFixed(2)} · Init SL ${initSL.toFixed(2)} (-10%) · trail 10% từ peak · hold tối đa T+30\n\n`;
     }
-    text += `💰 Backtest sizing 10M VND/signal → +29.8%/năm trên 200M vốn.\n`;
-    text += `⏰ Hold ~1 tháng calendar. Edge từ asymmetric R:R (Win 52% nhưng PF 2.82).\n`;
+    text += `💰 Sim 5 slot + T+2: +12.4%/năm (2018-23), +8.3%/năm (2024-nay). 2024-nay VN-Index +16.1% → pattern này ăn ở drawdown (-18% vs -45% hồi 2018-23), không phải ăn hơn index.\n`;
+    text += `⏰ Hold ~25 phiên. Edge từ R:R lệch (Win chỉ 48% nhưng PF 1.75) — phải chịu được chuỗi lỗ.\n`;
   }
 
   text += `\n_Update mỗi 14:50 EOD. Reload app để xem chi tiết._`;
