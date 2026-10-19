@@ -1,0 +1,54 @@
+
+
+████████ 2024-nay (2024-01-01 → 2026-10-16), 5 slot, T+2, cost 0.4% ████████
+
+Strategy                      Total      CAGR       Vol    Sharpe     MaxDD      %Pos
+-------------------------------------------------------------------------------------
+A. KHÔNG SỬA: climax + exit bot    +1.48%    +0.54%    +5.13%     0.130    -6.53%    +2.46%
+B. chỉ đổi exit: climax + trail    +3.88%    +1.40%    +5.53%     0.278    -6.44%    +7.23%
+C. B + mở universe 185 mã   -19.08%    -7.42%    +8.86%    -0.826   -27.96%   +23.12%
+D. C + thêm Strength Cont.    +0.53%    +0.19%   +22.50%     0.120   -32.65%   +42.05%
+E. HH/HL + trail (n lớn nhất)   +12.70%    +4.45%   +19.50%     0.321   -44.75%   +48.70%
+VN-Index buy&hold           +50.74%   +16.09%   +18.29%     0.908   -18.11%   +54.40%
+
+  kế hoạch                               lệnh   Win%  avg/lệnh   hold  signal bỏ lỡ
+  A. KHÔNG SỬA: climax + exit bot          16  68.8%    +0.85%    3.9            15
+  B. chỉ đổi exit: climax + trail          13  53.8%    +0.97%   12.8            15
+  C. B + mở universe 185 mã                56  37.5%    -2.16%   11.5            82
+  D. C + thêm Strength Cont.              116  44.8%    +0.05%   15.3           143
+  E. HH/HL + trail (n lớn nhất)           191  38.2%    +0.62%   14.2          1326
+
+  Độ nhạy với luật chọn khi thiếu slot (CAGR):
+  kế hoạch                              vol_ratio↓        rsi↑     ret_3d↑
+  A. KHÔNG SỬA: climax + exit bot           +0.54%      +0.12%      -0.77%
+  B. chỉ đổi exit: climax + trail           +1.40%      -1.04%      -1.87%
+  C. B + mở universe 185 mã                 -7.42%      -5.95%      -7.69%
+  D. C + thêm Strength Cont.                +0.19%      +1.00%      -0.67%
+  E. HH/HL + trail (n lớn nhất)             +4.45%      -2.35%      -2.46%
+
+
+████████ 2018-2023 (2018-01-01 → 2023-12-31), 5 slot, T+2, cost 0.4% ████████
+
+Strategy                      Total      CAGR       Vol    Sharpe     MaxDD      %Pos
+-------------------------------------------------------------------------------------
+A. KHÔNG SỬA: climax + exit bot   +19.21%    +3.00%    +4.75%     0.645    -6.77%    +4.47%
+B. chỉ đổi exit: climax + trail   +25.73%    +3.92%    +8.33%     0.503   -15.63%   +10.34%
+C. B + mở universe 185 mã    +6.91%    +1.13%   +14.46%     0.150   -26.51%   +26.75%
+D. C + thêm Strength Cont.   +81.13%   +10.50%   +17.08%     0.670   -33.36%   +44.50%
+E. HH/HL + trail (n lớn nhất)  +112.43%   +13.50%   +25.19%     0.628   -35.95%   +50.63%
+VN-Index buy&hold           +13.47%    +2.15%   +20.35%     0.207   -45.26%   +56.48%
+
+  kế hoạch                               lệnh   Win%  avg/lệnh   hold  signal bỏ lỡ
+  A. KHÔNG SỬA: climax + exit bot          51  58.8%    +1.93%    3.9             5
+  B. chỉ đổi exit: climax + trail          51  47.1%    +2.42%   12.2             5
+  C. B + mở universe 185 mã               162  42.6%    +0.43%   11.5           159
+  D. C + thêm Strength Cont.              282  43.6%    +1.25%   14.5           385
+  E. HH/HL + trail (n lớn nhất)           380  46.8%    +1.18%   14.3          3249
+
+  Độ nhạy với luật chọn khi thiếu slot (CAGR):
+  kế hoạch                              vol_ratio↓        rsi↑     ret_3d↑
+  A. KHÔNG SỬA: climax + exit bot           +3.00%      +2.87%      +2.99%
+  B. chỉ đổi exit: climax + trail           +3.92%      +3.83%      +4.06%
+  C. B + mở universe 185 mã                 +1.13%      +0.81%      +1.12%
+  D. C + thêm Strength Cont.               +10.50%      +7.45%      +8.21%
+  E. HH/HL + trail (n lớn nhất)            +13.50%     +18.30%     +16.98%

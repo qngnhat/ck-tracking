@@ -122,17 +122,20 @@ def main():
         ("ĐẢO: CHỈ vào lúc weak", lambda w: w["health"] == "weak"),
         ("ĐẢO: CHỈ vào lúc weak/caution", lambda w: w["health"] != "ok"),
     ]
+    END = df["date"].max().strftime("%Y-%m-%d")
     WINDOWS = [
-        ("2018-01-01", "2026-05-13", "ALL 8.4y"),
+        ("2018-01-01", END, "ALL"),
         ("2018-01-01", "2023-12-31", "2018-2023 out-sample"),
-        ("2024-01-01", "2026-05-13", "2024-2026 gần đây"),
+        ("2024-01-01", END, "2024-nay gần đây"),
+        # Đoạn bot chạy live, chưa có trong data lúc đo lần đầu (2026-05-13).
+        ("2026-05-14", END, "2026-05→nay (live, n nhỏ)"),
     ]
 
     for tier, col in [("A", "base_A"), ("B", "base_B")]:
         run_variants(df, col, WINDOWS, VARIANTS, f"Tier {tier} ({col})")
 
     # Ngưỡng 0.5 có phải số đúng không, hay chỉ là số đầu tiên nghĩ ra.
-    print("\n\n████ Quét ngưỡng breadth của luật weak (Tier B, ALL 8.4y) ████")
+    print("\n\n████ Quét ngưỡng breadth của luật weak (Tier B, toàn kỳ) ████")
     print(f"  {'ngưỡng weak':<42} {'n':>4} {'Win%':>6} {'Avg':>7} {'Sharpe':>7} {'PF':>5}")
     base = df[(df["date"] >= "2018-01-01")].copy()
     for th in (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0):

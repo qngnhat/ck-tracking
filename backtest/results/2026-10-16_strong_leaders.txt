@@ -1,0 +1,65 @@
+Loading universe + VN-Index...
+  universe: 655 symbols, 1369833 rows
+  vnindex: 2191 rows
+
+Computing Strong Leaders scores...
+  eligible rows: 322602, with score: 322602
+
+Test window 2024-01-01+: 449716 rows, 655 symbols
+
+Score distribution (test):
+  count: 122666, mean: 2.03, median: 1.00
+  pct[50/75/90/95/99]: [ 1.   4.   7.5 10.  14. ]
+  >= 4.0: 32433
+  >= 5.0: 25625
+  >= 6.0: 19958
+  >= 7.0: 15559
+
+=== Backtest variants ===
+  min=4.0 top=3 hold=5d: n=2058 win= 43.6% avg= -0.52% sharpe=-0.062 pf=0.84
+  min=4.0 top=3 hold=10d: n=2040 win= 44.9% avg= +0.10% sharpe=0.009 pf=1.03
+  min=4.0 top=3 hold=15d: n=2028 win= 47.3% avg= +0.44% sharpe=0.031 pf=1.09
+  min=4.0 top=5 hold=5d: n=3431 win= 43.7% avg= -0.51% sharpe=-0.064 pf=0.83
+  min=4.0 top=5 hold=10d: n=3403 win= 44.9% avg= +0.08% sharpe=0.008 pf=1.02
+  min=4.0 top=5 hold=15d: n=3381 win= 47.1% avg= +0.45% sharpe=0.033 pf=1.10
+  min=4.0 top=10 hold=5d: n=6835 win= 43.0% avg= -0.44% sharpe=-0.058 pf=0.85
+  min=4.0 top=10 hold=10d: n=6779 win= 45.2% avg= +0.07% sharpe=0.006 pf=1.02
+  min=4.0 top=10 hold=15d: n=6739 win= 46.6% avg= +0.50% sharpe=0.038 pf=1.12
+  min=5.0 top=3 hold=5d: n=2058 win= 43.7% avg= -0.56% sharpe=-0.067 pf=0.83
+  min=5.0 top=3 hold=10d: n=2040 win= 44.4% avg= +0.03% sharpe=0.003 pf=1.01
+  min=5.0 top=3 hold=15d: n=2028 win= 47.2% avg= +0.30% sharpe=0.021 pf=1.06
+  min=5.0 top=5 hold=5d: n=3428 win= 43.3% avg= -0.54% sharpe=-0.068 pf=0.82
+  min=5.0 top=5 hold=10d: n=3401 win= 44.7% avg= +0.05% sharpe=0.005 pf=1.01
+  min=5.0 top=5 hold=15d: n=3379 win= 47.0% avg= +0.39% sharpe=0.029 pf=1.09
+  min=5.0 top=10 hold=5d: n=6772 win= 43.3% avg= -0.42% sharpe=-0.056 pf=0.85
+  min=5.0 top=10 hold=10d: n=6716 win= 45.2% avg= +0.06% sharpe=0.006 pf=1.02
+  min=5.0 top=10 hold=15d: n=6676 win= 46.7% avg= +0.51% sharpe=0.039 pf=1.12
+  min=6.0 top=3 hold=5d: n=2056 win= 43.4% avg= -0.59% sharpe=-0.071 pf=0.82
+  min=6.0 top=3 hold=10d: n=2038 win= 44.1% avg= -0.04% sharpe=-0.003 pf=0.99
+  min=6.0 top=3 hold=15d: n=2026 win= 46.8% avg= +0.25% sharpe=0.018 pf=1.05
+  min=6.0 top=5 hold=5d: n=3414 win= 43.4% avg= -0.53% sharpe=-0.066 pf=0.83
+  min=6.0 top=5 hold=10d: n=3387 win= 44.8% avg= +0.02% sharpe=0.002 pf=1.00
+  min=6.0 top=5 hold=15d: n=3365 win= 47.2% avg= +0.46% sharpe=0.034 pf=1.10
+  min=6.0 top=10 hold=5d: n=6605 win= 42.7% avg= -0.47% sharpe=-0.062 pf=0.84
+  min=6.0 top=10 hold=10d: n=6549 win= 44.9% avg= +0.03% sharpe=0.003 pf=1.01
+  min=6.0 top=10 hold=15d: n=6509 win= 46.4% avg= +0.46% sharpe=0.035 pf=1.11
+  min=7.0 top=3 hold=5d: n=2052 win= 43.6% avg= -0.58% sharpe=-0.070 pf=0.82
+  min=7.0 top=3 hold=10d: n=2035 win= 44.7% avg= +0.04% sharpe=0.003 pf=1.01
+  min=7.0 top=3 hold=15d: n=2022 win= 47.1% avg= +0.33% sharpe=0.023 pf=1.07
+  min=7.0 top=5 hold=5d: n=3381 win= 43.6% avg= -0.55% sharpe=-0.068 pf=0.82
+  min=7.0 top=5 hold=10d: n=3354 win= 44.9% avg= +0.02% sharpe=0.001 pf=1.00
+  min=7.0 top=5 hold=15d: n=3332 win= 47.1% avg= +0.43% sharpe=0.032 pf=1.10
+  min=7.0 top=10 hold=5d: n=6285 win= 42.5% avg= -0.55% sharpe=-0.073 pf=0.81
+  min=7.0 top=10 hold=10d: n=6228 win= 44.8% avg= -0.07% sharpe=-0.006 pf=0.98
+  min=7.0 top=10 hold=15d: n=6189 win= 46.3% avg= +0.35% sharpe=0.027 pf=1.08
+
+Saved → /Users/qngnhat/stocks/ck_tracking/backtest/results/strong_leaders_metrics.csv
+
+=== Random baseline ===
+  Random top5 hold10: n=3407 win=44.1% avg=-0.45% sharpe=-0.057
+
+=== Best variant ===
+  min_score=5.0 top_n=10 hold=15d
+  n=6676 win=46.7% avg=+0.51% sharpe=0.039 pf=1.12
+
+  vs Random: win +2.7%, avg +0.97%
