@@ -5545,7 +5545,7 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
   if (premiumMatches.length > 0 && !isEliteRegime) {
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `💎 *Premium picks* (${premiumMatches.length}) — Climax + NN net mua\n`;
-    text += `_Backtest 7.4y: Win 61%, Sharpe 1.90 vs Tier A base Sharpe 0.36._\n`;
+    text += `_Backtest 2018-23: Win 61%, Sharpe 1.90 vs Tier A base 0.36 — chưa đo lại cho 2024-nay._\n`;
     text += `_Khác Elite: Premium = Climax + NN mua ròng 5d xác nhận; Elite = Climax khi VNI correction (chưa cần NN)._\n\n`;
     const t1Label = tLabel(1);
     for (const m of premiumMatches.slice(0, 5)) {
@@ -5554,7 +5554,7 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const target = cur * 1.03 * 0.995;
       const sl = cur * 0.92;
       const nnTag = m.nn_net_5d_bn != null ? `NN +${m.nn_net_5d_bn}B/5d` : "";
-      text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag} · _hist Win 61%_\n`;
+      text += `💎 *${m.symbol}*${weakFlag} @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · ${nnTag} · _Win 61% (2018-23)_\n`;
       const openLine = alreadyOpenLine(m.symbol, "  ");
       if (openLine) {
         text += `${openLine}\n`;
@@ -5564,7 +5564,7 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
         text += `  MUA ${t1Label} ≤ ${entryMax.toFixed(2)} · SL < ${sl.toFixed(2)} · TP T+3→T+5 ${target.toFixed(2)} (+3%)\n\n`;
       }
     }
-    text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly-adjusted, Sharpe 1.90 justifies bigger size)\n`;
+    text += `💰 *Size khuyến nghị Premium*: 20% NAV/lệnh (Kelly theo Sharpe 1.90 của regime 2018-23)\n`;
   }
 
   text += `\n━━━━━━━━━━━━━━━\n`;
@@ -5596,7 +5596,7 @@ async function sendMarketDigest(env, precomputedResult = null, opts = {}) {
       const target = entryMid * 1.03;
 
       const tierTag = (m.tier === "A" ? "🟢 A" : "🔵 B") + weakFlag;
-      const hist = m.tier === "A" ? "hist Win 59%" : "edge vừa";
+      const hist = m.tier === "A" ? "Win 59% (2018-23)" : "edge vừa (2018-23)";
       text += `${tierTag} *${m.symbol}* @ ${cur.toFixed(2)} · 3p ${m.ret3d.toFixed(1)}% · vol ${m.volRatio.toFixed(1)}× · RSI ${m.rsi.toFixed(0)} · _${hist}_\n`;
       const openLine = alreadyOpenLine(m.symbol, "  ");
       if (openLine) {
@@ -5847,7 +5847,9 @@ async function sendClimaxAlerts(env) {
   }
 
   text += `💰 Size: 15% NAV/lệnh, max 2-3 lệnh\n`;
-  text += `⚠️ Backtest 8.5y dynamic exit: Win 60-63%, Avg +1%/lệnh. Vẫn có 3-4/10 thua.`;
+  // Số backtest in kèm từng pick là của regime 2018-23. Đo lại 2026-10-16 (backtest/
+  // results/2026-10-16_*): Climax 2024-nay Win 50%, Avg -0.8%/lệnh -> không còn edge.
+  text += `⚠️ Số backtest ở trên là của regime 2018-23. Đo lại 10/2026: Climax 2024-nay Win 50%, Avg -0.8%/lệnh — pattern đang KHÔNG có edge. Coi đây là watchlist, không phải lệnh mua.`;
 
   let sent = 0;
   for (const chatId of chats) {
