@@ -4107,17 +4107,26 @@ async function checkSpikeAlerts(env) {
   const nowIso = new Date().toISOString();
   // Read active picks (not expired)
   const picks = await sbQuery(sb, "climax_active_picks", {
-    select: "symbol,entry_price,target_price,tier,above_threshold,last_alert_at,signal_date,expires_at",
+    select: "symbol,entry_price,target_price,tier,above_threshold,last_alert_at,signal_date,expires_at,exit_alerted_at",
   });
   if (!picks || picks.length === 0) {
     return;
   }
+  // Row sống tới expires_at để resolver còn chỗ ghi peak + dấu đã báo, nhưng sổ
+  // chốt TRƯỚC mốc đó. Cùng luật "đã chốt" với checkExitAlerts: lệch nhau là mã
+  // đã chốt vẫn bắn tin mỗi 3 phút (CDC chốt 20/10 còn báo tới 22/10).
   // Không dựa vào cleanup của EOD persist được: nó chạy ~15:30, sớm hơn expires_at
   // của pick hết hạn cùng ngày → row chết vẫn nằm lại tới EOD hôm sau và bắn tin.
-  const active = picks.filter((p) => !p.expires_at || new Date(p.expires_at) > new Date());
+  const today = vnDateString();
+  const active = picks.filter((p) => {
+    if (p.expires_at && new Date(p.expires_at) <= new Date()) return false;
+    if (vnTradingDaysBetween(p.signal_date, today) - 1 > pickMaxHold(p)) return false;
+    // Dấu trước signal_date là của vị thế cũ cùng mã (upsert không xoá dấu).
+    return !(p.exit_alerted_at && p.exit_alerted_at.slice(0, 10) >= p.signal_date);
+  });
   if (active.length === 0) return;
 
-  console.log(`[spike] checking ${active.length} active picks`);
+  console.log(`[spike] checking ${active.length}/${picks.length} picks (bỏ ${picks.length - active.length} đã chốt)`);
 
   // Fetch intraday concurrently (Cloudflare limit ~50 subrequests; ~5 picks typical → safe)
   const results = await Promise.all(active.map(async (p) => {
